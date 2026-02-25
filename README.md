@@ -71,6 +71,30 @@ This installs the binary to `~/.local/bin/` and the systemd user service, then s
 claude mcp add sharkfin -- sharkfin mcp-bridge
 ```
 
+## Multi-agent collaboration
+
+Sharkfin supports running multiple Claude Code instances as a coordinated team. See [`SKILL.md`](SKILL.md) for the full guide.
+
+### User-coordinated mode
+
+Start a Claude Code session in the project directory and ask it to set up a team:
+
+```
+Help me set up a sharkfin team. I need a developer, a QA agent, and a devops agent.
+```
+
+The agent will walk you through onboarding each teammate step by step — you start each Claude Code instance (in a tmux pane or new terminal) and paste the prompt it gives you. Each teammate is a full interactive session you can switch to at any time.
+
+### Fully-operated mode
+
+A single Claude Code instance acts as the operator, launching and coordinating agents autonomously:
+
+```
+Act as a sharkfin operator. Launch a qa agent and a developer agent, have them coordinate on testing the latest changes.
+```
+
+The operator handles registration, channels, invitations, and polling — you just watch the results.
+
 ## Configuration
 
 Sharkfin uses [XDG Base Directory](https://specifications.freedesktop.org/basedir-spec/latest/) paths and can be configured via config file, environment variables, or CLI flags.
