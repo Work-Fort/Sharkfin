@@ -39,6 +39,17 @@ depends = ["build"]
 dir = "tests/e2e"
 run = "go test -v -race -timeout 120s"
 
+[tasks."install:local"]
+description = "Install sharkfin binary and systemd user service"
+depends = ["build"]
+run = """
+install -Dm755 "$BUILD_DIR/$BINARY_NAME" ~/.local/bin/$BINARY_NAME
+install -Dm644 dist/sharkfin.service ~/.config/systemd/user/sharkfin.service
+systemctl --user daemon-reload
+echo "Installed $BINARY_NAME to ~/.local/bin and systemd user service"
+echo "Run: systemctl --user enable --now sharkfin"
+"""
+
 [tasks.ci]
 description = "Run all CI checks"
 depends = ["lint", "test", "e2e"]
