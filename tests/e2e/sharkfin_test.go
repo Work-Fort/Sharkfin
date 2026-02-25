@@ -394,3 +394,568 @@ func TestIdentifyNonexistentUser(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
+
+// --- MCP Protocol tests ---
+
+func TestInitializeResponse(t *testing.T) {
+	addr, err := harness.FreePort()
+	if err != nil {
+		t.Fatal(err)
+	}
+	d, err := harness.StartDaemon(sharkfinBin, addr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Stop()
+
+	c := harness.NewClient(addr)
+	id := 1
+	result, rpcErr, headers, err := c.RawMCPRequest("initialize", id, map[string]any{
+		"protocolVersion": "2025-03-26",
+		"capabilities":    map[string]any{},
+		"clientInfo":      map[string]string{"name": "e2e-test", "version": "0.1"},
+	})
+	if err != nil {
+		t.Fatalf("initialize request: %v", err)
+	}
+	if rpcErr != nil {
+		t.Fatalf("initialize RPC error: %s", rpcErr.Message)
+	}
+
+	var initResult struct {
+		ProtocolVersion string `json:"protocolVersion"`
+		ServerInfo      struct {
+			Name string `json:"name"`
+		} `json:"serverInfo"`
+	}
+	if err := json.Unmarshal(result, &initResult); err != nil {
+		t.Fatalf("unmarshal initialize result: %v", err)
+	}
+	if initResult.ProtocolVersion != "2025-03-26" {
+		t.Errorf("protocolVersion = %q, want %q", initResult.ProtocolVersion, "2025-03-26")
+	}
+	if initResult.ServerInfo.Name != "sharkfin" {
+		t.Errorf("serverInfo.name = %q, want %q", initResult.ServerInfo.Name, "sharkfin")
+	}
+
+	sessionID := headers.Get("Mcp-Session-Id")
+	if sessionID == "" {
+		t.Error("Mcp-Session-Id header not set")
+	}
+}
+
+func TestToolsList(t *testing.T) {
+	addr, err := harness.FreePort()
+	if err != nil {
+		t.Fatal(err)
+	}
+	d, err := harness.StartDaemon(sharkfinBin, addr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Stop()
+
+	c := harness.NewClient(addr)
+	if err := c.Initialize(); err != nil {
+		t.Fatal(err)
+	}
+
+	id := 100
+	result, rpcErr, _, err := c.RawMCPRequest("tools/list", id, nil)
+	if err != nil {
+		t.Fatalf("tools/list request: %v", err)
+	}
+	if rpcErr != nil {
+		t.Fatalf("tools/list RPC error: %s", rpcErr.Message)
+	}
+
+	var listResult struct {
+		Tools []struct {
+			Name string `json:"name"`
+		} `json:"tools"`
+	}
+	if err := json.Unmarshal(result, &listResult); err != nil {
+		t.Fatalf("unmarshal tools/list: %v", err)
+	}
+
+	expected := []string{
+		"register", "identify", "user_list", "channel_list",
+		"channel_create", "channel_invite", "send_message", "unread_messages",
+	}
+	if len(listResult.Tools) != len(expected) {
+		names := make([]string, len(listResult.Tools))
+		for i, tool := range listResult.Tools {
+			names[i] = tool.Name
+		}
+		t.Fatalf("got %d tools %v, want %d %v", len(listResult.Tools), names, len(expected), expected)
+	}
+
+	got := make(map[string]bool)
+	for _, tool := range listResult.Tools {
+		got[tool.Name] = true
+	}
+	for _, name := range expected {
+		if !got[name] {
+			t.Errorf("missing tool %q", name)
+		}
+	}
+}
+
+func TestToolCallBeforeIdentify(t *testing.T) {
+	addr, err := harness.FreePort()
+	if err != nil {
+		t.Fatal(err)
+	}
+	d, err := harness.StartDaemon(sharkfinBin, addr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Stop()
+
+	c := harness.NewClient(addr)
+	if err := c.ConnectPresence(); err != nil {
+		t.Fatal(err)
+	}
+	defer c.DisconnectPresence()
+
+	if err := c.Initialize(); err != nil {
+		t.Fatal(err)
+	}
+
+	r, err := c.ToolCall("user_list", map[string]any{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.Error == nil {
+		t.Fatal("expected error for tool call before identify")
+	}
+	if !strings.Contains(strings.ToLower(r.Error.Message), "not identified") {
+		t.Errorf("error message = %q, want it to contain 'not identified'", r.Error.Message)
+	}
+}
+
+func TestUnknownMethod(t *testing.T) {
+	addr, err := harness.FreePort()
+	if err != nil {
+		t.Fatal(err)
+	}
+	d, err := harness.StartDaemon(sharkfinBin, addr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Stop()
+
+	c := harness.NewClient(addr)
+	if err := c.Initialize(); err != nil {
+		t.Fatal(err)
+	}
+
+	_, rpcErr, _, err := c.RawMCPRequest("nonexistent/method", 99, nil)
+	if err != nil {
+		t.Fatalf("request: %v", err)
+	}
+	if rpcErr == nil {
+		t.Fatal("expected RPC error for unknown method")
+	}
+}
+
+func TestUnknownTool(t *testing.T) {
+	addr, err := harness.FreePort()
+	if err != nil {
+		t.Fatal(err)
+	}
+	d, err := harness.StartDaemon(sharkfinBin, addr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Stop()
+
+	c := harness.NewClient(addr)
+	if err := c.Initialize(); err != nil {
+		t.Fatal(err)
+	}
+
+	r, err := c.ToolCall("nonexistent_tool", map[string]any{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.Error == nil {
+		t.Fatal("expected error for unknown tool")
+	}
+}
+
+func TestInvalidJSON(t *testing.T) {
+	addr, err := harness.FreePort()
+	if err != nil {
+		t.Fatal(err)
+	}
+	d, err := harness.StartDaemon(sharkfinBin, addr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Stop()
+
+	c := harness.NewClient(addr)
+	status, body, err := c.RawPost("/mcp", "this is not json{{{")
+	if err != nil {
+		t.Fatalf("request: %v", err)
+	}
+	t.Logf("status=%d body=%s", status, string(body))
+
+	// Server should return 200 with a JSON-RPC parse error
+	if status != http.StatusOK {
+		t.Errorf("status = %d, want %d", status, http.StatusOK)
+	}
+	if !strings.Contains(string(body), "error") {
+		t.Errorf("response body should contain 'error': %s", string(body))
+	}
+}
+
+func TestMethodNotAllowed(t *testing.T) {
+	addr, err := harness.FreePort()
+	if err != nil {
+		t.Fatal(err)
+	}
+	d, err := harness.StartDaemon(sharkfinBin, addr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Stop()
+
+	c := harness.NewClient(addr)
+	status, err := c.RawGet("/mcp")
+	if err != nil {
+		t.Fatalf("request: %v", err)
+	}
+	if status != http.StatusMethodNotAllowed {
+		t.Errorf("status = %d, want %d", status, http.StatusMethodNotAllowed)
+	}
+}
+
+// --- Channel tests ---
+
+func TestChannelCreateAndList(t *testing.T) {
+	addr, err := harness.FreePort()
+	if err != nil {
+		t.Fatal(err)
+	}
+	d, err := harness.StartDaemon(sharkfinBin, addr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Stop()
+
+	alice := harness.NewClient(addr)
+	if err := alice.RegisterFlow("alice"); err != nil {
+		t.Fatal(err)
+	}
+	defer alice.DisconnectPresence()
+
+	r, err := alice.ToolCall("channel_create", map[string]any{
+		"name":   "general",
+		"public": true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.Error != nil {
+		t.Fatalf("channel_create error: %s", r.Error.Message)
+	}
+
+	r, err = alice.ToolCall("channel_list", map[string]any{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.Error != nil {
+		t.Fatalf("channel_list error: %s", r.Error.Message)
+	}
+
+	var channels []struct {
+		Name   string `json:"name"`
+		Public bool   `json:"public"`
+	}
+	if err := json.Unmarshal([]byte(r.Text), &channels); err != nil {
+		t.Fatalf("unmarshal channel_list: %v (raw: %s)", err, r.Text)
+	}
+
+	found := false
+	for _, ch := range channels {
+		if ch.Name == "general" {
+			found = true
+			if !ch.Public {
+				t.Error("channel 'general' should be public")
+			}
+		}
+	}
+	if !found {
+		t.Errorf("channel 'general' not found in list: %s", r.Text)
+	}
+}
+
+func TestPrivateChannelVisibility(t *testing.T) {
+	addr, err := harness.FreePort()
+	if err != nil {
+		t.Fatal(err)
+	}
+	d, err := harness.StartDaemon(sharkfinBin, addr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Stop()
+
+	alice := harness.NewClient(addr)
+	if err := alice.RegisterFlow("alice"); err != nil {
+		t.Fatal(err)
+	}
+	defer alice.DisconnectPresence()
+
+	bob := harness.NewClient(addr)
+	if err := bob.RegisterFlow("bob"); err != nil {
+		t.Fatal(err)
+	}
+	defer bob.DisconnectPresence()
+
+	charlie := harness.NewClient(addr)
+	if err := charlie.RegisterFlow("charlie"); err != nil {
+		t.Fatal(err)
+	}
+	defer charlie.DisconnectPresence()
+
+	// Alice creates a private channel with bob
+	r, err := alice.ToolCall("channel_create", map[string]any{
+		"name":    "secret",
+		"public":  false,
+		"members": []string{"bob"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.Error != nil {
+		t.Fatalf("channel_create error: %s", r.Error.Message)
+	}
+
+	// Charlie should NOT see the private channel
+	r, err = charlie.ToolCall("channel_list", map[string]any{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(r.Text, "secret") {
+		t.Errorf("charlie should not see private channel 'secret': %s", r.Text)
+	}
+
+	// Bob should see the private channel
+	r, err = bob.ToolCall("channel_list", map[string]any{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(r.Text, "secret") {
+		t.Errorf("bob should see private channel 'secret': %s", r.Text)
+	}
+}
+
+func TestPublicChannelVisibleToAll(t *testing.T) {
+	addr, err := harness.FreePort()
+	if err != nil {
+		t.Fatal(err)
+	}
+	d, err := harness.StartDaemon(sharkfinBin, addr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Stop()
+
+	alice := harness.NewClient(addr)
+	if err := alice.RegisterFlow("alice"); err != nil {
+		t.Fatal(err)
+	}
+	defer alice.DisconnectPresence()
+
+	bob := harness.NewClient(addr)
+	if err := bob.RegisterFlow("bob"); err != nil {
+		t.Fatal(err)
+	}
+	defer bob.DisconnectPresence()
+
+	r, err := alice.ToolCall("channel_create", map[string]any{
+		"name":   "lobby",
+		"public": true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.Error != nil {
+		t.Fatalf("channel_create error: %s", r.Error.Message)
+	}
+
+	// Bob (non-member) should see the public channel
+	r, err = bob.ToolCall("channel_list", map[string]any{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(r.Text, "lobby") {
+		t.Errorf("bob should see public channel 'lobby': %s", r.Text)
+	}
+}
+
+func TestChannelCreationDisabled(t *testing.T) {
+	addr, err := harness.FreePort()
+	if err != nil {
+		t.Fatal(err)
+	}
+	d, err := harness.StartDaemon(sharkfinBin, addr,
+		harness.WithAllowChannelCreation(false))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Stop()
+
+	alice := harness.NewClient(addr)
+	if err := alice.RegisterFlow("alice"); err != nil {
+		t.Fatal(err)
+	}
+	defer alice.DisconnectPresence()
+
+	r, err := alice.ToolCall("channel_create", map[string]any{
+		"name":   "forbidden",
+		"public": true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.Error == nil {
+		t.Fatal("expected error when channel creation is disabled")
+	}
+	if !strings.Contains(strings.ToLower(r.Error.Message), "channel creation is disabled") {
+		t.Errorf("error message = %q, want it to contain 'channel creation is disabled'", r.Error.Message)
+	}
+}
+
+func TestChannelInvite(t *testing.T) {
+	addr, err := harness.FreePort()
+	if err != nil {
+		t.Fatal(err)
+	}
+	d, err := harness.StartDaemon(sharkfinBin, addr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Stop()
+
+	alice := harness.NewClient(addr)
+	if err := alice.RegisterFlow("alice"); err != nil {
+		t.Fatal(err)
+	}
+	defer alice.DisconnectPresence()
+
+	bob := harness.NewClient(addr)
+	if err := bob.RegisterFlow("bob"); err != nil {
+		t.Fatal(err)
+	}
+	defer bob.DisconnectPresence()
+
+	charlie := harness.NewClient(addr)
+	if err := charlie.RegisterFlow("charlie"); err != nil {
+		t.Fatal(err)
+	}
+	defer charlie.DisconnectPresence()
+
+	// Alice creates a private channel with bob
+	r, err := alice.ToolCall("channel_create", map[string]any{
+		"name":    "team",
+		"public":  false,
+		"members": []string{"bob"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.Error != nil {
+		t.Fatalf("channel_create error: %s", r.Error.Message)
+	}
+
+	// Bob invites charlie
+	r, err = bob.ToolCall("channel_invite", map[string]any{
+		"channel":  "team",
+		"username": "charlie",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.Error != nil {
+		t.Fatalf("channel_invite error: %s", r.Error.Message)
+	}
+
+	// Charlie can now see the channel
+	r, err = charlie.ToolCall("channel_list", map[string]any{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(r.Text, "team") {
+		t.Errorf("charlie should see channel 'team' after invite: %s", r.Text)
+	}
+
+	// Charlie can send a message
+	r, err = charlie.ToolCall("send_message", map[string]any{
+		"channel": "team",
+		"text":    "hello from charlie",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.Error != nil {
+		t.Errorf("charlie send_message error: %s", r.Error.Message)
+	}
+}
+
+func TestChannelInviteByNonMember(t *testing.T) {
+	addr, err := harness.FreePort()
+	if err != nil {
+		t.Fatal(err)
+	}
+	d, err := harness.StartDaemon(sharkfinBin, addr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Stop()
+
+	alice := harness.NewClient(addr)
+	if err := alice.RegisterFlow("alice"); err != nil {
+		t.Fatal(err)
+	}
+	defer alice.DisconnectPresence()
+
+	bob := harness.NewClient(addr)
+	if err := bob.RegisterFlow("bob"); err != nil {
+		t.Fatal(err)
+	}
+	defer bob.DisconnectPresence()
+
+	charlie := harness.NewClient(addr)
+	if err := charlie.RegisterFlow("charlie"); err != nil {
+		t.Fatal(err)
+	}
+	defer charlie.DisconnectPresence()
+
+	// Alice creates a private channel (only alice is a member)
+	r, err := alice.ToolCall("channel_create", map[string]any{
+		"name":   "private-only-alice",
+		"public": false,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.Error != nil {
+		t.Fatalf("channel_create error: %s", r.Error.Message)
+	}
+
+	// Bob (not a member) tries to invite charlie
+	r, err = bob.ToolCall("channel_invite", map[string]any{
+		"channel":  "private-only-alice",
+		"username": "charlie",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.Error == nil {
+		t.Fatal("expected error when non-member invites to private channel")
+	}
+}
