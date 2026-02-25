@@ -1,3 +1,44 @@
 [tools]
 go = "latest"
-"go:github.com/go-task/task/v3/cmd/task" = "latest"
+
+[env]
+BINARY_NAME = "sharkfin"
+BUILD_DIR = "build"
+
+[tasks.build]
+description = "Build sharkfin"
+sources = ["**/*.go", "go.mod", "go.sum"]
+outputs = ["{{env.BUILD_DIR}}/{{env.BINARY_NAME}}"]
+run = """
+mkdir -p $BUILD_DIR
+VERSION="${VERSION:-dev-$(git rev-parse --short HEAD 2>/dev/null || echo unknown)}"
+go build -ldflags "-X github.com/Work-Fort/sharkfin/cmd.Version=$VERSION" -o "$BUILD_DIR/$BINARY_NAME"
+"""
+
+[tasks.test]
+description = "Run tests"
+run = """
+mkdir -p $BUILD_DIR
+go test -v -race -coverprofile="$BUILD_DIR/coverage.out" ./...
+"""
+
+[tasks.lint]
+description = "Run linters"
+run = """
+test -z "$(gofmt -l .)" || (gofmt -l . && exit 1)
+go vet ./...
+"""
+
+[tasks.clean]
+description = "Clean build artifacts"
+run = "rm -rf $BUILD_DIR"
+
+[tasks.e2e]
+description = "Run end-to-end tests"
+depends = ["build"]
+dir = "tests/e2e"
+run = "go test -v -race -timeout 120s"
+
+[tasks.ci]
+description = "Run all CI checks"
+depends = ["lint", "test", "e2e"]
