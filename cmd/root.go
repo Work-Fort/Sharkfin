@@ -96,6 +96,7 @@ func init() {
 	rootCmd.AddCommand(mcpbridge.NewMCPBridgeCmd())
 	rootCmd.AddCommand(presence.NewPresenceCmd())
 
+	rootCmd.Version = Version
 	rootCmd.SilenceUsage = true
 	rootCmd.SilenceErrors = true
 }

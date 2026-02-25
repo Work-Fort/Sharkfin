@@ -1,0 +1,178 @@
+# SPDX-License-Identifier: GPL-2.0-only
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+permissions:
+  contents: write
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: jdx/mise-action@v3
+      - run: mise run ci
+
+  build:
+    needs: test
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - goos: linux
+            goarch: amd64
+            ext: tar.gz
+          - goos: linux
+            goarch: arm64
+            ext: tar.gz
+          - goos: darwin
+            goarch: amd64
+            ext: tar.gz
+          - goos: darwin
+            goarch: arm64
+            ext: tar.gz
+          - goos: windows
+            goarch: amd64
+            ext: zip
+    steps:
+      - uses: actions/checkout@v4
+      - uses: jdx/mise-action@v3
+
+      - name: Build binary
+        env:
+          CGO_ENABLED: '0'
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+        run: |
+          VERSION="${GITHUB_REF_NAME}"
+          SUFFIX=""
+          if [ "${{ matrix.goos }}" = "windows" ]; then SUFFIX=".exe"; fi
+          go build -ldflags "-X github.com/Work-Fort/sharkfin/cmd.Version=${VERSION}" \
+            -o "sharkfin${SUFFIX}"
+
+      - name: Package archive
+        run: |
+          VERSION="${GITHUB_REF_NAME}"
+          ARCHIVE="sharkfin-${VERSION}-${{ matrix.goos }}-${{ matrix.goarch }}"
+          mkdir -p "${ARCHIVE}"
+
+          SUFFIX=""
+          if [ "${{ matrix.goos }}" = "windows" ]; then SUFFIX=".exe"; fi
+          cp "sharkfin${SUFFIX}" "${ARCHIVE}/"
+
+          if [ "${{ matrix.goos }}" = "linux" ]; then
+            cp dist/sharkfin.user.service "${ARCHIVE}/"
+          fi
+
+          if [ "${{ matrix.ext }}" = "tar.gz" ]; then
+            tar czf "${ARCHIVE}.tar.gz" "${ARCHIVE}/"
+          else
+            zip -r "${ARCHIVE}.zip" "${ARCHIVE}/"
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: archive-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: sharkfin-*-${{ matrix.goos }}-${{ matrix.goarch }}.${{ matrix.ext }}
+          retention-days: 1
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: archive-*
+          merge-multiple: true
+          path: artifacts
+
+      - name: Generate changelog
+        id: changelog
+        uses: requarks/changelog-action@v1
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          tag: ${{ github.ref_name }}
+          excludeTypes: ci,docs,style,chore
+          writeToFile: 'false'
+          useGitmojis: 'false'
+
+      - name: Generate checksums
+        working-directory: artifacts
+        run: sha256sum sharkfin-* > SHA256SUMS
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: ${{ github.ref_name }}
+          body: ${{ steps.changelog.outputs.changes }}
+          files: artifacts/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  aur:
+    needs: release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: archive-linux-*
+          merge-multiple: true
+          path: artifacts
+
+      - name: Update PKGBUILD
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          AMD64_SUM=$(sha256sum artifacts/sharkfin-*-linux-amd64.tar.gz | cut -d' ' -f1)
+          ARM64_SUM=$(sha256sum artifacts/sharkfin-*-linux-arm64.tar.gz | cut -d' ' -f1)
+
+          cd aur
+          sed -i "s/pkgver=.*/pkgver=${VERSION}/" PKGBUILD
+          sed -i "s/sha256sums_x86_64=.*/sha256sums_x86_64=('${AMD64_SUM}')/" PKGBUILD
+          sed -i "s/sha256sums_aarch64=.*/sha256sums_aarch64=('${ARM64_SUM}')/" PKGBUILD
+
+      - name: Generate .SRCINFO
+        run: |
+          cp dist/sharkfin.system.service aur/sharkfin.service
+          docker run --rm -v "$PWD/aur:/pkg" archlinux:latest bash -c '
+            pacman -Sy --noconfirm base-devel >/dev/null 2>&1
+            useradd -m builder
+            chown -R builder:builder /pkg
+            su builder -c "cd /pkg && makepkg --printsrcinfo > .SRCINFO"
+          '
+
+      - name: Push to AUR
+        env:
+          AUR_SSH_PRIVATE_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+        run: |
+          mkdir -p ~/.ssh
+          echo "${AUR_SSH_PRIVATE_KEY}" > ~/.ssh/aur_key
+          chmod 600 ~/.ssh/aur_key
+          ssh-keyscan -H aur.archlinux.org >> ~/.ssh/known_hosts 2>/dev/null
+
+          export GIT_SSH_COMMAND="ssh -i ~/.ssh/aur_key"
+
+          git clone ssh://aur@aur.archlinux.org/sharkfin-bin.git aur-repo
+          cp aur/PKGBUILD aur/.SRCINFO aur-repo/
+          cp dist/sharkfin.system.service aur-repo/sharkfin.service
+
+          cd aur-repo
+          git config user.name "Kaz Walker"
+          git config user.email "me@kazatron.com"
+          git add PKGBUILD .SRCINFO sharkfin.service
+          if ! git diff --cached --quiet; then
+            git commit -m "Update to v${GITHUB_REF_NAME#v}"
+            git push
+          fi

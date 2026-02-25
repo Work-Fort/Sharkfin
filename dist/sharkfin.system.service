@@ -1,0 +1,11 @@
+[Unit]
+Description=sharkfin daemon
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/sharkfin daemon
+Restart=on-failure
+
+[Install]
+WantedBy=default.target
