@@ -35,8 +35,11 @@ func NewPresenceCmd() *cobra.Command {
 			}
 			fmt.Println(string(msg))
 
-			// Read loop: processes server pings (gorilla auto-responds with pong)
+			// Read loop: processes server pings (gorilla auto-responds with pong).
+			// Exits when the server closes the connection.
+			connClosed := make(chan struct{})
 			go func() {
+				defer close(connClosed)
 				for {
 					if _, _, err := conn.ReadMessage(); err != nil {
 						return
@@ -44,10 +47,14 @@ func NewPresenceCmd() *cobra.Command {
 				}
 			}()
 
-			// Hold connection open until signal
+			// Hold connection open until signal or server disconnect
 			sigCh := make(chan os.Signal, 1)
 			signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
-			<-sigCh
+			select {
+			case <-sigCh:
+			case <-connClosed:
+				return nil
+			}
 
 			conn.WriteMessage(websocket.CloseMessage,
 				websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""))
