@@ -2,6 +2,7 @@
 package db
 
 import (
+	"database/sql"
 	"fmt"
 	"time"
 )
@@ -68,6 +69,38 @@ func (d *DB) ListChannelsForUser(userID int64) ([]Channel, error) {
 		channels = append(channels, ch)
 	}
 	return channels, rows.Err()
+}
+
+// GetChannelByID returns a channel by its ID.
+func (d *DB) GetChannelByID(id int64) (*Channel, error) {
+	var ch Channel
+	err := d.db.QueryRow(
+		"SELECT id, name, public, created_at FROM channels WHERE id = ?",
+		id,
+	).Scan(&ch.ID, &ch.Name, &ch.Public, &ch.CreatedAt)
+	if err == sql.ErrNoRows {
+		return nil, fmt.Errorf("channel not found: %d", id)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("get channel: %w", err)
+	}
+	return &ch, nil
+}
+
+// GetChannelByName returns a channel by its name.
+func (d *DB) GetChannelByName(name string) (*Channel, error) {
+	var ch Channel
+	err := d.db.QueryRow(
+		"SELECT id, name, public, created_at FROM channels WHERE name = ?",
+		name,
+	).Scan(&ch.ID, &ch.Name, &ch.Public, &ch.CreatedAt)
+	if err == sql.ErrNoRows {
+		return nil, fmt.Errorf("channel not found: %s", name)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("get channel: %w", err)
+	}
+	return &ch, nil
 }
 
 // AddChannelMember adds a user to a channel.
