@@ -8,11 +8,6 @@ import (
 	"github.com/gorilla/websocket"
 )
 
-const (
-	pingInterval = 10 * time.Second
-	pongTimeout  = 20 * time.Second
-)
-
 var upgrader = websocket.Upgrader{
 	CheckOrigin: func(r *http.Request) bool { return true },
 }
@@ -20,14 +15,20 @@ var upgrader = websocket.Upgrader{
 // PresenceHandler handles WebSocket presence connections.
 // On connect: creates an identity token and sends it as the first message.
 // Keeps the connection alive with ping/pong. When the client disconnects
-// (or pong times out after 20s), the user is marked offline.
+// (or pong times out), the user is marked offline.
 type PresenceHandler struct {
-	sessions *SessionManager
+	sessions     *SessionManager
+	pongTimeout  time.Duration
+	pingInterval time.Duration
 }
 
 // NewPresenceHandler creates a new presence handler.
-func NewPresenceHandler(sessions *SessionManager) *PresenceHandler {
-	return &PresenceHandler{sessions: sessions}
+func NewPresenceHandler(sessions *SessionManager, pongTimeout time.Duration) *PresenceHandler {
+	return &PresenceHandler{
+		sessions:     sessions,
+		pongTimeout:  pongTimeout,
+		pingInterval: pongTimeout / 2,
+	}
 }
 
 func (h *PresenceHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -50,9 +51,9 @@ func (h *PresenceHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Pong handler resets read deadline (keepalive timeout)
-	conn.SetReadDeadline(time.Now().Add(pongTimeout))
+	conn.SetReadDeadline(time.Now().Add(h.pongTimeout))
 	conn.SetPongHandler(func(string) error {
-		conn.SetReadDeadline(time.Now().Add(pongTimeout))
+		conn.SetReadDeadline(time.Now().Add(h.pongTimeout))
 		return nil
 	})
 
@@ -69,13 +70,13 @@ func (h *PresenceHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}()
 
 	// Write loop: send pings periodically
-	ticker := time.NewTicker(pingInterval)
+	ticker := time.NewTicker(h.pingInterval)
 	defer ticker.Stop()
 
 	for {
 		select {
 		case <-ticker.C:
-			conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
+			conn.SetWriteDeadline(time.Now().Add(h.pingInterval))
 			if err := conn.WriteMessage(websocket.PingMessage, nil); err != nil {
 				return
 			}

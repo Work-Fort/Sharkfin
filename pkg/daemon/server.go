@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"time"
 
 	"github.com/charmbracelet/log"
 
@@ -21,7 +22,7 @@ type Server struct {
 }
 
 // NewServer creates a new sharkfind server.
-func NewServer(addr, dbPath string, allowChannelCreation bool) (*Server, error) {
+func NewServer(addr, dbPath string, allowChannelCreation bool, pongTimeout time.Duration) (*Server, error) {
 	database, err := db.Open(dbPath)
 	if err != nil {
 		return nil, fmt.Errorf("open database: %w", err)
@@ -29,7 +30,7 @@ func NewServer(addr, dbPath string, allowChannelCreation bool) (*Server, error) 
 
 	sm := NewSessionManager(database, allowChannelCreation)
 	mcpHandler := NewMCPHandler(sm, database)
-	presenceHandler := NewPresenceHandler(sm)
+	presenceHandler := NewPresenceHandler(sm, pongTimeout)
 
 	mux := http.NewServeMux()
 	mux.Handle("POST /mcp", mcpHandler)

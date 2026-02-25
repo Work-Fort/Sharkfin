@@ -29,7 +29,13 @@ func NewDaemonCmd() *cobra.Command {
 			addr := viper.GetString("daemon")
 			dbPath := filepath.Join(config.GlobalPaths.StateDir, "sharkfin.db")
 
-			srv, err := pkgdaemon.NewServer(addr, dbPath, allowChannelCreation)
+			timeoutStr := viper.GetString("presence-timeout")
+			pongTimeout, err := time.ParseDuration(timeoutStr)
+			if err != nil {
+				return fmt.Errorf("invalid presence-timeout %q: %w", timeoutStr, err)
+			}
+
+			srv, err := pkgdaemon.NewServer(addr, dbPath, allowChannelCreation, pongTimeout)
 			if err != nil {
 				return fmt.Errorf("create server: %w", err)
 			}

@@ -75,6 +75,7 @@ func InitDirs() error {
 func InitViper() {
 	viper.SetDefault("daemon", DefaultDaemonAddr)
 	viper.SetDefault("log-level", "debug")
+	viper.SetDefault("presence-timeout", "20s")
 
 	viper.SetConfigName(ConfigFileName)
 	viper.SetConfigType(ConfigType)

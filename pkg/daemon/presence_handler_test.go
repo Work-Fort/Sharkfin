@@ -22,7 +22,7 @@ func TestPresenceTokenDelivery(t *testing.T) {
 	d, _ := db.Open(":memory:")
 	defer d.Close()
 	sm := NewSessionManager(d, true)
-	ph := NewPresenceHandler(sm)
+	ph := NewPresenceHandler(sm, 20*time.Second)
 
 	server := httptest.NewServer(ph)
 	defer server.Close()
@@ -51,7 +51,7 @@ func TestPresenceHoldsConnection(t *testing.T) {
 	d, _ := db.Open(":memory:")
 	defer d.Close()
 	sm := NewSessionManager(d, true)
-	ph := NewPresenceHandler(sm)
+	ph := NewPresenceHandler(sm, 20*time.Second)
 
 	server := httptest.NewServer(ph)
 	defer server.Close()
@@ -82,7 +82,7 @@ func TestPresenceDisconnectNotifiesSession(t *testing.T) {
 	d, _ := db.Open(":memory:")
 	defer d.Close()
 	sm := NewSessionManager(d, true)
-	ph := NewPresenceHandler(sm)
+	ph := NewPresenceHandler(sm, 20*time.Second)
 
 	server := httptest.NewServer(ph)
 	defer server.Close()
@@ -125,7 +125,7 @@ func TestPresenceRejectsNonWebSocket(t *testing.T) {
 	d, _ := db.Open(":memory:")
 	defer d.Close()
 	sm := NewSessionManager(d, true)
-	ph := NewPresenceHandler(sm)
+	ph := NewPresenceHandler(sm, 20*time.Second)
 
 	server := httptest.NewServer(ph)
 	defer server.Close()
