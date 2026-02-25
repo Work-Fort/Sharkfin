@@ -3,6 +3,7 @@ package mcpbridge
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -129,7 +130,7 @@ func (b *bridge) processStdin() error {
 			return fmt.Errorf("read response: %w", err)
 		}
 
-		os.Stdout.Write(body)
+		os.Stdout.Write(bytes.TrimRight(body, "\n"))
 		os.Stdout.Write([]byte("\n"))
 	}
 	return scanner.Err()
