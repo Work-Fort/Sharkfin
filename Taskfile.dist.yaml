@@ -49,9 +49,17 @@ tasks:
     cmds:
       - rm -rf {{.BUILD_DIR}}
 
+  e2e:
+    desc: Run end-to-end tests
+    silent: true
+    deps: [build]
+    cmds:
+      - cd tests/e2e && go test -v -race -timeout 120s
+
   ci:
     desc: Run all CI checks
     silent: true
     cmds:
       - task: lint
       - task: test
+      - task: e2e
