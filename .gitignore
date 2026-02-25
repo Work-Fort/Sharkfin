@@ -1,2 +1,3 @@
 build/
 .task/
+tests/e2e/testbin/
