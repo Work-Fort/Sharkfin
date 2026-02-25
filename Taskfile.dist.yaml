@@ -1,0 +1,57 @@
+# SPDX-License-Identifier: GPL-2.0-only
+# yaml-language-server: $schema=https://taskfile.dev/schema.json
+version: '3'
+
+vars:
+  BINARY_NAME: sharkfin
+  BUILD_DIR: build
+  GIT_SHORT_SHA:
+    sh: git rev-parse --short HEAD 2>/dev/null || echo "unknown"
+  VERSION: '{{.VERSION | default (printf "dev-%s" .GIT_SHORT_SHA)}}'
+
+tasks:
+  default:
+    desc: Show available tasks
+    silent: true
+    cmds:
+      - task --list
+
+  build:
+    desc: Build sharkfin
+    silent: true
+    sources:
+      - "**/*.go"
+      - go.mod
+      - go.sum
+    generates:
+      - "{{.BUILD_DIR}}/{{.BINARY_NAME}}"
+    cmds:
+      - mkdir -p {{.BUILD_DIR}}
+      - go build -ldflags "-X github.com/Work-Fort/sharkfin/cmd.Version={{.VERSION}}" -o {{.BUILD_DIR}}/{{.BINARY_NAME}}
+
+  test:
+    desc: Run tests
+    silent: true
+    cmds:
+      - mkdir -p {{.BUILD_DIR}}
+      - go test -v -race -coverprofile={{.BUILD_DIR}}/coverage.out ./...
+
+  lint:
+    desc: Run linters
+    silent: true
+    cmds:
+      - test -z "$(gofmt -l .)" || (gofmt -l . && exit 1)
+      - go vet ./...
+
+  clean:
+    desc: Clean build artifacts
+    silent: true
+    cmds:
+      - rm -rf {{.BUILD_DIR}}
+
+  ci:
+    desc: Run all CI checks
+    silent: true
+    cmds:
+      - task: lint
+      - task: test
