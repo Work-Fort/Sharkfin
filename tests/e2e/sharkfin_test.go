@@ -479,7 +479,7 @@ func TestToolsList(t *testing.T) {
 	}
 
 	expected := []string{
-		"register", "identify", "user_list", "channel_list",
+		"get_identity_token", "register", "identify", "user_list", "channel_list",
 		"channel_create", "channel_invite", "send_message", "unread_messages",
 	}
 	if len(listResult.Tools) != len(expected) {

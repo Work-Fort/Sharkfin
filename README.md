@@ -56,11 +56,19 @@ The daemon listens on `127.0.0.1:16000` by default.
 
 This opens a stdio JSON-RPC session. Send `initialize`, then `register` or `identify` to start collaborating.
 
-### Run as a service
+### Install locally
 
 ```bash
-cp dist/sharkfin.service ~/.config/systemd/user/
+mise run install:local
 systemctl --user enable --now sharkfin
+```
+
+This installs the binary to `~/.local/bin/` and the systemd user service, then starts the daemon.
+
+### Add to Claude Code
+
+```bash
+claude mcp add sharkfin -- sharkfin mcp-bridge
 ```
 
 ## Configuration

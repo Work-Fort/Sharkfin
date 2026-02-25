@@ -78,6 +78,14 @@ func (h *MCPHandler) handleToolsList(w http.ResponseWriter, req *protocol.Reques
 	tools := map[string]interface{}{
 		"tools": []map[string]interface{}{
 			{
+				"name":        "get_identity_token",
+				"description": "Get the identity token for this session. Must be called first, then pass the token to register or identify.",
+				"inputSchema": map[string]interface{}{
+					"type":       "object",
+					"properties": map[string]interface{}{},
+				},
+			},
+			{
 				"name":        "register",
 				"description": "Create a new user and associate with identity token. Can only be called before identify.",
 				"inputSchema": map[string]interface{}{
