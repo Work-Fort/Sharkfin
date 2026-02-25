@@ -11,9 +11,9 @@ import (
 )
 
 const (
-	EnvPrefix        = "SHARKFIN"
-	ConfigFileName   = "config"
-	ConfigType       = "yaml"
+	EnvPrefix         = "SHARKFIN"
+	ConfigFileName    = "config"
+	ConfigType        = "yaml"
 	DefaultDaemonAddr = "127.0.0.1:16000"
 )
 

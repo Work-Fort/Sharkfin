@@ -16,7 +16,7 @@ type SessionManager struct {
 	mu                   sync.RWMutex
 	tokens               map[string]*IdentityToken // token string → state
 	mcpSessions          map[string]*MCPSession    // MCP session ID → session
-	onlineUsers          map[string]string          // username → token
+	onlineUsers          map[string]string         // username → token
 	db                   *db.DB
 	AllowChannelCreation bool
 }

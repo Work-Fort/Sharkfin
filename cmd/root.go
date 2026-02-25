@@ -10,6 +10,9 @@ import (
 	"github.com/charmbracelet/log"
 	"github.com/spf13/cobra"
 
+	"github.com/Work-Fort/sharkfin/cmd/daemon"
+	"github.com/Work-Fort/sharkfin/cmd/mcpbridge"
+	"github.com/Work-Fort/sharkfin/cmd/presence"
 	"github.com/Work-Fort/sharkfin/pkg/config"
 )
 
@@ -88,6 +91,10 @@ func init() {
 	rootCmd.PersistentFlags().StringVarP(&logLevel, "log-level", "l", "debug", "Log level: disabled, debug, info, warn, error")
 
 	config.BindFlags(rootCmd.PersistentFlags())
+
+	rootCmd.AddCommand(daemon.NewDaemonCmd())
+	rootCmd.AddCommand(mcpbridge.NewMCPBridgeCmd())
+	rootCmd.AddCommand(presence.NewPresenceCmd())
 
 	rootCmd.SilenceUsage = true
 	rootCmd.SilenceErrors = true
