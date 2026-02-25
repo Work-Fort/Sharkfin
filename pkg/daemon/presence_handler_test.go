@@ -2,70 +2,79 @@
 package daemon
 
 import (
-	"bytes"
-	"context"
-	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/gorilla/websocket"
 
 	"github.com/Work-Fort/sharkfin/pkg/db"
 )
 
-func TestPresenceValidToken(t *testing.T) {
+// wsURL converts an httptest.Server URL to a WebSocket URL with path.
+func wsURL(server *httptest.Server) string {
+	return "ws" + strings.TrimPrefix(server.URL, "http")
+}
+
+func TestPresenceTokenDelivery(t *testing.T) {
 	d, _ := db.Open(":memory:")
 	defer d.Close()
 	sm := NewSessionManager(d, true)
 	ph := NewPresenceHandler(sm)
 
-	token := sm.CreateIdentityToken()
+	server := httptest.NewServer(ph)
+	defer server.Close()
 
-	// Run presence in a goroutine since it blocks
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL(server), nil)
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	defer conn.Close()
 
-	done := make(chan int)
-	go func() {
-		body, _ := json.Marshal(map[string]string{"token": token})
-		req := httptest.NewRequest("POST", "/presence", bytes.NewReader(body)).WithContext(ctx)
-		w := httptest.NewRecorder()
-		ph.ServeHTTP(w, req)
-		done <- w.Code
-	}()
-
-	// Give it a moment to connect
-	time.Sleep(50 * time.Millisecond)
-
-	// Verify presence is attached
-	sm.mu.RLock()
-	it := sm.tokens[token]
-	sm.mu.RUnlock()
-	if !it.HasPresence {
-		t.Error("expected presence to be attached")
+	_, msg, err := conn.ReadMessage()
+	if err != nil {
+		t.Fatalf("read: %v", err)
 	}
 
-	// Cancel to disconnect
-	cancel()
-	code := <-done
-	if code != http.StatusOK {
-		t.Errorf("status = %d, want 200", code)
+	token := string(msg)
+	if token == "" {
+		t.Fatal("expected non-empty token")
+	}
+	if len(token) != 64 { // 32 bytes hex-encoded
+		t.Errorf("token length = %d, want 64", len(token))
 	}
 }
 
-func TestPresenceInvalidToken(t *testing.T) {
+func TestPresenceHoldsConnection(t *testing.T) {
 	d, _ := db.Open(":memory:")
 	defer d.Close()
 	sm := NewSessionManager(d, true)
 	ph := NewPresenceHandler(sm)
 
-	body, _ := json.Marshal(map[string]string{"token": "bogus"})
-	req := httptest.NewRequest("POST", "/presence", bytes.NewReader(body))
-	w := httptest.NewRecorder()
-	ph.ServeHTTP(w, req)
+	server := httptest.NewServer(ph)
+	defer server.Close()
 
-	if w.Code != http.StatusBadRequest {
-		t.Errorf("status = %d, want 400", w.Code)
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL(server), nil)
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	defer conn.Close()
+
+	// Read token
+	_, _, err = conn.ReadMessage()
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+
+	// Verify presence is attached
+	time.Sleep(50 * time.Millisecond)
+	sm.mu.RLock()
+	tokenCount := len(sm.tokens)
+	sm.mu.RUnlock()
+	if tokenCount == 0 {
+		t.Error("expected token to exist in session manager")
 	}
 }
 
@@ -75,22 +84,22 @@ func TestPresenceDisconnectNotifiesSession(t *testing.T) {
 	sm := NewSessionManager(d, true)
 	ph := NewPresenceHandler(sm)
 
-	token := sm.CreateIdentityToken()
+	server := httptest.NewServer(ph)
+	defer server.Close()
 
-	ctx, cancel := context.WithCancel(context.Background())
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL(server), nil)
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
 
-	done := make(chan struct{})
-	go func() {
-		body, _ := json.Marshal(map[string]string{"token": token})
-		req := httptest.NewRequest("POST", "/presence", bytes.NewReader(body)).WithContext(ctx)
-		w := httptest.NewRecorder()
-		ph.ServeHTTP(w, req)
-		close(done)
-	}()
+	// Read token
+	_, msg, err := conn.ReadMessage()
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	token := string(msg)
 
-	time.Sleep(50 * time.Millisecond)
-
-	// Register while presence is connected
+	// Register a user on this token
 	d.CreateUser("alice", "")
 	sm.mu.Lock()
 	it := sm.tokens[token]
@@ -103,11 +112,32 @@ func TestPresenceDisconnectNotifiesSession(t *testing.T) {
 		t.Error("alice should be online")
 	}
 
-	// Disconnect
-	cancel()
-	<-done
+	// Disconnect by closing WebSocket
+	conn.Close()
+	time.Sleep(100 * time.Millisecond)
 
 	if sm.IsUserOnline("alice") {
 		t.Error("alice should be offline after disconnect")
+	}
+}
+
+func TestPresenceRejectsNonWebSocket(t *testing.T) {
+	d, _ := db.Open(":memory:")
+	defer d.Close()
+	sm := NewSessionManager(d, true)
+	ph := NewPresenceHandler(sm)
+
+	server := httptest.NewServer(ph)
+	defer server.Close()
+
+	// Plain HTTP POST — not a WebSocket upgrade
+	resp, err := http.Post(server.URL, "application/json", nil)
+	if err != nil {
+		t.Fatalf("request: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusOK || resp.StatusCode == http.StatusSwitchingProtocols {
+		t.Errorf("expected non-WebSocket request to be rejected, got %d", resp.StatusCode)
 	}
 }

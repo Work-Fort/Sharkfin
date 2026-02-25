@@ -78,14 +78,6 @@ func (h *MCPHandler) handleToolsList(w http.ResponseWriter, req *protocol.Reques
 	tools := map[string]interface{}{
 		"tools": []map[string]interface{}{
 			{
-				"name":        "get_identity_token",
-				"description": "Get a pending identity token from sharkfind for session establishment",
-				"inputSchema": map[string]interface{}{
-					"type":       "object",
-					"properties": map[string]interface{}{},
-				},
-			},
-			{
 				"name":        "register",
 				"description": "Create a new user and associate with identity token. Can only be called before identify.",
 				"inputSchema": map[string]interface{}{
@@ -192,9 +184,6 @@ func (h *MCPHandler) handleToolsCall(w http.ResponseWriter, req *protocol.Reques
 
 	// Tools that don't require identification
 	switch params.Name {
-	case "get_identity_token":
-		h.handleGetIdentityToken(w, req)
-		return
 	case "register":
 		h.handleRegister(w, req, params.Arguments, sessionID)
 		return
@@ -226,11 +215,6 @@ func (h *MCPHandler) handleToolsCall(w http.ResponseWriter, req *protocol.Reques
 	default:
 		writeJSONRPCError(w, req.ID, protocol.MethodNotFound, fmt.Sprintf("unknown tool: %s", params.Name))
 	}
-}
-
-func (h *MCPHandler) handleGetIdentityToken(w http.ResponseWriter, req *protocol.Request) {
-	token := h.sessions.CreateIdentityToken()
-	writeToolResult(w, req.ID, token)
 }
 
 func (h *MCPHandler) handleRegister(w http.ResponseWriter, req *protocol.Request, args json.RawMessage, sessionID string) {

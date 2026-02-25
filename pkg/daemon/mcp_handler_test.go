@@ -72,7 +72,8 @@ func mcpCall(t *testing.T, handler http.Handler, sessionID string, method string
 	return resp, rpcResp
 }
 
-// registerUser creates a user through the full MCP flow and returns the session ID.
+// registerUser creates a user through the MCP flow and returns the session ID.
+// Simulates the bridge: creates token + attaches presence directly.
 func registerUser(t *testing.T, env *testEnv, username string) string {
 	t.Helper()
 
@@ -84,20 +85,8 @@ func registerUser(t *testing.T, env *testEnv, username string) string {
 	})
 	sessionID := httpResp.Header.Get("Mcp-Session-Id")
 
-	// Get identity token
-	_, rpcResp := mcpCall(t, env.handler, sessionID, "tools/call", 2, map[string]interface{}{
-		"name":      "get_identity_token",
-		"arguments": map[string]interface{}{},
-	})
-	var tokenResult struct {
-		Content []struct {
-			Text string `json:"text"`
-		} `json:"content"`
-	}
-	json.Unmarshal(rpcResp.Result, &tokenResult)
-	token := tokenResult.Content[0].Text
-
-	// Attach presence
+	// Simulate bridge: create token and attach presence directly
+	token := env.sm.CreateIdentityToken()
 	env.sm.AttachPresence(token)
 
 	// Register — captures the new session ID from the response
@@ -113,7 +102,6 @@ func registerUser(t *testing.T, env *testEnv, username string) string {
 		t.Fatalf("register failed: %s", rpcResp.Error.Message)
 	}
 
-	// Register returns the real session ID tied to the identity token
 	newSessionID := regResp.Header.Get("Mcp-Session-Id")
 	if newSessionID != "" {
 		return newSessionID
@@ -163,7 +151,7 @@ func TestToolsList(t *testing.T) {
 	json.Unmarshal(rpcResp.Result, &result)
 
 	expected := map[string]bool{
-		"get_identity_token": true, "register": true, "identify": true,
+		"register": true, "identify": true,
 		"user_list": true, "channel_list": true, "channel_create": true,
 		"channel_invite": true, "send_message": true, "unread_messages": true,
 	}
@@ -174,26 +162,6 @@ func TestToolsList(t *testing.T) {
 		if !expected[tool.Name] {
 			t.Errorf("unexpected tool: %s", tool.Name)
 		}
-	}
-}
-
-func TestGetIdentityToken(t *testing.T) {
-	env := newTestEnv(t)
-	_, rpcResp := mcpCall(t, env.handler, "", "tools/call", 1, map[string]interface{}{
-		"name":      "get_identity_token",
-		"arguments": map[string]interface{}{},
-	})
-	if rpcResp.Error != nil {
-		t.Fatalf("error: %s", rpcResp.Error.Message)
-	}
-	var result struct {
-		Content []struct {
-			Text string `json:"text"`
-		} `json:"content"`
-	}
-	json.Unmarshal(rpcResp.Result, &result)
-	if len(result.Content) == 0 || result.Content[0].Text == "" {
-		t.Error("expected non-empty token")
 	}
 }
 
@@ -226,28 +194,11 @@ func TestIdentifyUserAlreadyOnline(t *testing.T) {
 	env := newTestEnv(t)
 	registerUser(t, env, "alice")
 
-	// Get a new session and try to identify as alice
-	httpResp, _ := mcpCall(t, env.handler, "", "initialize", 1, map[string]interface{}{
-		"protocolVersion": "2025-03-26",
-		"clientInfo":      map[string]string{"name": "test2"},
-		"capabilities":    map[string]interface{}{},
-	})
-	sessionID2 := httpResp.Header.Get("Mcp-Session-Id")
-
-	_, rpcResp := mcpCall(t, env.handler, sessionID2, "tools/call", 2, map[string]interface{}{
-		"name":      "get_identity_token",
-		"arguments": map[string]interface{}{},
-	})
-	var tokenResult struct {
-		Content []struct {
-			Text string `json:"text"`
-		} `json:"content"`
-	}
-	json.Unmarshal(rpcResp.Result, &tokenResult)
-	token := tokenResult.Content[0].Text
+	// Simulate a second bridge: create token and attach presence directly
+	token := env.sm.CreateIdentityToken()
 	env.sm.AttachPresence(token)
 
-	_, rpcResp = mcpCall(t, env.handler, sessionID2, "tools/call", 3, map[string]interface{}{
+	_, rpcResp := mcpCall(t, env.handler, "", "tools/call", 3, map[string]interface{}{
 		"name": "identify",
 		"arguments": map[string]interface{}{
 			"token":    token,

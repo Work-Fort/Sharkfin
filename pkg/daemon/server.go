@@ -33,7 +33,7 @@ func NewServer(addr, dbPath string, allowChannelCreation bool) (*Server, error) 
 
 	mux := http.NewServeMux()
 	mux.Handle("POST /mcp", mcpHandler)
-	mux.Handle("POST /presence", presenceHandler)
+	mux.Handle("GET /presence", presenceHandler)
 
 	return &Server{
 		addr:     addr,

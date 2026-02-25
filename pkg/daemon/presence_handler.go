@@ -2,12 +2,25 @@
 package daemon
 
 import (
-	"encoding/json"
-	"io"
 	"net/http"
+	"time"
+
+	"github.com/gorilla/websocket"
 )
 
-// PresenceHandler handles long-poll presence connections.
+const (
+	pingInterval = 10 * time.Second
+	pongTimeout  = 20 * time.Second
+)
+
+var upgrader = websocket.Upgrader{
+	CheckOrigin: func(r *http.Request) bool { return true },
+}
+
+// PresenceHandler handles WebSocket presence connections.
+// On connect: creates an identity token and sends it as the first message.
+// Keeps the connection alive with ping/pong. When the client disconnects
+// (or pong times out after 20s), the user is marked offline.
 type PresenceHandler struct {
 	sessions *SessionManager
 }
@@ -18,36 +31,58 @@ func NewPresenceHandler(sessions *SessionManager) *PresenceHandler {
 }
 
 func (h *PresenceHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	body, err := io.ReadAll(r.Body)
+	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
-		http.Error(w, "failed to read body", http.StatusBadRequest)
 		return
 	}
+	defer conn.Close()
 
-	var req struct {
-		Token string `json:"token"`
-	}
-	if err := json.Unmarshal(body, &req); err != nil || req.Token == "" {
-		http.Error(w, "invalid request: token required", http.StatusBadRequest)
-		return
-	}
+	token := h.sessions.CreateIdentityToken()
 
-	done, err := h.sessions.AttachPresence(req.Token)
+	done, err := h.sessions.AttachPresence(token)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	defer h.sessions.DisconnectPresence(token)
+
+	if err := conn.WriteMessage(websocket.TextMessage, []byte(token)); err != nil {
 		return
 	}
 
-	// Block until client disconnects or server closes the session
-	select {
-	case <-r.Context().Done():
-	case <-done:
-	}
+	// Pong handler resets read deadline (keepalive timeout)
+	conn.SetReadDeadline(time.Now().Add(pongTimeout))
+	conn.SetPongHandler(func(string) error {
+		conn.SetReadDeadline(time.Now().Add(pongTimeout))
+		return nil
+	})
 
-	h.sessions.DisconnectPresence(req.Token)
+	// Read loop in goroutine — processes pong frames and detects disconnect.
+	// gorilla/websocket: one concurrent reader + one concurrent writer is safe.
+	readDone := make(chan struct{})
+	go func() {
+		defer close(readDone)
+		for {
+			if _, _, err := conn.ReadMessage(); err != nil {
+				return
+			}
+		}
+	}()
+
+	// Write loop: send pings periodically
+	ticker := time.NewTicker(pingInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
+			if err := conn.WriteMessage(websocket.PingMessage, nil); err != nil {
+				return
+			}
+		case <-readDone:
+			return
+		case <-done:
+			return
+		}
+	}
 }

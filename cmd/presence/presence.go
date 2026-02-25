@@ -2,15 +2,12 @@
 package presence
 
 import (
-	"bytes"
-	"context"
-	"encoding/json"
 	"fmt"
-	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
 
+	"github.com/gorilla/websocket"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
@@ -18,47 +15,42 @@ import (
 // NewPresenceCmd creates the presence subcommand.
 func NewPresenceCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "presence <token>",
+		Use:   "presence",
 		Short: "Establish presence connection to the daemon",
-		Args:  cobra.ExactArgs(1),
+		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			addr := viper.GetString("daemon")
-			presenceURL := fmt.Sprintf("http://%s/presence", addr)
-			token := args[0]
+			wsURL := fmt.Sprintf("ws://%s/presence", addr)
 
-			body, _ := json.Marshal(map[string]string{"token": token})
+			conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+			if err != nil {
+				return fmt.Errorf("connect: %w", err)
+			}
+			defer conn.Close()
 
-			ctx, cancel := context.WithCancel(context.Background())
-			defer cancel()
+			// Read token (first message from server)
+			_, msg, err := conn.ReadMessage()
+			if err != nil {
+				return fmt.Errorf("read token: %w", err)
+			}
+			fmt.Println(string(msg))
 
-			// Cancel the request on SIGINT/SIGTERM
-			sigCh := make(chan os.Signal, 1)
-			signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+			// Read loop: processes server pings (gorilla auto-responds with pong)
 			go func() {
-				<-sigCh
-				cancel()
+				for {
+					if _, _, err := conn.ReadMessage(); err != nil {
+						return
+					}
+				}
 			}()
 
-			req, err := http.NewRequestWithContext(ctx, "POST", presenceURL, bytes.NewReader(body))
-			if err != nil {
-				return fmt.Errorf("create request: %w", err)
-			}
-			req.Header.Set("Content-Type", "application/json")
+			// Hold connection open until signal
+			sigCh := make(chan os.Signal, 1)
+			signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+			<-sigCh
 
-			resp, err := http.DefaultClient.Do(req)
-			if err != nil {
-				// Context cancellation from signal is expected
-				if ctx.Err() != nil {
-					return nil
-				}
-				return fmt.Errorf("presence connection failed: %w", err)
-			}
-			defer resp.Body.Close()
-
-			if resp.StatusCode != http.StatusOK {
-				return fmt.Errorf("presence rejected: %s", resp.Status)
-			}
-
+			conn.WriteMessage(websocket.CloseMessage,
+				websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""))
 			return nil
 		},
 	}

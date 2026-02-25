@@ -12,6 +12,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gorilla/websocket"
+
 	pkgdaemon "github.com/Work-Fort/sharkfin/pkg/daemon"
 	"github.com/Work-Fort/sharkfin/pkg/protocol"
 )
@@ -153,40 +155,61 @@ func toolResultText(t *testing.T, resp protocol.Response) string {
 	return result.Content[0].Text
 }
 
-// registerUser performs the full identity handshake: initialize → get_identity_token → presence → register.
+// connectPresence establishes a WebSocket presence connection and returns the identity token.
+// The cancel function closes the connection (marks user offline).
+func (e *testEnv) connectPresence() (token string, cancelPresence func()) {
+	e.t.Helper()
+
+	wsURL := fmt.Sprintf("ws://%s/presence", e.addr)
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	if err != nil {
+		e.t.Fatalf("dial presence: %v", err)
+	}
+
+	// Read token (first message from server)
+	_, msg, err := conn.ReadMessage()
+	if err != nil {
+		conn.Close()
+		e.t.Fatalf("read presence token: %v", err)
+	}
+	token = string(msg)
+
+	// Read loop: processes server pings (gorilla auto-responds with pong)
+	readDone := make(chan struct{})
+	go func() {
+		defer close(readDone)
+		for {
+			if _, _, err := conn.ReadMessage(); err != nil {
+				return
+			}
+		}
+	}()
+
+	cancelPresence = func() {
+		conn.WriteMessage(websocket.CloseMessage,
+			websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""))
+		conn.Close()
+		<-readDone
+	}
+	return token, cancelPresence
+}
+
+// registerUser performs the full identity handshake: presence → initialize → register.
 // Returns the MCP session ID and a cancel function to disconnect presence.
 func (e *testEnv) registerUser(username string, id int) (sessionID string, cancelPresence func()) {
 	e.t.Helper()
 
-	// 1. Initialize
+	// 1. Connect to presence (gets token)
+	token, cancelPresence := e.connectPresence()
+
+	// 2. Initialize
 	_, _ = e.mcpRequest("", "initialize", id, map[string]interface{}{
 		"protocolVersion": "2025-03-26",
 		"capabilities":    map[string]interface{}{},
 		"clientInfo":      map[string]string{"name": "test", "version": "0.1"},
 	})
 
-	// 2. Get identity token
-	_, tokenResp := e.toolCall("", id+1, "get_identity_token", map[string]interface{}{})
-	token := toolResultText(e.t, tokenResp)
-
-	// 3. Start presence in background
-	ctx, cancel := context.WithCancel(context.Background())
-	presenceDone := make(chan struct{})
-	go func() {
-		defer close(presenceDone)
-		body, _ := json.Marshal(map[string]string{"token": token})
-		req, _ := http.NewRequestWithContext(ctx, "POST", fmt.Sprintf("http://%s/presence", e.addr), bytes.NewReader(body))
-		req.Header.Set("Content-Type", "application/json")
-		resp, err := http.DefaultClient.Do(req)
-		if err == nil {
-			resp.Body.Close()
-		}
-	}()
-
-	// Wait for presence to attach
-	time.Sleep(50 * time.Millisecond)
-
-	// 4. Register
+	// 3. Register
 	httpResp, regResp := e.toolCall("", id+2, "register", map[string]interface{}{
 		"token": token, "username": username, "password": "",
 	})
@@ -195,45 +218,24 @@ func (e *testEnv) registerUser(username string, id int) (sessionID string, cance
 	}
 	sessionID = httpResp.Header.Get("Mcp-Session-Id")
 
-	cancelPresence = func() {
-		cancel()
-		<-presenceDone
-	}
-
 	return sessionID, cancelPresence
 }
 
-// identifyUser performs the full identity handshake for an existing user: initialize → get_identity_token → presence → identify.
+// identifyUser performs the full identity handshake for an existing user: presence → initialize → identify.
 func (e *testEnv) identifyUser(username string, id int) (sessionID string, cancelPresence func()) {
 	e.t.Helper()
 
-	// 1. Initialize
+	// 1. Connect to presence (gets token)
+	token, cancelPresence := e.connectPresence()
+
+	// 2. Initialize
 	_, _ = e.mcpRequest("", "initialize", id, map[string]interface{}{
 		"protocolVersion": "2025-03-26",
 		"capabilities":    map[string]interface{}{},
 		"clientInfo":      map[string]string{"name": "test", "version": "0.1"},
 	})
 
-	// 2. Get identity token
-	_, tokenResp := e.toolCall("", id+1, "get_identity_token", map[string]interface{}{})
-	token := toolResultText(e.t, tokenResp)
-
-	// 3. Start presence
-	ctx, cancel := context.WithCancel(context.Background())
-	presenceDone := make(chan struct{})
-	go func() {
-		defer close(presenceDone)
-		body, _ := json.Marshal(map[string]string{"token": token})
-		req, _ := http.NewRequestWithContext(ctx, "POST", fmt.Sprintf("http://%s/presence", e.addr), bytes.NewReader(body))
-		req.Header.Set("Content-Type", "application/json")
-		resp, err := http.DefaultClient.Do(req)
-		if err == nil {
-			resp.Body.Close()
-		}
-	}()
-	time.Sleep(50 * time.Millisecond)
-
-	// 4. Identify
+	// 3. Identify
 	httpResp, identResp := e.toolCall("", id+2, "identify", map[string]interface{}{
 		"token": token, "username": username, "password": "",
 	})
@@ -242,10 +244,6 @@ func (e *testEnv) identifyUser(username string, id int) (sessionID string, cance
 	}
 	sessionID = httpResp.Header.Get("Mcp-Session-Id")
 
-	cancelPresence = func() {
-		cancel()
-		<-presenceDone
-	}
 	return sessionID, cancelPresence
 }
 
@@ -496,29 +494,9 @@ func TestScenario6_DoubleLoginPrevention(t *testing.T) {
 	_, cancelA := env.registerUser("alice", 1)
 	defer cancelA()
 
-	// Get a new token and presence for a second connection
-	_, _ = env.mcpRequest("", "initialize", 20, map[string]interface{}{
-		"protocolVersion": "2025-03-26",
-		"capabilities":    map[string]interface{}{},
-		"clientInfo":      map[string]string{"name": "test", "version": "0.1"},
-	})
-
-	_, tokenResp := env.toolCall("", 21, "get_identity_token", map[string]interface{}{})
-	token2 := toolResultText(t, tokenResp)
-
-	// Start presence for token2
-	ctx2, cancel2 := context.WithCancel(context.Background())
-	defer cancel2()
-	go func() {
-		body, _ := json.Marshal(map[string]string{"token": token2})
-		req, _ := http.NewRequestWithContext(ctx2, "POST", fmt.Sprintf("http://%s/presence", env.addr), bytes.NewReader(body))
-		req.Header.Set("Content-Type", "application/json")
-		resp, err := http.DefaultClient.Do(req)
-		if err == nil {
-			resp.Body.Close()
-		}
-	}()
-	time.Sleep(50 * time.Millisecond)
+	// Get a second presence connection (simulates a second bridge)
+	token2, cancelPresence2 := env.connectPresence()
+	defer cancelPresence2()
 
 	// Try to identify as alice — should fail because alice is already online
 	_, identResp := env.toolCall("", 22, "identify", map[string]interface{}{
