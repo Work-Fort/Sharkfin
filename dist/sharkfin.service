@@ -4,7 +4,7 @@ After=network.target
 
 [Service]
 Type=simple
-ExecStart=sharkfin daemon
+ExecStart=%h/.local/bin/sharkfin daemon
 Restart=on-failure
 
 [Install]
