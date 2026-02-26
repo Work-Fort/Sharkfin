@@ -56,6 +56,8 @@ func (d *DB) GetUnreadMessages(userID int64, channelID *int64) ([]Message, error
 }
 
 func fetchUnreadForChannel(tx *sql.Tx, userID, channelID int64) ([]Message, error) {
+	// Fetch all unread messages (including own) to find the max ID for cursor advancement,
+	// but only return messages from other users.
 	rows, err := tx.Query(`
 		SELECT m.id, m.channel_id, m.user_id, m.body, m.created_at, u.username
 		FROM messages m
@@ -78,9 +80,11 @@ func fetchUnreadForChannel(tx *sql.Tx, userID, channelID int64) ([]Message, erro
 		if err := rows.Scan(&m.ID, &m.ChannelID, &m.UserID, &m.Body, &m.CreatedAt, &m.Username); err != nil {
 			return nil, fmt.Errorf("scan message: %w", err)
 		}
-		messages = append(messages, m)
 		if m.ID > maxID {
 			maxID = m.ID
+		}
+		if m.UserID != userID {
+			messages = append(messages, m)
 		}
 	}
 	if err := rows.Err(); err != nil {

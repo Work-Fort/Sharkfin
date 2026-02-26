@@ -273,3 +273,42 @@ func TestUnreadMessagesFilterByChannel(t *testing.T) {
 		t.Fatalf("len = %d, want 1", len(msgs))
 	}
 }
+
+func TestUnreadExcludesOwnMessages(t *testing.T) {
+	d := newTestDB(t)
+	aliceID, _ := d.CreateUser("alice", "")
+	bobID, _ := d.CreateUser("bob", "")
+	chID, _ := d.CreateChannel("dm", false, []int64{aliceID, bobID})
+
+	d.SendMessage(chID, aliceID, "from alice")
+	d.SendMessage(chID, bobID, "from bob")
+	d.SendMessage(chID, aliceID, "from alice again")
+
+	// Bob should only see Alice's messages, not his own
+	msgs, err := d.GetUnreadMessages(bobID, nil)
+	if err != nil {
+		t.Fatalf("get unread: %v", err)
+	}
+	if len(msgs) != 2 {
+		t.Fatalf("len = %d, want 2", len(msgs))
+	}
+	if msgs[0].Body != "from alice" || msgs[1].Body != "from alice again" {
+		t.Errorf("got %q and %q, want alice's messages only", msgs[0].Body, msgs[1].Body)
+	}
+
+	// Cursor should have advanced past all 3 messages (including bob's own).
+	// A new message from alice should appear, but bob's own should not reappear.
+	d.SendMessage(chID, aliceID, "new from alice")
+	d.SendMessage(chID, bobID, "new from bob")
+
+	msgs, err = d.GetUnreadMessages(bobID, nil)
+	if err != nil {
+		t.Fatalf("get unread: %v", err)
+	}
+	if len(msgs) != 1 {
+		t.Fatalf("len = %d, want 1", len(msgs))
+	}
+	if msgs[0].Body != "new from alice" {
+		t.Errorf("body = %q, want 'new from alice'", msgs[0].Body)
+	}
+}
