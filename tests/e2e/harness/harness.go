@@ -412,6 +412,98 @@ func (b *Bridge) Kill() error {
 	return b.cmd.Process.Kill()
 }
 
+// --- WSClient ---
+
+// WSEnvelope is the JSON envelope for WebSocket messages.
+type WSEnvelope struct {
+	Type string          `json:"type"`
+	D    json.RawMessage `json:"d,omitempty"`
+	Ref  string          `json:"ref,omitempty"`
+	OK   *bool           `json:"ok,omitempty"`
+}
+
+// WSClient connects to the /ws endpoint for WebSocket-based chat.
+type WSClient struct {
+	conn *websocket.Conn
+}
+
+// NewWSClient dials the daemon's /ws endpoint and reads the hello message.
+func NewWSClient(daemonAddr string) (*WSClient, error) {
+	url := fmt.Sprintf("ws://%s/ws", daemonAddr)
+	conn, _, err := websocket.DefaultDialer.Dial(url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("dial ws: %w", err)
+	}
+
+	// Read and discard hello
+	conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	_, _, err = conn.ReadMessage()
+	if err != nil {
+		conn.Close()
+		return nil, fmt.Errorf("read hello: %w", err)
+	}
+
+	return &WSClient{conn: conn}, nil
+}
+
+// Close cleanly closes the WebSocket connection.
+func (w *WSClient) Close() {
+	w.conn.WriteMessage(websocket.CloseMessage,
+		websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""))
+	w.conn.Close()
+}
+
+// Send writes a request envelope to the WebSocket.
+func (w *WSClient) Send(typ string, d any, ref string) error {
+	raw, _ := json.Marshal(d)
+	env := map[string]any{"type": typ, "d": json.RawMessage(raw), "ref": ref}
+	data, _ := json.Marshal(env)
+	return w.conn.WriteMessage(websocket.TextMessage, data)
+}
+
+// Read reads a single envelope from the WebSocket with a 2s deadline.
+func (w *WSClient) Read() (WSEnvelope, error) {
+	w.conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	_, msg, err := w.conn.ReadMessage()
+	if err != nil {
+		return WSEnvelope{}, err
+	}
+	var env WSEnvelope
+	if err := json.Unmarshal(msg, &env); err != nil {
+		return WSEnvelope{}, fmt.Errorf("unmarshal: %w (body: %s)", err, string(msg))
+	}
+	return env, nil
+}
+
+// Req sends a request and reads the response matching the given ref.
+// Broadcasts (messages with no ref) are discarded.
+func (w *WSClient) Req(typ string, d any, ref string) (WSEnvelope, error) {
+	if err := w.Send(typ, d, ref); err != nil {
+		return WSEnvelope{}, err
+	}
+	for {
+		env, err := w.Read()
+		if err != nil {
+			return WSEnvelope{}, err
+		}
+		if env.Ref == ref {
+			return env, nil
+		}
+	}
+}
+
+// WSRegister registers a user on the WS connection.
+func (w *WSClient) WSRegister(username string) error {
+	env, err := w.Req("register", map[string]string{"username": username}, "reg")
+	if err != nil {
+		return err
+	}
+	if env.OK == nil || !*env.OK {
+		return fmt.Errorf("ws register failed: %s", string(env.D))
+	}
+	return nil
+}
+
 // --- Helpers ---
 
 func FreePort() (string, error) {

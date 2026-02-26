@@ -1594,3 +1594,683 @@ func TestPresenceExitsOnDaemonRestart(t *testing.T) {
 	}
 	defer c.DisconnectPresence()
 }
+
+// --- WebSocket chat tests ---
+
+func TestWSRegisterAndIdentify(t *testing.T) {
+	addr, err := harness.FreePort()
+	if err != nil {
+		t.Fatal(err)
+	}
+	d, err := harness.StartDaemon(sharkfinBin, addr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Stop()
+
+	// Register via WS
+	ws1, err := harness.NewWSClient(addr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ws1.WSRegister("alice"); err != nil {
+		t.Fatal(err)
+	}
+
+	// Verify alice appears in user_list
+	env, err := ws1.Req("user_list", map[string]any{}, "u1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if env.OK == nil || !*env.OK {
+		t.Fatalf("user_list failed: %s", string(env.D))
+	}
+	if !strings.Contains(string(env.D), `"alice"`) {
+		t.Errorf("expected alice in user list: %s", string(env.D))
+	}
+
+	// Disconnect
+	ws1.Close()
+	time.Sleep(100 * time.Millisecond)
+
+	// Re-identify on new connection
+	ws2, err := harness.NewWSClient(addr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ws2.Close()
+
+	env, err = ws2.Req("identify", map[string]string{"username": "alice"}, "i1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if env.OK == nil || !*env.OK {
+		t.Errorf("identify failed: %s", string(env.D))
+	}
+}
+
+func TestWSChannelCreateAndInvite(t *testing.T) {
+	addr, err := harness.FreePort()
+	if err != nil {
+		t.Fatal(err)
+	}
+	d, err := harness.StartDaemon(sharkfinBin, addr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Stop()
+
+	alice, err := harness.NewWSClient(addr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer alice.Close()
+	if err := alice.WSRegister("alice"); err != nil {
+		t.Fatal(err)
+	}
+
+	bob, err := harness.NewWSClient(addr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer bob.Close()
+	if err := bob.WSRegister("bob"); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create private channel
+	env, err := alice.Req("channel_create", map[string]any{
+		"name": "project", "public": false,
+	}, "c1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if env.OK == nil || !*env.OK {
+		t.Fatalf("channel_create failed: %s", string(env.D))
+	}
+
+	// Invite bob
+	env, err = alice.Req("channel_invite", map[string]any{
+		"channel": "project", "username": "bob",
+	}, "inv1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if env.OK == nil || !*env.OK {
+		t.Fatalf("channel_invite failed: %s", string(env.D))
+	}
+
+	// Bob can send to the channel
+	env, err = bob.Req("send_message", map[string]any{
+		"channel": "project", "body": "hello from bob",
+	}, "m1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if env.OK == nil || !*env.OK {
+		t.Errorf("bob send failed: %s", string(env.D))
+	}
+}
+
+func TestWSSendAndBroadcast(t *testing.T) {
+	addr, err := harness.FreePort()
+	if err != nil {
+		t.Fatal(err)
+	}
+	d, err := harness.StartDaemon(sharkfinBin, addr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Stop()
+
+	alice, err := harness.NewWSClient(addr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer alice.Close()
+	if err := alice.WSRegister("alice"); err != nil {
+		t.Fatal(err)
+	}
+
+	bob, err := harness.NewWSClient(addr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer bob.Close()
+	if err := bob.WSRegister("bob"); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create channel with both
+	alice.Req("channel_create", map[string]any{
+		"name": "general", "public": true,
+	}, "c1")
+	alice.Req("channel_invite", map[string]any{
+		"channel": "general", "username": "bob",
+	}, "inv1")
+
+	// Alice sends
+	env, err := alice.Req("send_message", map[string]any{
+		"channel": "general", "body": "hello everyone",
+	}, "m1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if env.OK == nil || !*env.OK {
+		t.Fatalf("send failed: %s", string(env.D))
+	}
+
+	// Bob receives broadcast
+	bcast, err := bob.Read()
+	if err != nil {
+		t.Fatalf("read broadcast: %v", err)
+	}
+	if bcast.Type != "message.new" {
+		t.Fatalf("type = %q, want message.new", bcast.Type)
+	}
+
+	var msg struct {
+		Channel string `json:"channel"`
+		From    string `json:"from"`
+		Body    string `json:"body"`
+		ID      int64  `json:"id"`
+	}
+	json.Unmarshal(bcast.D, &msg)
+	if msg.Channel != "general" {
+		t.Errorf("channel = %q, want general", msg.Channel)
+	}
+	if msg.From != "alice" {
+		t.Errorf("from = %q, want alice", msg.From)
+	}
+	if msg.Body != "hello everyone" {
+		t.Errorf("body = %q, want 'hello everyone'", msg.Body)
+	}
+	if msg.ID == 0 {
+		t.Error("expected non-zero message ID in broadcast")
+	}
+}
+
+func TestWSHistory(t *testing.T) {
+	addr, err := harness.FreePort()
+	if err != nil {
+		t.Fatal(err)
+	}
+	d, err := harness.StartDaemon(sharkfinBin, addr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Stop()
+
+	ws, err := harness.NewWSClient(addr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ws.Close()
+	if err := ws.WSRegister("alice"); err != nil {
+		t.Fatal(err)
+	}
+
+	ws.Req("channel_create", map[string]any{
+		"name": "general", "public": true,
+	}, "c1")
+
+	// Send 3 messages
+	for i := 0; i < 3; i++ {
+		ws.Req("send_message", map[string]any{
+			"channel": "general", "body": fmt.Sprintf("msg-%d", i),
+		}, fmt.Sprintf("m%d", i))
+	}
+
+	// Fetch history
+	env, err := ws.Req("history", map[string]any{
+		"channel": "general",
+	}, "h1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if env.OK == nil || !*env.OK {
+		t.Fatalf("history failed: %s", string(env.D))
+	}
+
+	var result struct {
+		Messages []struct {
+			Body string `json:"body"`
+		} `json:"messages"`
+	}
+	json.Unmarshal(env.D, &result)
+	if len(result.Messages) != 3 {
+		t.Fatalf("got %d messages, want 3", len(result.Messages))
+	}
+	if result.Messages[0].Body != "msg-0" {
+		t.Errorf("first message = %q, want msg-0", result.Messages[0].Body)
+	}
+	if result.Messages[2].Body != "msg-2" {
+		t.Errorf("last message = %q, want msg-2", result.Messages[2].Body)
+	}
+}
+
+func TestWSUnreadMessages(t *testing.T) {
+	addr, err := harness.FreePort()
+	if err != nil {
+		t.Fatal(err)
+	}
+	d, err := harness.StartDaemon(sharkfinBin, addr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Stop()
+
+	alice, err := harness.NewWSClient(addr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer alice.Close()
+	if err := alice.WSRegister("alice"); err != nil {
+		t.Fatal(err)
+	}
+
+	bob, err := harness.NewWSClient(addr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer bob.Close()
+	if err := bob.WSRegister("bob"); err != nil {
+		t.Fatal(err)
+	}
+
+	alice.Req("channel_create", map[string]any{
+		"name": "chat", "public": true,
+	}, "c1")
+	alice.Req("channel_invite", map[string]any{
+		"channel": "chat", "username": "bob",
+	}, "inv1")
+
+	alice.Req("send_message", map[string]any{
+		"channel": "chat", "body": "hey bob",
+	}, "m1")
+	// Drain bob's broadcast
+	bob.Read()
+
+	// Bob reads unread
+	env, err := bob.Req("unread_messages", map[string]any{}, "u1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if env.OK == nil || !*env.OK {
+		t.Fatalf("unread failed: %s", string(env.D))
+	}
+
+	var result struct {
+		Messages []struct {
+			Body    string `json:"body"`
+			Channel string `json:"channel"`
+		} `json:"messages"`
+	}
+	json.Unmarshal(env.D, &result)
+	if len(result.Messages) != 1 {
+		t.Fatalf("got %d messages, want 1", len(result.Messages))
+	}
+	if result.Messages[0].Body != "hey bob" {
+		t.Errorf("body = %q, want 'hey bob'", result.Messages[0].Body)
+	}
+
+	// Second call should return empty (consumed)
+	env, err = bob.Req("unread_messages", map[string]any{}, "u2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var result2 struct {
+		Messages []struct{} `json:"messages"`
+	}
+	json.Unmarshal(env.D, &result2)
+	if len(result2.Messages) != 0 {
+		t.Errorf("expected 0 messages on second read, got %d", len(result2.Messages))
+	}
+}
+
+func TestWSMentions(t *testing.T) {
+	addr, err := harness.FreePort()
+	if err != nil {
+		t.Fatal(err)
+	}
+	d, err := harness.StartDaemon(sharkfinBin, addr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Stop()
+
+	alice, err := harness.NewWSClient(addr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer alice.Close()
+	if err := alice.WSRegister("alice"); err != nil {
+		t.Fatal(err)
+	}
+
+	bob, err := harness.NewWSClient(addr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer bob.Close()
+	if err := bob.WSRegister("bob"); err != nil {
+		t.Fatal(err)
+	}
+
+	alice.Req("channel_create", map[string]any{
+		"name": "general", "public": true,
+	}, "c1")
+	alice.Req("channel_invite", map[string]any{
+		"channel": "general", "username": "bob",
+	}, "inv1")
+
+	// Send with mention
+	env, err := alice.Req("send_message", map[string]any{
+		"channel":  "general",
+		"body":     "hey @bob look at this",
+		"mentions": []string{"bob"},
+	}, "m1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if env.OK == nil || !*env.OK {
+		t.Fatalf("send failed: %s", string(env.D))
+	}
+
+	// Bob receives broadcast with mentions
+	bcast, err := bob.Read()
+	if err != nil {
+		t.Fatalf("read broadcast: %v", err)
+	}
+	var msg struct {
+		Mentions []string `json:"mentions"`
+	}
+	json.Unmarshal(bcast.D, &msg)
+	if len(msg.Mentions) != 1 || msg.Mentions[0] != "bob" {
+		t.Errorf("mentions = %v, want [bob]", msg.Mentions)
+	}
+
+	// Also send a non-mention message
+	alice.Req("send_message", map[string]any{
+		"channel": "general", "body": "just chatting",
+	}, "m2")
+	bob.Read() // drain broadcast
+
+	// Bob filters with mentions_only
+	env, err = bob.Req("unread_messages", map[string]any{
+		"mentions_only": true,
+	}, "u1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var result struct {
+		Messages []struct {
+			Body     string   `json:"body"`
+			Mentions []string `json:"mentions"`
+		} `json:"messages"`
+	}
+	json.Unmarshal(env.D, &result)
+	if len(result.Messages) != 1 {
+		t.Fatalf("got %d mention messages, want 1", len(result.Messages))
+	}
+	if result.Messages[0].Body != "hey @bob look at this" {
+		t.Errorf("body = %q", result.Messages[0].Body)
+	}
+}
+
+func TestWSMentionInvalidUser(t *testing.T) {
+	addr, err := harness.FreePort()
+	if err != nil {
+		t.Fatal(err)
+	}
+	d, err := harness.StartDaemon(sharkfinBin, addr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Stop()
+
+	ws, err := harness.NewWSClient(addr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ws.Close()
+	if err := ws.WSRegister("alice"); err != nil {
+		t.Fatal(err)
+	}
+
+	ws.Req("channel_create", map[string]any{
+		"name": "general", "public": true,
+	}, "c1")
+
+	env, err := ws.Req("send_message", map[string]any{
+		"channel":  "general",
+		"body":     "hey @ghost",
+		"mentions": []string{"ghost"},
+	}, "m1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if env.OK != nil && *env.OK {
+		t.Error("expected error for invalid mention")
+	}
+}
+
+func TestWSThreadReply(t *testing.T) {
+	addr, err := harness.FreePort()
+	if err != nil {
+		t.Fatal(err)
+	}
+	d, err := harness.StartDaemon(sharkfinBin, addr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Stop()
+
+	alice, err := harness.NewWSClient(addr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer alice.Close()
+	if err := alice.WSRegister("alice"); err != nil {
+		t.Fatal(err)
+	}
+
+	bob, err := harness.NewWSClient(addr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer bob.Close()
+	if err := bob.WSRegister("bob"); err != nil {
+		t.Fatal(err)
+	}
+
+	alice.Req("channel_create", map[string]any{
+		"name": "general", "public": true,
+	}, "c1")
+	alice.Req("channel_invite", map[string]any{
+		"channel": "general", "username": "bob",
+	}, "inv1")
+
+	// Send parent
+	parentEnv, err := alice.Req("send_message", map[string]any{
+		"channel": "general", "body": "parent message",
+	}, "m1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	bob.Read() // drain parent broadcast
+
+	var parentResult struct {
+		ID int64 `json:"id"`
+	}
+	json.Unmarshal(parentEnv.D, &parentResult)
+
+	// Reply in thread
+	env, err := alice.Req("send_message", map[string]any{
+		"channel":   "general",
+		"body":      "thread reply",
+		"thread_id": parentResult.ID,
+	}, "m2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if env.OK == nil || !*env.OK {
+		t.Fatalf("thread reply failed: %s", string(env.D))
+	}
+
+	// Bob receives broadcast with thread_id
+	bcast, err := bob.Read()
+	if err != nil {
+		t.Fatalf("read broadcast: %v", err)
+	}
+	var msg struct {
+		ThreadID int64 `json:"thread_id"`
+	}
+	json.Unmarshal(bcast.D, &msg)
+	if msg.ThreadID != parentResult.ID {
+		t.Errorf("thread_id = %d, want %d", msg.ThreadID, parentResult.ID)
+	}
+
+	// History filtered by thread_id returns only the reply
+	env, err = alice.Req("history", map[string]any{
+		"channel":   "general",
+		"thread_id": parentResult.ID,
+	}, "h1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var histResult struct {
+		Messages []struct {
+			Body string `json:"body"`
+		} `json:"messages"`
+	}
+	json.Unmarshal(env.D, &histResult)
+	if len(histResult.Messages) != 1 {
+		t.Fatalf("got %d thread messages, want 1", len(histResult.Messages))
+	}
+	if histResult.Messages[0].Body != "thread reply" {
+		t.Errorf("body = %q, want 'thread reply'", histResult.Messages[0].Body)
+	}
+}
+
+func TestWSNestedReplyRejected(t *testing.T) {
+	addr, err := harness.FreePort()
+	if err != nil {
+		t.Fatal(err)
+	}
+	d, err := harness.StartDaemon(sharkfinBin, addr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Stop()
+
+	ws, err := harness.NewWSClient(addr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ws.Close()
+	if err := ws.WSRegister("alice"); err != nil {
+		t.Fatal(err)
+	}
+
+	ws.Req("channel_create", map[string]any{
+		"name": "general", "public": true,
+	}, "c1")
+
+	// Send parent
+	parentEnv, _ := ws.Req("send_message", map[string]any{
+		"channel": "general", "body": "parent",
+	}, "m1")
+	var pr struct{ ID int64 `json:"id"` }
+	json.Unmarshal(parentEnv.D, &pr)
+
+	// Send reply
+	replyEnv, _ := ws.Req("send_message", map[string]any{
+		"channel": "general", "body": "reply", "thread_id": pr.ID,
+	}, "m2")
+	var rr struct{ ID int64 `json:"id"` }
+	json.Unmarshal(replyEnv.D, &rr)
+
+	// Nested reply should fail
+	env, err := ws.Req("send_message", map[string]any{
+		"channel": "general", "body": "nested", "thread_id": rr.ID,
+	}, "m3")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if env.OK != nil && *env.OK {
+		t.Error("expected error for nested reply")
+	}
+}
+
+func TestWSAndMCPInterop(t *testing.T) {
+	addr, err := harness.FreePort()
+	if err != nil {
+		t.Fatal(err)
+	}
+	d, err := harness.StartDaemon(sharkfinBin, addr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Stop()
+
+	// Alice on MCP
+	alice := harness.NewClient(addr)
+	if err := alice.RegisterFlow("alice"); err != nil {
+		t.Fatal(err)
+	}
+	defer alice.DisconnectPresence()
+
+	// Bob on WS
+	bob, err := harness.NewWSClient(addr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer bob.Close()
+	if err := bob.WSRegister("bob"); err != nil {
+		t.Fatal(err)
+	}
+
+	// Alice creates channel and invites bob via MCP
+	r, err := alice.ToolCall("channel_create", map[string]any{
+		"name": "cross", "public": false, "members": []string{"bob"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.Error != nil {
+		t.Fatalf("channel_create: %s", r.Error.Message)
+	}
+
+	// Alice sends via MCP
+	r, err = alice.ToolCall("send_message", map[string]any{
+		"channel": "cross", "message": "from mcp",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.Error != nil {
+		t.Fatalf("send_message: %s", r.Error.Message)
+	}
+
+	// Bob receives broadcast on WS
+	bcast, err := bob.Read()
+	if err != nil {
+		t.Fatalf("read broadcast: %v", err)
+	}
+	if bcast.Type != "message.new" {
+		t.Fatalf("type = %q, want message.new", bcast.Type)
+	}
+
+	var msg struct {
+		From string `json:"from"`
+		Body string `json:"body"`
+	}
+	json.Unmarshal(bcast.D, &msg)
+	if msg.From != "alice" {
+		t.Errorf("from = %q, want alice", msg.From)
+	}
+	if msg.Body != "from mcp" {
+		t.Errorf("body = %q, want 'from mcp'", msg.Body)
+	}
+}
