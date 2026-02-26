@@ -480,7 +480,7 @@ func TestToolsList(t *testing.T) {
 
 	expected := []string{
 		"get_identity_token", "register", "identify", "user_list", "channel_list",
-		"channel_create", "channel_invite", "send_message", "unread_messages",
+		"channel_create", "channel_invite", "send_message", "unread_messages", "history",
 	}
 	if len(listResult.Tools) != len(expected) {
 		names := make([]string, len(listResult.Tools))
@@ -1382,6 +1382,100 @@ func TestMultipleMessagesOrdering(t *testing.T) {
 		if m.Body != expected {
 			t.Errorf("message[%d].body = %q, want %q", i, m.Body, expected)
 		}
+	}
+}
+
+func TestMCPHistory(t *testing.T) {
+	addr, err := harness.FreePort()
+	if err != nil {
+		t.Fatal(err)
+	}
+	d, err := harness.StartDaemon(sharkfinBin, addr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Stop()
+
+	alice := harness.NewClient(addr)
+	if err := alice.RegisterFlow("alice"); err != nil {
+		t.Fatal(err)
+	}
+	defer alice.DisconnectPresence()
+
+	// Create channel
+	r, err := alice.ToolCall("channel_create", map[string]any{
+		"name": "general", "public": true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.Error != nil {
+		t.Fatalf("channel_create: %s", r.Error.Message)
+	}
+
+	// Send 3 messages
+	for i := 1; i <= 3; i++ {
+		r, err := alice.ToolCall("send_message", map[string]any{
+			"channel": "general",
+			"message": fmt.Sprintf("msg-%d", i),
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if r.Error != nil {
+			t.Fatalf("send_message: %s", r.Error.Message)
+		}
+	}
+
+	// Fetch history
+	r, err = alice.ToolCall("history", map[string]any{
+		"channel": "general",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.Error != nil {
+		t.Fatalf("history: %s", r.Error.Message)
+	}
+
+	var messages []struct {
+		ID   int64  `json:"id"`
+		From string `json:"from"`
+		Body string `json:"body"`
+	}
+	if err := json.Unmarshal([]byte(r.Text), &messages); err != nil {
+		t.Fatalf("unmarshal history: %v", err)
+	}
+	if len(messages) != 3 {
+		t.Fatalf("got %d messages, want 3", len(messages))
+	}
+	// Messages are in chronological order (oldest first)
+	if messages[0].Body != "msg-1" {
+		t.Errorf("first message = %q, want msg-1", messages[0].Body)
+	}
+	if messages[2].Body != "msg-3" {
+		t.Errorf("last message = %q, want msg-3", messages[2].Body)
+	}
+
+	// Test pagination with "before" — get messages before msg-3
+	r, err = alice.ToolCall("history", map[string]any{
+		"channel": "general",
+		"before":  messages[2].ID, // before newest
+		"limit":   2,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.Error != nil {
+		t.Fatalf("history before: %s", r.Error.Message)
+	}
+
+	var page []struct {
+		Body string `json:"body"`
+	}
+	json.Unmarshal([]byte(r.Text), &page)
+	if len(page) != 2 {
+		t.Fatalf("got %d messages, want 2", len(page))
 	}
 }
 

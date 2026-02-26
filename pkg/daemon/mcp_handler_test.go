@@ -155,6 +155,7 @@ func TestToolsList(t *testing.T) {
 		"get_identity_token": true, "register": true, "identify": true,
 		"user_list": true, "channel_list": true, "channel_create": true,
 		"channel_invite": true, "send_message": true, "unread_messages": true,
+		"history": true,
 	}
 	if len(result.Tools) != len(expected) {
 		t.Errorf("got %d tools, want %d", len(result.Tools), len(expected))
@@ -445,6 +446,84 @@ func TestUnreadMessages(t *testing.T) {
 	fmt.Printf("Unread messages: %s\n", result.Content[0].Text)
 }
 
+func TestHistory(t *testing.T) {
+	env := newTestEnv(t)
+	aliceSession := registerUser(t, env, "alice")
+
+	// Alice creates a channel
+	mcpCall(t, env.handler, aliceSession, "tools/call", 10, map[string]interface{}{
+		"name": "channel_create",
+		"arguments": map[string]interface{}{
+			"name":   "general",
+			"public": true,
+		},
+	})
+
+	// Alice sends 3 messages
+	for i := 1; i <= 3; i++ {
+		mcpCall(t, env.handler, aliceSession, "tools/call", 10+i, map[string]interface{}{
+			"name": "send_message",
+			"arguments": map[string]interface{}{
+				"channel": "general",
+				"message": fmt.Sprintf("msg-%d", i),
+			},
+		})
+	}
+
+	// Fetch history
+	_, rpcResp := mcpCall(t, env.handler, aliceSession, "tools/call", 20, map[string]interface{}{
+		"name": "history",
+		"arguments": map[string]interface{}{
+			"channel": "general",
+		},
+	})
+	if rpcResp.Error != nil {
+		t.Fatalf("history: %s", rpcResp.Error.Message)
+	}
+
+	var result struct {
+		Content []struct {
+			Text string `json:"text"`
+		} `json:"content"`
+	}
+	json.Unmarshal(rpcResp.Result, &result)
+	if len(result.Content) == 0 {
+		t.Fatal("expected content")
+	}
+
+	var messages []map[string]interface{}
+	json.Unmarshal([]byte(result.Content[0].Text), &messages)
+	if len(messages) != 3 {
+		t.Errorf("got %d messages, want 3", len(messages))
+	}
+}
+
+func TestHistoryNonParticipant(t *testing.T) {
+	env := newTestEnv(t)
+	aliceSession := registerUser(t, env, "alice")
+	bobSession := registerUser(t, env, "bob")
+
+	// Alice creates a private channel (bob not invited)
+	mcpCall(t, env.handler, aliceSession, "tools/call", 10, map[string]interface{}{
+		"name": "channel_create",
+		"arguments": map[string]interface{}{
+			"name":   "secret",
+			"public": false,
+		},
+	})
+
+	// Bob tries to read history
+	_, rpcResp := mcpCall(t, env.handler, bobSession, "tools/call", 11, map[string]interface{}{
+		"name": "history",
+		"arguments": map[string]interface{}{
+			"channel": "secret",
+		},
+	})
+	if rpcResp.Error == nil {
+		t.Error("expected error: bob is not a participant")
+	}
+}
+
 func TestUnidentifiedSessionCannotUseProtectedTools(t *testing.T) {
 	env := newTestEnv(t)
 
@@ -456,7 +535,7 @@ func TestUnidentifiedSessionCannotUseProtectedTools(t *testing.T) {
 	})
 	sessionID := httpResp.Header.Get("Mcp-Session-Id")
 
-	tools := []string{"user_list", "channel_list", "channel_create", "channel_invite", "send_message", "unread_messages"}
+	tools := []string{"user_list", "channel_list", "channel_create", "channel_invite", "send_message", "unread_messages", "history"}
 	for _, tool := range tools {
 		_, rpcResp := mcpCall(t, env.handler, sessionID, "tools/call", 10, map[string]interface{}{
 			"name":      tool,

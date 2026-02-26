@@ -180,6 +180,21 @@ func (h *MCPHandler) handleToolsList(w http.ResponseWriter, req *protocol.Reques
 					},
 				},
 			},
+			{
+				"name":        "history",
+				"description": "Get message history for a channel. Returns the most recent messages in chronological order.",
+				"inputSchema": map[string]interface{}{
+					"type": "object",
+					"properties": map[string]interface{}{
+						"channel":   map[string]string{"type": "string", "description": "Channel name"},
+						"before":    map[string]interface{}{"type": "integer", "description": "Return messages before this message ID (for pagination)"},
+						"after":     map[string]interface{}{"type": "integer", "description": "Return messages after this message ID"},
+						"limit":     map[string]interface{}{"type": "integer", "description": "Maximum number of messages to return (default 50, max 100)"},
+						"thread_id": map[string]interface{}{"type": "integer", "description": "If set, return only replies to this parent message ID"},
+					},
+					"required": []string{"channel"},
+				},
+			},
 		},
 	}
 
@@ -226,6 +241,8 @@ func (h *MCPHandler) handleToolsCall(w http.ResponseWriter, req *protocol.Reques
 		h.handleSendMessage(w, req, params.Arguments, session)
 	case "unread_messages":
 		h.handleUnreadMessages(w, req, params.Arguments, session)
+	case "history":
+		h.handleHistory(w, req, params.Arguments, session)
 	default:
 		writeJSONRPCError(w, req.ID, protocol.MethodNotFound, fmt.Sprintf("unknown tool: %s", params.Name))
 	}
@@ -550,6 +567,75 @@ func (h *MCPHandler) handleUnreadMessages(w http.ResponseWriter, req *protocol.R
 		}
 		list = append(list, msgInfo{
 			Channel:  chName,
+			From:     m.Username,
+			Body:     m.Body,
+			SentAt:   m.CreatedAt.Format("2006-01-02T15:04:05Z"),
+			ThreadID: m.ThreadID,
+			Mentions: m.Mentions,
+		})
+	}
+
+	data, _ := json.Marshal(list)
+	writeToolResult(w, req.ID, string(data))
+}
+
+func (h *MCPHandler) handleHistory(w http.ResponseWriter, req *protocol.Request, args json.RawMessage, session *MCPSession) {
+	var a struct {
+		Channel  string `json:"channel"`
+		Before   *int64 `json:"before"`
+		After    *int64 `json:"after"`
+		Limit    int    `json:"limit"`
+		ThreadID *int64 `json:"thread_id"`
+	}
+	if err := json.Unmarshal(args, &a); err != nil {
+		writeJSONRPCError(w, req.ID, protocol.InvalidParams, "invalid arguments")
+		return
+	}
+
+	user, err := h.db.GetUserByUsername(session.Username)
+	if err != nil {
+		writeJSONRPCError(w, req.ID, protocol.InternalError, err.Error())
+		return
+	}
+
+	ch, err := h.getChannelByName(a.Channel)
+	if err != nil {
+		writeJSONRPCError(w, req.ID, -32001, err.Error())
+		return
+	}
+
+	isMember, err := h.db.IsChannelMember(ch.ID, user.ID)
+	if err != nil {
+		writeJSONRPCError(w, req.ID, protocol.InternalError, err.Error())
+		return
+	}
+	if !isMember {
+		writeJSONRPCError(w, req.ID, -32001, "you are not a participant of this channel")
+		return
+	}
+
+	if a.Limit <= 0 {
+		a.Limit = 50
+	}
+
+	messages, err := h.db.GetMessages(ch.ID, a.Before, a.After, a.Limit, a.ThreadID)
+	if err != nil {
+		writeJSONRPCError(w, req.ID, protocol.InternalError, err.Error())
+		return
+	}
+
+	type msgInfo struct {
+		ID       int64    `json:"id"`
+		From     string   `json:"from"`
+		Body     string   `json:"body"`
+		SentAt   string   `json:"sent_at"`
+		ThreadID *int64   `json:"thread_id,omitempty"`
+		Mentions []string `json:"mentions,omitempty"`
+	}
+	var list []msgInfo
+	for _, m := range messages {
+		list = append(list, msgInfo{
+			ID:       m.ID,
 			From:     m.Username,
 			Body:     m.Body,
 			SentAt:   m.CreatedAt.Format("2006-01-02T15:04:05Z"),
