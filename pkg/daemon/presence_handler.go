@@ -18,14 +18,16 @@ var upgrader = websocket.Upgrader{
 // (or pong times out), the user is marked offline.
 type PresenceHandler struct {
 	sessions     *SessionManager
+	hub          *Hub
 	pongTimeout  time.Duration
 	pingInterval time.Duration
 }
 
 // NewPresenceHandler creates a new presence handler.
-func NewPresenceHandler(sessions *SessionManager, pongTimeout time.Duration) *PresenceHandler {
+func NewPresenceHandler(sessions *SessionManager, hub *Hub, pongTimeout time.Duration) *PresenceHandler {
 	return &PresenceHandler{
 		sessions:     sessions,
+		hub:          hub,
 		pongTimeout:  pongTimeout,
 		pingInterval: pongTimeout / 2,
 	}

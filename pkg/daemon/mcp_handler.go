@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"time"
 
 	"github.com/Work-Fort/sharkfin/pkg/db"
 	"github.com/Work-Fort/sharkfin/pkg/protocol"
@@ -15,11 +16,12 @@ import (
 type MCPHandler struct {
 	sessions *SessionManager
 	db       *db.DB
+	hub      *Hub
 }
 
 // NewMCPHandler creates a new MCP handler.
-func NewMCPHandler(sessions *SessionManager, database *db.DB) *MCPHandler {
-	return &MCPHandler{sessions: sessions, db: database}
+func NewMCPHandler(sessions *SessionManager, database *db.DB, hub *Hub) *MCPHandler {
+	return &MCPHandler{sessions: sessions, db: database, hub: hub}
 }
 
 func (h *MCPHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -333,7 +335,8 @@ func (h *MCPHandler) handleChannelList(w http.ResponseWriter, req *protocol.Requ
 }
 
 func (h *MCPHandler) handleChannelCreate(w http.ResponseWriter, req *protocol.Request, args json.RawMessage, session *MCPSession) {
-	if !h.sessions.AllowChannelCreation {
+	val, err := h.db.GetSetting("allow_channel_creation")
+	if err == nil && val == "false" {
 		writeJSONRPCError(w, req.ID, -32001, "channel creation is disabled")
 		return
 	}
@@ -463,6 +466,17 @@ func (h *MCPHandler) handleSendMessage(w http.ResponseWriter, req *protocol.Requ
 	}
 
 	writeToolResult(w, req.ID, fmt.Sprintf("message sent (id: %d)", msgID))
+
+	// Broadcast to WebSocket clients
+	msg := db.Message{
+		ID:        msgID,
+		ChannelID: ch.ID,
+		UserID:    sender.ID,
+		Body:      a.Message,
+		CreatedAt: time.Now(),
+		Username:  session.Username,
+	}
+	h.hub.BroadcastMessage(ch.ID, a.Channel, msg, h.db)
 }
 
 func (h *MCPHandler) handleUnreadMessages(w http.ResponseWriter, req *protocol.Request, args json.RawMessage, session *MCPSession) {

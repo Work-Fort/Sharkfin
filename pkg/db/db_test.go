@@ -2,6 +2,7 @@
 package db
 
 import (
+	"fmt"
 	"testing"
 )
 
@@ -271,6 +272,166 @@ func TestUnreadMessagesFilterByChannel(t *testing.T) {
 	}
 	if len(msgs) != 1 {
 		t.Fatalf("len = %d, want 1", len(msgs))
+	}
+}
+
+// --- Settings ---
+
+func TestSetAndGetSetting(t *testing.T) {
+	d := newTestDB(t)
+	if err := d.SetSetting("allow_channel_creation", "true"); err != nil {
+		t.Fatalf("set setting: %v", err)
+	}
+	val, err := d.GetSetting("allow_channel_creation")
+	if err != nil {
+		t.Fatalf("get setting: %v", err)
+	}
+	if val != "true" {
+		t.Errorf("value = %q, want true", val)
+	}
+}
+
+func TestSetSettingUpsert(t *testing.T) {
+	d := newTestDB(t)
+	d.SetSetting("key", "v1")
+	d.SetSetting("key", "v2")
+	val, _ := d.GetSetting("key")
+	if val != "v2" {
+		t.Errorf("value = %q, want v2", val)
+	}
+}
+
+func TestGetSettingNotFound(t *testing.T) {
+	d := newTestDB(t)
+	_, err := d.GetSetting("nonexistent")
+	if err == nil {
+		t.Error("expected error for missing setting")
+	}
+}
+
+func TestListSettings(t *testing.T) {
+	d := newTestDB(t)
+	d.SetSetting("a", "1")
+	d.SetSetting("b", "2")
+	settings, err := d.ListSettings()
+	if err != nil {
+		t.Fatalf("list settings: %v", err)
+	}
+	if len(settings) != 2 {
+		t.Fatalf("len = %d, want 2", len(settings))
+	}
+	if settings["a"] != "1" || settings["b"] != "2" {
+		t.Errorf("settings = %v, want {a:1, b:2}", settings)
+	}
+}
+
+// --- Message History ---
+
+func TestGetMessages(t *testing.T) {
+	d := newTestDB(t)
+	aliceID, _ := d.CreateUser("alice", "")
+	chID, _ := d.CreateChannel("general", true, []int64{aliceID})
+
+	for i := 0; i < 5; i++ {
+		d.SendMessage(chID, aliceID, fmt.Sprintf("msg%d", i))
+	}
+
+	// Get all (no cursor)
+	msgs, err := d.GetMessages(chID, nil, nil, 50)
+	if err != nil {
+		t.Fatalf("get messages: %v", err)
+	}
+	if len(msgs) != 5 {
+		t.Fatalf("len = %d, want 5", len(msgs))
+	}
+	// Should be oldest first
+	if msgs[0].Body != "msg0" || msgs[4].Body != "msg4" {
+		t.Errorf("order wrong: first=%q last=%q", msgs[0].Body, msgs[4].Body)
+	}
+}
+
+func TestGetMessagesBefore(t *testing.T) {
+	d := newTestDB(t)
+	aliceID, _ := d.CreateUser("alice", "")
+	chID, _ := d.CreateChannel("general", true, []int64{aliceID})
+
+	var ids []int64
+	for i := 0; i < 5; i++ {
+		id, _ := d.SendMessage(chID, aliceID, fmt.Sprintf("msg%d", i))
+		ids = append(ids, id)
+	}
+
+	// Get messages before msg3 (should return msg0, msg1, msg2)
+	msgs, err := d.GetMessages(chID, &ids[3], nil, 50)
+	if err != nil {
+		t.Fatalf("get messages: %v", err)
+	}
+	if len(msgs) != 3 {
+		t.Fatalf("len = %d, want 3", len(msgs))
+	}
+	if msgs[2].Body != "msg2" {
+		t.Errorf("last = %q, want msg2", msgs[2].Body)
+	}
+}
+
+func TestGetMessagesAfter(t *testing.T) {
+	d := newTestDB(t)
+	aliceID, _ := d.CreateUser("alice", "")
+	chID, _ := d.CreateChannel("general", true, []int64{aliceID})
+
+	var ids []int64
+	for i := 0; i < 5; i++ {
+		id, _ := d.SendMessage(chID, aliceID, fmt.Sprintf("msg%d", i))
+		ids = append(ids, id)
+	}
+
+	// Get messages after msg1 (should return msg2, msg3, msg4)
+	msgs, err := d.GetMessages(chID, nil, &ids[1], 50)
+	if err != nil {
+		t.Fatalf("get messages: %v", err)
+	}
+	if len(msgs) != 3 {
+		t.Fatalf("len = %d, want 3", len(msgs))
+	}
+	if msgs[0].Body != "msg2" {
+		t.Errorf("first = %q, want msg2", msgs[0].Body)
+	}
+}
+
+func TestGetMessagesLimit(t *testing.T) {
+	d := newTestDB(t)
+	aliceID, _ := d.CreateUser("alice", "")
+	chID, _ := d.CreateChannel("general", true, []int64{aliceID})
+
+	for i := 0; i < 10; i++ {
+		d.SendMessage(chID, aliceID, fmt.Sprintf("msg%d", i))
+	}
+
+	msgs, err := d.GetMessages(chID, nil, nil, 3)
+	if err != nil {
+		t.Fatalf("get messages: %v", err)
+	}
+	if len(msgs) != 3 {
+		t.Fatalf("len = %d, want 3", len(msgs))
+	}
+	// With no cursor, limit returns the most recent N messages (oldest first)
+	if msgs[0].Body != "msg7" {
+		t.Errorf("first = %q, want msg7", msgs[0].Body)
+	}
+}
+
+func TestGetMessagesIncludesUsername(t *testing.T) {
+	d := newTestDB(t)
+	aliceID, _ := d.CreateUser("alice", "")
+	chID, _ := d.CreateChannel("general", true, []int64{aliceID})
+	d.SendMessage(chID, aliceID, "hello")
+
+	msgs, _ := d.GetMessages(chID, nil, nil, 50)
+	if len(msgs) != 1 {
+		t.Fatalf("len = %d, want 1", len(msgs))
+	}
+	if msgs[0].Username != "alice" {
+		t.Errorf("username = %q, want alice", msgs[0].Username)
 	}
 }
 

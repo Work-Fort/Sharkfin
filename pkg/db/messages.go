@@ -17,6 +17,71 @@ type Message struct {
 	Username  string
 }
 
+// GetMessages returns messages for a channel with cursor-based pagination.
+// If before is set, returns messages with id < before (most recent first up to limit, returned in ASC order).
+// If after is set, returns messages with id > after in ASC order.
+// If neither is set, returns the most recent `limit` messages in ASC order.
+func (d *DB) GetMessages(channelID int64, before *int64, after *int64, limit int) ([]Message, error) {
+	if limit <= 0 || limit > 100 {
+		limit = 50
+	}
+
+	var query string
+	var args []interface{}
+
+	switch {
+	case before != nil:
+		// Fetch `limit` messages before the cursor, ordered newest-first, then reverse
+		query = `
+			SELECT * FROM (
+				SELECT m.id, m.channel_id, m.user_id, m.body, m.created_at, u.username
+				FROM messages m
+				JOIN users u ON m.user_id = u.id
+				WHERE m.channel_id = ? AND m.id < ?
+				ORDER BY m.id DESC
+				LIMIT ?
+			) sub ORDER BY sub.id ASC`
+		args = []interface{}{channelID, *before, limit}
+	case after != nil:
+		query = `
+			SELECT m.id, m.channel_id, m.user_id, m.body, m.created_at, u.username
+			FROM messages m
+			JOIN users u ON m.user_id = u.id
+			WHERE m.channel_id = ? AND m.id > ?
+			ORDER BY m.id ASC
+			LIMIT ?`
+		args = []interface{}{channelID, *after, limit}
+	default:
+		// No cursor: return most recent `limit` messages
+		query = `
+			SELECT * FROM (
+				SELECT m.id, m.channel_id, m.user_id, m.body, m.created_at, u.username
+				FROM messages m
+				JOIN users u ON m.user_id = u.id
+				WHERE m.channel_id = ?
+				ORDER BY m.id DESC
+				LIMIT ?
+			) sub ORDER BY sub.id ASC`
+		args = []interface{}{channelID, limit}
+	}
+
+	rows, err := d.db.Query(query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("get messages: %w", err)
+	}
+	defer rows.Close()
+
+	var messages []Message
+	for rows.Next() {
+		var m Message
+		if err := rows.Scan(&m.ID, &m.ChannelID, &m.UserID, &m.Body, &m.CreatedAt, &m.Username); err != nil {
+			return nil, fmt.Errorf("scan message: %w", err)
+		}
+		messages = append(messages, m)
+	}
+	return messages, rows.Err()
+}
+
 // SendMessage inserts a message into a channel.
 func (d *DB) SendMessage(channelID, userID int64, body string) (int64, error) {
 	res, err := d.db.Exec(

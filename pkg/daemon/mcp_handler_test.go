@@ -28,8 +28,9 @@ func newTestEnv(t *testing.T) *testEnv {
 	}
 	t.Cleanup(func() { d.Close() })
 
-	sm := NewSessionManager(d, true)
-	h := NewMCPHandler(sm, d)
+	sm := NewSessionManager(d)
+	hub := NewHub()
+	h := NewMCPHandler(sm, d, hub)
 	return &testEnv{handler: h, sm: sm, db: d}
 }
 
@@ -259,8 +260,10 @@ func TestChannelCreate(t *testing.T) {
 func TestChannelCreateDisabled(t *testing.T) {
 	d, _ := db.Open(":memory:")
 	defer d.Close()
-	sm := NewSessionManager(d, false)
-	h := NewMCPHandler(sm, d)
+	sm := NewSessionManager(d)
+	hub := NewHub()
+	h := NewMCPHandler(sm, d, hub)
+	d.SetSetting("allow_channel_creation", "false")
 	env := &testEnv{handler: h, sm: sm, db: d}
 
 	sessionID := registerUser(t, env, "alice")

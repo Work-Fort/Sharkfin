@@ -14,7 +14,7 @@ func newTestSessionManager(t *testing.T) *SessionManager {
 		t.Fatalf("open db: %v", err)
 	}
 	t.Cleanup(func() { d.Close() })
-	return NewSessionManager(d, true)
+	return NewSessionManager(d)
 }
 
 func TestCreateIdentityToken(t *testing.T) {

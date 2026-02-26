@@ -28,13 +28,25 @@ func NewServer(addr, dbPath string, allowChannelCreation bool, pongTimeout time.
 		return nil, fmt.Errorf("open database: %w", err)
 	}
 
-	sm := NewSessionManager(database, allowChannelCreation)
-	mcpHandler := NewMCPHandler(sm, database)
-	presenceHandler := NewPresenceHandler(sm, pongTimeout)
+	// Seed allow_channel_creation setting if not already set
+	if _, err := database.GetSetting("allow_channel_creation"); err != nil {
+		val := "true"
+		if !allowChannelCreation {
+			val = "false"
+		}
+		database.SetSetting("allow_channel_creation", val)
+	}
+
+	sm := NewSessionManager(database)
+	hub := NewHub()
+	mcpHandler := NewMCPHandler(sm, database, hub)
+	presenceHandler := NewPresenceHandler(sm, hub, pongTimeout)
+	wsHandler := NewWSHandler(sm, database, hub, pongTimeout)
 
 	mux := http.NewServeMux()
 	mux.Handle("POST /mcp", mcpHandler)
 	mux.Handle("GET /presence", presenceHandler)
+	mux.Handle("GET /ws", wsHandler)
 
 	return &Server{
 		addr:     addr,

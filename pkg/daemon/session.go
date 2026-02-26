@@ -17,8 +17,7 @@ type SessionManager struct {
 	tokens               map[string]*IdentityToken // token string → state
 	mcpSessions          map[string]*MCPSession    // MCP session ID → session
 	onlineUsers          map[string]string         // username → token
-	db                   *db.DB
-	AllowChannelCreation bool
+	db *db.DB
 }
 
 // IdentityToken tracks the lifecycle of an identity token.
@@ -40,13 +39,12 @@ type MCPSession struct {
 }
 
 // NewSessionManager creates a new session manager.
-func NewSessionManager(database *db.DB, allowChannelCreation bool) *SessionManager {
+func NewSessionManager(database *db.DB) *SessionManager {
 	return &SessionManager{
-		tokens:               make(map[string]*IdentityToken),
-		mcpSessions:          make(map[string]*MCPSession),
-		onlineUsers:          make(map[string]string),
-		db:                   database,
-		AllowChannelCreation: allowChannelCreation,
+		tokens:      make(map[string]*IdentityToken),
+		mcpSessions: make(map[string]*MCPSession),
+		onlineUsers: make(map[string]string),
+		db:          database,
 	}
 }
 
