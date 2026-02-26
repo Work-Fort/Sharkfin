@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"os"
 	"time"
 
 	"github.com/charmbracelet/log"
@@ -61,11 +62,12 @@ func NewServer(addr, dbPath string, allowChannelCreation bool, pongTimeout time.
 
 // Start begins listening for connections.
 func (s *Server) Start() error {
-	ln, err := net.Listen("tcp", s.addr)
+	// TODO: change back to "tcp" when Nexus supports IPv6
+	ln, err := net.Listen("tcp4", s.addr)
 	if err != nil {
 		return fmt.Errorf("listen: %w", err)
 	}
-	log.Infof("sharkfind listening on %s", s.addr)
+	fmt.Fprintf(os.Stderr, "sharkfind listening on %s\n", ln.Addr())
 	return s.httpServer.Serve(ln)
 }
 
