@@ -2,11 +2,18 @@
 package db
 
 import (
+	"context"
 	"database/sql"
+	"embed"
 	"fmt"
+	"io/fs"
 
+	"github.com/pressly/goose/v3"
 	_ "modernc.org/sqlite"
 )
+
+//go:embed migrations/*.sql
+var embedMigrations embed.FS
 
 // DB wraps an SQLite database connection.
 type DB struct {
@@ -30,12 +37,11 @@ func Open(path string) (*DB, error) {
 		return nil, fmt.Errorf("set journal mode: %w", err)
 	}
 
-	d := &DB{db: sqldb}
-	if err := d.migrate(); err != nil {
+	if err := runMigrations(sqldb); err != nil {
 		sqldb.Close()
 		return nil, fmt.Errorf("migrate: %w", err)
 	}
-	return d, nil
+	return &DB{db: sqldb}, nil
 }
 
 // Close closes the database connection.
@@ -43,44 +49,17 @@ func (d *DB) Close() error {
 	return d.db.Close()
 }
 
-func (d *DB) migrate() error {
-	schema := `
-	CREATE TABLE IF NOT EXISTS users (
-		id         INTEGER PRIMARY KEY AUTOINCREMENT,
-		username   TEXT UNIQUE NOT NULL,
-		password   TEXT DEFAULT '',
-		created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-	);
-
-	CREATE TABLE IF NOT EXISTS channels (
-		id         INTEGER PRIMARY KEY AUTOINCREMENT,
-		name       TEXT NOT NULL,
-		public     BOOLEAN DEFAULT 0,
-		created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-	);
-
-	CREATE TABLE IF NOT EXISTS channel_members (
-		channel_id INTEGER NOT NULL REFERENCES channels(id),
-		user_id    INTEGER NOT NULL REFERENCES users(id),
-		joined_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-		PRIMARY KEY (channel_id, user_id)
-	);
-
-	CREATE TABLE IF NOT EXISTS messages (
-		id         INTEGER PRIMARY KEY AUTOINCREMENT,
-		channel_id INTEGER NOT NULL REFERENCES channels(id),
-		user_id    INTEGER NOT NULL REFERENCES users(id),
-		body       TEXT NOT NULL,
-		created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-	);
-
-	CREATE TABLE IF NOT EXISTS read_cursors (
-		channel_id           INTEGER NOT NULL REFERENCES channels(id),
-		user_id              INTEGER NOT NULL REFERENCES users(id),
-		last_read_message_id INTEGER NOT NULL REFERENCES messages(id),
-		PRIMARY KEY (channel_id, user_id)
-	);
-	`
-	_, err := d.db.Exec(schema)
-	return err
+func runMigrations(db *sql.DB) error {
+	fsys, err := fs.Sub(embedMigrations, "migrations")
+	if err != nil {
+		return fmt.Errorf("migrations fs: %w", err)
+	}
+	provider, err := goose.NewProvider(goose.DialectSQLite3, db, fsys)
+	if err != nil {
+		return fmt.Errorf("goose provider: %w", err)
+	}
+	if _, err := provider.Up(context.Background()); err != nil {
+		return fmt.Errorf("goose up: %w", err)
+	}
+	return nil
 }
