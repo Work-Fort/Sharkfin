@@ -105,10 +105,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.target }}-${{ needs.tag.outputs.new_tag }}
-          path: |
-            sharkfin-${{ matrix.target }}.xz
-            sharkfin-${{ matrix.target }}.zip
-            sharkfin-${{ matrix.target }}.sha256
+          path: sharkfin-${{ matrix.target }}.*
           retention-days: 7
 
   release:
