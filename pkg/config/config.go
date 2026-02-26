@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/spf13/pflag"
 	"github.com/spf13/viper"
@@ -82,6 +83,7 @@ func InitViper() {
 	viper.AddConfigPath(GlobalPaths.ConfigDir)
 
 	viper.SetEnvPrefix(EnvPrefix)
+	viper.SetEnvKeyReplacer(strings.NewReplacer("-", "_"))
 	viper.AutomaticEnv()
 }
 
@@ -97,7 +99,12 @@ func LoadConfig() error {
 }
 
 // BindFlags binds cobra flags to viper.
-func BindFlags(flags *pflag.FlagSet) {
-	_ = viper.BindPFlag("daemon", flags.Lookup("daemon"))
-	_ = viper.BindPFlag("log-level", flags.Lookup("log-level"))
+func BindFlags(flags *pflag.FlagSet) error {
+	flagsToBind := []string{"daemon", "log-level"}
+	for _, name := range flagsToBind {
+		if err := viper.BindPFlag(name, flags.Lookup(name)); err != nil {
+			return fmt.Errorf("bind flag %s: %w", name, err)
+		}
+	}
+	return nil
 }

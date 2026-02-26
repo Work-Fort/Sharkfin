@@ -24,6 +24,7 @@ func NewMCPBridgeCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "mcp-bridge",
 		Short: "MCP stdio to HTTP bridge",
+		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			addr := viper.GetString("daemon")
 

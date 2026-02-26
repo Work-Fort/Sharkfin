@@ -9,6 +9,7 @@ import (
 
 	"github.com/charmbracelet/log"
 	"github.com/spf13/cobra"
+	"github.com/spf13/viper"
 
 	"github.com/Work-Fort/sharkfin/cmd/daemon"
 	"github.com/Work-Fort/sharkfin/cmd/mcpbridge"
@@ -16,12 +17,8 @@ import (
 	"github.com/Work-Fort/sharkfin/pkg/config"
 )
 
-var (
-	// Version is set at build time via ldflags
-	Version    string
-	daemonAddr string
-	logLevel   string
-)
+// Version is set at build time via ldflags.
+var Version string
 
 var rootCmd = &cobra.Command{
 	Use:   "sharkfin",
@@ -34,13 +31,14 @@ var rootCmd = &cobra.Command{
 			return err
 		}
 
-		if logLevel == "disabled" {
+		ll := viper.GetString("log-level")
+		if ll == "disabled" {
 			log.SetOutput(io.Discard)
 			return nil
 		}
 
 		var level log.Level
-		switch logLevel {
+		switch ll {
 		case "debug":
 			level = log.DebugLevel
 		case "info":
@@ -79,18 +77,16 @@ func Execute() {
 	}
 }
 
-// GetDaemonAddr returns the configured daemon address.
-func GetDaemonAddr() string {
-	return daemonAddr
-}
-
 func init() {
 	config.InitViper()
 
-	rootCmd.PersistentFlags().StringVar(&daemonAddr, "daemon", "127.0.0.1:16000", "Daemon address")
-	rootCmd.PersistentFlags().StringVarP(&logLevel, "log-level", "l", "debug", "Log level: disabled, debug, info, warn, error")
+	rootCmd.PersistentFlags().String("daemon", config.DefaultDaemonAddr, "Daemon address")
+	rootCmd.PersistentFlags().StringP("log-level", "l", "debug", "Log level: disabled, debug, info, warn, error")
 
-	config.BindFlags(rootCmd.PersistentFlags())
+	if err := config.BindFlags(rootCmd.PersistentFlags()); err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %s\n", err)
+		os.Exit(1)
+	}
 
 	rootCmd.AddCommand(daemon.NewDaemonCmd())
 	rootCmd.AddCommand(mcpbridge.NewMCPBridgeCmd())

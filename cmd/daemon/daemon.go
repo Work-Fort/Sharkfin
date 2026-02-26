@@ -25,6 +25,7 @@ func NewDaemonCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "daemon",
 		Short: "Start the sharkfind daemon",
+		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			addr := viper.GetString("daemon")
 			dbPath := filepath.Join(config.GlobalPaths.StateDir, "sharkfin.db")
