@@ -625,6 +625,7 @@ func (h *MCPHandler) handleHistory(w http.ResponseWriter, req *protocol.Request,
 	}
 
 	type msgInfo struct {
+		Channel  string   `json:"channel"`
 		ID       int64    `json:"id"`
 		From     string   `json:"from"`
 		Body     string   `json:"body"`
@@ -635,6 +636,7 @@ func (h *MCPHandler) handleHistory(w http.ResponseWriter, req *protocol.Request,
 	var list []msgInfo
 	for _, m := range messages {
 		list = append(list, msgInfo{
+			Channel:  a.Channel,
 			ID:       m.ID,
 			From:     m.Username,
 			Body:     m.Body,

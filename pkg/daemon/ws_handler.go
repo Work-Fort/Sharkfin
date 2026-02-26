@@ -443,7 +443,7 @@ func (h *WSHandler) handleWSHistory(sendCh chan<- []byte, ref string, rawD json.
 			Mentions: m.Mentions,
 		})
 	}
-	sendReply(sendCh, ref, true, map[string]interface{}{"messages": list})
+	sendReply(sendCh, ref, true, map[string]interface{}{"channel": d.Channel, "messages": list})
 }
 
 func (h *WSHandler) handleWSUnreadMessages(sendCh chan<- []byte, ref string, rawD json.RawMessage, userID int64) {

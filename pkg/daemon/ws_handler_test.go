@@ -393,6 +393,7 @@ func TestWSHistory(t *testing.T) {
 	}
 	d, _ := json.Marshal(resp.D)
 	var result struct {
+		Channel  string `json:"channel"`
 		Messages []struct {
 			ID   int64  `json:"id"`
 			From string `json:"from"`
@@ -400,6 +401,9 @@ func TestWSHistory(t *testing.T) {
 		} `json:"messages"`
 	}
 	json.Unmarshal(d, &result)
+	if result.Channel != "general" {
+		t.Errorf("channel = %q, want general", result.Channel)
+	}
 	if len(result.Messages) != 3 {
 		t.Errorf("got %d messages, want 3", len(result.Messages))
 	}
