@@ -3,8 +3,7 @@ name: Release
 
 on:
   push:
-    tags:
-      - 'v*.*.*'
+    branches: [master]
 
 permissions:
   contents: write
@@ -19,29 +18,65 @@ jobs:
       - uses: jdx/mise-action@v3
       - run: mise run ci
 
-  build:
-    needs: test
+  tag:
+    name: Create Version Tag
     runs-on: ubuntu-latest
+    needs: test
+    outputs:
+      new_tag: ${{ steps.tag_version.outputs.new_tag }}
+      changelog: ${{ steps.tag_version.outputs.changelog }}
+      should_release: ${{ steps.check_tag.outputs.should_release }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Bump version and create tag
+        id: tag_version
+        uses: mathieudutour/github-tag-action@v6.2
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          default_bump: patch
+          release_branches: master
+          tag_prefix: v
+
+      - name: Check if new tag was created
+        id: check_tag
+        run: |
+          if [ -n "${{ steps.tag_version.outputs.new_tag }}" ]; then
+            echo "should_release=true" >> $GITHUB_OUTPUT
+          else
+            echo "should_release=false" >> $GITHUB_OUTPUT
+          fi
+
+  build:
+    name: Build (${{ matrix.target }})
+    runs-on: ubuntu-latest
+    needs: tag
+    if: needs.tag.outputs.should_release == 'true'
     strategy:
       matrix:
         include:
-          - goos: linux
+          - target: linux-amd64
+            goos: linux
             goarch: amd64
-            ext: tar.gz
-          - goos: linux
+          - target: linux-arm64
+            goos: linux
             goarch: arm64
-            ext: tar.gz
-          - goos: darwin
+          - target: darwin-amd64
+            goos: darwin
             goarch: amd64
-            ext: tar.gz
-          - goos: darwin
+          - target: darwin-arm64
+            goos: darwin
             goarch: arm64
-            ext: tar.gz
-          - goos: windows
+          - target: windows-amd64
+            goos: windows
             goarch: amd64
-            ext: zip
+      fail-fast: false
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.tag.outputs.new_tag }}
       - uses: jdx/mise-action@v3
 
       - name: Build binary
@@ -50,102 +85,157 @@ jobs:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
         run: |
-          VERSION="${GITHUB_REF_NAME}"
+          VERSION="${{ needs.tag.outputs.new_tag }}"
           SUFFIX=""
           if [ "${{ matrix.goos }}" = "windows" ]; then SUFFIX=".exe"; fi
           go build -ldflags "-X github.com/Work-Fort/sharkfin/cmd.Version=${VERSION}" \
-            -o "sharkfin${SUFFIX}"
+            -o "sharkfin-${{ matrix.target }}${SUFFIX}"
 
-      - name: Package archive
+      - name: Compress and generate checksum
         run: |
-          VERSION="${GITHUB_REF_NAME}"
-          ARCHIVE="sharkfin-${VERSION}-${{ matrix.goos }}-${{ matrix.goarch }}"
-          mkdir -p "${ARCHIVE}"
-
-          SUFFIX=""
-          if [ "${{ matrix.goos }}" = "windows" ]; then SUFFIX=".exe"; fi
-          cp "sharkfin${SUFFIX}" "${ARCHIVE}/"
-
-          if [ "${{ matrix.goos }}" = "linux" ]; then
-            cp dist/sharkfin.user.service "${ARCHIVE}/"
-          fi
-
-          if [ "${{ matrix.ext }}" = "tar.gz" ]; then
-            tar czf "${ARCHIVE}.tar.gz" "${ARCHIVE}/"
+          TARGET="${{ matrix.target }}"
+          if [ "${{ matrix.goos }}" = "windows" ]; then
+            zip "sharkfin-${TARGET}.zip" "sharkfin-${TARGET}.exe"
+            sha256sum "sharkfin-${TARGET}.zip" > "sharkfin-${TARGET}.sha256"
           else
-            zip -r "${ARCHIVE}.zip" "${ARCHIVE}/"
+            xz -z -9 "sharkfin-${TARGET}"
+            sha256sum "sharkfin-${TARGET}.xz" > "sharkfin-${TARGET}.sha256"
           fi
 
       - uses: actions/upload-artifact@v4
         with:
-          name: archive-${{ matrix.goos }}-${{ matrix.goarch }}
-          path: sharkfin-*-${{ matrix.goos }}-${{ matrix.goarch }}.${{ matrix.ext }}
-          retention-days: 1
+          name: ${{ matrix.target }}-${{ needs.tag.outputs.new_tag }}
+          path: |
+            sharkfin-${{ matrix.target }}.xz
+            sharkfin-${{ matrix.target }}.zip
+            sharkfin-${{ matrix.target }}.sha256
+          retention-days: 7
 
   release:
-    needs: build
+    name: Create GitHub Release
     runs-on: ubuntu-latest
+    needs: [tag, build]
+    if: needs.tag.outputs.should_release == 'true'
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0
+          ref: ${{ needs.tag.outputs.new_tag }}
 
       - uses: actions/download-artifact@v4
         with:
-          pattern: archive-*
-          merge-multiple: true
           path: artifacts
+          pattern: '*-${{ needs.tag.outputs.new_tag }}'
+          merge-multiple: true
 
-      - name: Generate changelog
-        id: changelog
-        uses: requarks/changelog-action@v1
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          tag: ${{ github.ref_name }}
-          excludeTypes: ci,docs,style,chore
-          writeToFile: 'false'
-          useGitmojis: 'false'
-
-      - name: Generate checksums
+      - name: Create SHA256SUMS
         working-directory: artifacts
-        run: sha256sum sharkfin-* > SHA256SUMS
+        run: |
+          cat *.sha256 > SHA256SUMS
+          rm *.sha256
 
-      - name: Create GitHub release
+      - name: Create release notes
+        env:
+          TAG: ${{ needs.tag.outputs.new_tag }}
+          CHANGELOG: ${{ needs.tag.outputs.changelog }}
+          REPO: ${{ github.repository }}
+        run: |
+          VERSION=$(echo "$TAG" | sed 's/^v//')
+          cat > release-notes.md << EOF
+          # Sharkfin v${VERSION}
+
+          ## What's Changed
+
+          ${CHANGELOG}
+
+          ## Installation
+
+          ### Linux (x86_64)
+          \`\`\`bash
+          wget https://github.com/${REPO}/releases/download/${TAG}/sharkfin-linux-amd64.xz
+          xz -d sharkfin-linux-amd64.xz
+          chmod +x sharkfin-linux-amd64
+          sudo mv sharkfin-linux-amd64 /usr/local/bin/sharkfin
+          \`\`\`
+
+          ### Linux (ARM64)
+          \`\`\`bash
+          wget https://github.com/${REPO}/releases/download/${TAG}/sharkfin-linux-arm64.xz
+          xz -d sharkfin-linux-arm64.xz
+          chmod +x sharkfin-linux-arm64
+          sudo mv sharkfin-linux-arm64 /usr/local/bin/sharkfin
+          \`\`\`
+
+          ### macOS (Apple Silicon)
+          \`\`\`bash
+          wget https://github.com/${REPO}/releases/download/${TAG}/sharkfin-darwin-arm64.xz
+          xz -d sharkfin-darwin-arm64.xz
+          chmod +x sharkfin-darwin-arm64
+          sudo mv sharkfin-darwin-arm64 /usr/local/bin/sharkfin
+          \`\`\`
+
+          ### macOS (Intel)
+          \`\`\`bash
+          wget https://github.com/${REPO}/releases/download/${TAG}/sharkfin-darwin-amd64.xz
+          xz -d sharkfin-darwin-amd64.xz
+          chmod +x sharkfin-darwin-amd64
+          sudo mv sharkfin-darwin-amd64 /usr/local/bin/sharkfin
+          \`\`\`
+
+          ### Windows (x86_64)
+          Download \`sharkfin-windows-amd64.zip\` and extract.
+
+          ### Arch Linux (AUR)
+          \`\`\`bash
+          yay -S sharkfin
+          \`\`\`
+
+          ## Verification
+
+          \`\`\`bash
+          wget https://github.com/${REPO}/releases/download/${TAG}/SHA256SUMS
+          sha256sum -c SHA256SUMS --ignore-missing
+          \`\`\`
+
+          ---
+
+          Built automatically by [Sharkfin CI](https://github.com/${REPO})
+          EOF
+
+      - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.ref_name }}
-          name: ${{ github.ref_name }}
-          body: ${{ steps.changelog.outputs.changes }}
+          tag_name: ${{ needs.tag.outputs.new_tag }}
+          name: Release ${{ needs.tag.outputs.new_tag }}
+          body_path: release-notes.md
+          draft: false
+          prerelease: false
           files: artifacts/*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   aur:
-    needs: release
+    name: Publish to AUR
     runs-on: ubuntu-latest
+    needs: [tag, release]
+    if: needs.tag.outputs.should_release == 'true'
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/download-artifact@v4
-        with:
-          pattern: archive-linux-*
-          merge-multiple: true
-          path: artifacts
-
       - name: Update PKGBUILD
+        env:
+          TAG: ${{ needs.tag.outputs.new_tag }}
+          REPO: ${{ github.repository }}
         run: |
-          VERSION="${GITHUB_REF_NAME#v}"
-          AMD64_SUM=$(sha256sum artifacts/sharkfin-*-linux-amd64.tar.gz | cut -d' ' -f1)
-          ARM64_SUM=$(sha256sum artifacts/sharkfin-*-linux-arm64.tar.gz | cut -d' ' -f1)
+          VERSION=$(echo "$TAG" | sed 's/^v//')
+          wget -q "https://github.com/${REPO}/archive/refs/tags/${TAG}.tar.gz" -O source.tar.gz
+          SRC_SUM=$(sha256sum source.tar.gz | cut -d' ' -f1)
 
           cd aur
           sed -i "s/pkgver=.*/pkgver=${VERSION}/" PKGBUILD
-          sed -i "s/sha256sums_x86_64=.*/sha256sums_x86_64=('${AMD64_SUM}')/" PKGBUILD
-          sed -i "s/sha256sums_aarch64=.*/sha256sums_aarch64=('${ARM64_SUM}')/" PKGBUILD
+          sed -i "s/sha256sums=.*/sha256sums=('${SRC_SUM}')/" PKGBUILD
 
       - name: Generate .SRCINFO
         run: |
-          cp dist/sharkfin.system.service aur/sharkfin.service
           docker run --rm -v "$PWD/aur:/pkg" archlinux:latest bash -c '
             pacman -Sy --noconfirm base-devel >/dev/null 2>&1
             useradd -m builder
@@ -156,6 +246,7 @@ jobs:
       - name: Push to AUR
         env:
           AUR_SSH_PRIVATE_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+          TAG: ${{ needs.tag.outputs.new_tag }}
         run: |
           mkdir -p ~/.ssh
           echo "${AUR_SSH_PRIVATE_KEY}" > ~/.ssh/aur_key
@@ -164,15 +255,15 @@ jobs:
 
           export GIT_SSH_COMMAND="ssh -i ~/.ssh/aur_key"
 
-          git clone ssh://aur@aur.archlinux.org/sharkfin-bin.git aur-repo
+          git clone ssh://aur@aur.archlinux.org/sharkfin.git aur-repo
           cp aur/PKGBUILD aur/.SRCINFO aur-repo/
-          cp dist/sharkfin.system.service aur-repo/sharkfin.service
 
           cd aur-repo
           git config user.name "Kaz Walker"
           git config user.email "me@kazatron.com"
-          git add PKGBUILD .SRCINFO sharkfin.service
+          git add PKGBUILD .SRCINFO
           if ! git diff --cached --quiet; then
-            git commit -m "Update to v${GITHUB_REF_NAME#v}"
+            VERSION=$(echo "$TAG" | sed 's/^v//')
+            git commit -m "Update to v${VERSION}"
             git push
           fi
