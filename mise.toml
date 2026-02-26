@@ -7,7 +7,7 @@ BUILD_DIR = "build"
 
 [tasks.build]
 description = "Build sharkfin"
-sources = ["**/*.go", "go.mod", "go.sum"]
+sources = ["**/*.go", "**/*.sql", "go.mod", "go.sum"]
 outputs = ["{{env.BUILD_DIR}}/{{env.BINARY_NAME}}"]
 run = """
 mkdir -p $BUILD_DIR

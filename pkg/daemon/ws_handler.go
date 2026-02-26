@@ -232,7 +232,7 @@ func (h *WSHandler) handleWSUserList(sendCh chan<- []byte, ref string) {
 }
 
 func (h *WSHandler) handleWSChannelList(sendCh chan<- []byte, ref string, userID int64) {
-	channels, err := h.db.ListChannelsForUser(userID)
+	channels, err := h.db.ListAllChannelsWithMembership(userID)
 	if err != nil {
 		sendError(sendCh, ref, err.Error())
 		return
@@ -240,10 +240,11 @@ func (h *WSHandler) handleWSChannelList(sendCh chan<- []byte, ref string, userID
 	type channelInfo struct {
 		Name   string `json:"name"`
 		Public bool   `json:"public"`
+		Member bool   `json:"member"`
 	}
 	var list []channelInfo
 	for _, ch := range channels {
-		list = append(list, channelInfo{Name: ch.Name, Public: ch.Public})
+		list = append(list, channelInfo{Name: ch.Name, Public: ch.Public, Member: ch.Member})
 	}
 	sendReply(sendCh, ref, true, map[string]interface{}{"channels": list})
 }

@@ -45,11 +45,19 @@ func (d *DB) CreateChannel(name string, public bool, memberIDs []int64) (int64, 
 	return chID, nil
 }
 
+// ChannelWithMembership extends Channel with membership status.
+type ChannelWithMembership struct {
+	Channel
+	Member bool
+}
+
 // ListChannelsForUser returns channels visible to a user:
 // all public channels plus private channels where the user is a member.
-func (d *DB) ListChannelsForUser(userID int64) ([]Channel, error) {
+// Each result includes whether the user is a member.
+func (d *DB) ListChannelsForUser(userID int64) ([]ChannelWithMembership, error) {
 	rows, err := d.db.Query(`
-		SELECT DISTINCT c.id, c.name, c.public, c.created_at
+		SELECT DISTINCT c.id, c.name, c.public, c.created_at,
+			CASE WHEN cm.user_id IS NOT NULL THEN 1 ELSE 0 END AS member
 		FROM channels c
 		LEFT JOIN channel_members cm ON c.id = cm.channel_id AND cm.user_id = ?
 		WHERE c.public = 1 OR cm.user_id IS NOT NULL
@@ -60,10 +68,35 @@ func (d *DB) ListChannelsForUser(userID int64) ([]Channel, error) {
 	}
 	defer rows.Close()
 
-	var channels []Channel
+	var channels []ChannelWithMembership
 	for rows.Next() {
-		var ch Channel
-		if err := rows.Scan(&ch.ID, &ch.Name, &ch.Public, &ch.CreatedAt); err != nil {
+		var ch ChannelWithMembership
+		if err := rows.Scan(&ch.ID, &ch.Name, &ch.Public, &ch.CreatedAt, &ch.Member); err != nil {
+			return nil, fmt.Errorf("scan channel: %w", err)
+		}
+		channels = append(channels, ch)
+	}
+	return channels, rows.Err()
+}
+
+// ListAllChannelsWithMembership returns all channels with membership status for the given user.
+func (d *DB) ListAllChannelsWithMembership(userID int64) ([]ChannelWithMembership, error) {
+	rows, err := d.db.Query(`
+		SELECT c.id, c.name, c.public, c.created_at,
+			CASE WHEN cm.user_id IS NOT NULL THEN 1 ELSE 0 END AS member
+		FROM channels c
+		LEFT JOIN channel_members cm ON c.id = cm.channel_id AND cm.user_id = ?
+		ORDER BY c.name
+	`, userID)
+	if err != nil {
+		return nil, fmt.Errorf("list all channels: %w", err)
+	}
+	defer rows.Close()
+
+	var channels []ChannelWithMembership
+	for rows.Next() {
+		var ch ChannelWithMembership
+		if err := rows.Scan(&ch.ID, &ch.Name, &ch.Public, &ch.CreatedAt, &ch.Member); err != nil {
 			return nil, fmt.Errorf("scan channel: %w", err)
 		}
 		channels = append(channels, ch)

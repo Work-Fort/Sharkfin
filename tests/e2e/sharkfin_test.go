@@ -787,7 +787,7 @@ func TestPublicChannelVisibleToAll(t *testing.T) {
 		t.Fatalf("channel_create error: %s", r.Error.Message)
 	}
 
-	// Bob (non-member) should see the public channel
+	// Bob (non-member) should see the public channel via MCP
 	r, err = bob.ToolCall("channel_list", map[string]any{})
 	if err != nil {
 		t.Fatal(err)
