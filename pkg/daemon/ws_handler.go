@@ -197,6 +197,8 @@ func (h *WSHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			h.handleWSSendMessage(sendCh, req.Ref, req.D, username, userID)
 		case "history":
 			h.handleWSHistory(sendCh, req.Ref, req.D, userID)
+		case "unread_messages":
+			h.handleWSUnreadMessages(sendCh, req.Ref, req.D, userID)
 		case "set_setting":
 			h.handleWSSetSetting(sendCh, req.Ref, req.D)
 		case "get_settings":
@@ -325,8 +327,10 @@ func (h *WSHandler) handleWSChannelInvite(sendCh chan<- []byte, ref string, rawD
 
 func (h *WSHandler) handleWSSendMessage(sendCh chan<- []byte, ref string, rawD json.RawMessage, username string, userID int64) {
 	var d struct {
-		Channel string `json:"channel"`
-		Body    string `json:"body"`
+		Channel  string   `json:"channel"`
+		Body     string   `json:"body"`
+		Mentions []string `json:"mentions"`
+		ThreadID *int64   `json:"thread_id"`
 	}
 	if err := json.Unmarshal(rawD, &d); err != nil {
 		sendError(sendCh, ref, "invalid arguments")
@@ -349,7 +353,19 @@ func (h *WSHandler) handleWSSendMessage(sendCh chan<- []byte, ref string, rawD j
 		return
 	}
 
-	msgID, err := h.db.SendMessage(ch.ID, userID, d.Body)
+	var mentionUserIDs []int64
+	var mentionUsernames []string
+	for _, uname := range d.Mentions {
+		u, err := h.db.GetUserByUsername(uname)
+		if err != nil {
+			sendError(sendCh, ref, fmt.Sprintf("mentioned user not found: %s", uname))
+			return
+		}
+		mentionUserIDs = append(mentionUserIDs, u.ID)
+		mentionUsernames = append(mentionUsernames, u.Username)
+	}
+
+	msgID, err := h.db.SendMessage(ch.ID, userID, d.Body, d.ThreadID, mentionUserIDs)
 	if err != nil {
 		sendError(sendCh, ref, err.Error())
 		return
@@ -366,15 +382,16 @@ func (h *WSHandler) handleWSSendMessage(sendCh chan<- []byte, ref string, rawD j
 		CreatedAt: time.Now(),
 		Username:  username,
 	}
-	h.hub.BroadcastMessage(ch.ID, ch.Name, msg, h.db)
+	h.hub.BroadcastMessage(ch.ID, ch.Name, msg, mentionUsernames, d.ThreadID, h.db)
 }
 
 func (h *WSHandler) handleWSHistory(sendCh chan<- []byte, ref string, rawD json.RawMessage, userID int64) {
 	var d struct {
-		Channel string `json:"channel"`
-		Before  *int64 `json:"before"`
-		After   *int64 `json:"after"`
-		Limit   int    `json:"limit"`
+		Channel  string `json:"channel"`
+		Before   *int64 `json:"before"`
+		After    *int64 `json:"after"`
+		Limit    int    `json:"limit"`
+		ThreadID *int64 `json:"thread_id"`
 	}
 	if err := json.Unmarshal(rawD, &d); err != nil {
 		sendError(sendCh, ref, "invalid arguments")
@@ -401,25 +418,85 @@ func (h *WSHandler) handleWSHistory(sendCh chan<- []byte, ref string, rawD json.
 		d.Limit = 50
 	}
 
-	messages, err := h.db.GetMessages(ch.ID, d.Before, d.After, d.Limit)
+	messages, err := h.db.GetMessages(ch.ID, d.Before, d.After, d.Limit, d.ThreadID)
 	if err != nil {
 		sendError(sendCh, ref, err.Error())
 		return
 	}
 
 	type msgInfo struct {
-		ID     int64  `json:"id"`
-		From   string `json:"from"`
-		Body   string `json:"body"`
-		SentAt string `json:"sent_at"`
+		ID       int64    `json:"id"`
+		From     string   `json:"from"`
+		Body     string   `json:"body"`
+		SentAt   string   `json:"sent_at"`
+		ThreadID *int64   `json:"thread_id,omitempty"`
+		Mentions []string `json:"mentions,omitempty"`
 	}
 	var list []msgInfo
 	for _, m := range messages {
 		list = append(list, msgInfo{
-			ID:     m.ID,
-			From:   m.Username,
-			Body:   m.Body,
-			SentAt: m.CreatedAt.Format("2006-01-02T15:04:05Z"),
+			ID:       m.ID,
+			From:     m.Username,
+			Body:     m.Body,
+			SentAt:   m.CreatedAt.Format("2006-01-02T15:04:05Z"),
+			ThreadID: m.ThreadID,
+			Mentions: m.Mentions,
+		})
+	}
+	sendReply(sendCh, ref, true, map[string]interface{}{"messages": list})
+}
+
+func (h *WSHandler) handleWSUnreadMessages(sendCh chan<- []byte, ref string, rawD json.RawMessage, userID int64) {
+	var d struct {
+		Channel      string `json:"channel"`
+		MentionsOnly bool   `json:"mentions_only"`
+		ThreadID     *int64 `json:"thread_id"`
+	}
+	if rawD != nil {
+		json.Unmarshal(rawD, &d)
+	}
+
+	var channelID *int64
+	if d.Channel != "" {
+		ch, err := h.db.GetChannelByName(d.Channel)
+		if err != nil {
+			sendError(sendCh, ref, err.Error())
+			return
+		}
+		channelID = &ch.ID
+	}
+
+	messages, err := h.db.GetUnreadMessages(userID, channelID, d.MentionsOnly, d.ThreadID)
+	if err != nil {
+		sendError(sendCh, ref, err.Error())
+		return
+	}
+
+	channelNames := make(map[int64]string)
+	type msgInfo struct {
+		Channel  string   `json:"channel"`
+		From     string   `json:"from"`
+		Body     string   `json:"body"`
+		SentAt   string   `json:"sent_at"`
+		ThreadID *int64   `json:"thread_id,omitempty"`
+		Mentions []string `json:"mentions,omitempty"`
+	}
+	var list []msgInfo
+	for _, m := range messages {
+		chName, ok := channelNames[m.ChannelID]
+		if !ok {
+			if ch, err := h.db.GetChannelByID(m.ChannelID); err == nil {
+				chName = ch.Name
+			}
+			channelNames[m.ChannelID] = chName
+		}
+		list = append(list, msgInfo{
+			Channel:  chName,
+			From:     m.Username,
+			Body:     m.Body,
+			SentAt:   m.CreatedAt.Format("2006-01-02T15:04:05Z"),
+			ThreadID: m.ThreadID,
+			Mentions: m.Mentions,
 		})
 	}
 	sendReply(sendCh, ref, true, map[string]interface{}{"messages": list})

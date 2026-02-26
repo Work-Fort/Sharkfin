@@ -160,8 +160,10 @@ func (h *MCPHandler) handleToolsList(w http.ResponseWriter, req *protocol.Reques
 				"inputSchema": map[string]interface{}{
 					"type": "object",
 					"properties": map[string]interface{}{
-						"channel": map[string]string{"type": "string", "description": "Channel name"},
-						"message": map[string]string{"type": "string", "description": "Message text (UTF-8)"},
+						"channel":   map[string]string{"type": "string", "description": "Channel name"},
+						"message":   map[string]string{"type": "string", "description": "Message text (UTF-8)"},
+						"mentions":  map[string]interface{}{"type": "array", "items": map[string]string{"type": "string"}, "description": "Usernames to @mention in this message"},
+						"thread_id": map[string]interface{}{"type": "integer", "description": "Message ID of the parent message to reply to (creates a thread)"},
 					},
 					"required": []string{"channel", "message"},
 				},
@@ -172,7 +174,9 @@ func (h *MCPHandler) handleToolsList(w http.ResponseWriter, req *protocol.Reques
 				"inputSchema": map[string]interface{}{
 					"type": "object",
 					"properties": map[string]interface{}{
-						"channel": map[string]string{"type": "string", "description": "Optional channel name to filter by"},
+						"channel":       map[string]string{"type": "string", "description": "Optional channel name to filter by"},
+						"mentions_only": map[string]interface{}{"type": "boolean", "description": "If true, return only messages that @mention you"},
+						"thread_id":     map[string]interface{}{"type": "integer", "description": "If set, return only replies to this parent message ID"},
 					},
 				},
 			},
@@ -429,8 +433,10 @@ func (h *MCPHandler) handleChannelInvite(w http.ResponseWriter, req *protocol.Re
 
 func (h *MCPHandler) handleSendMessage(w http.ResponseWriter, req *protocol.Request, args json.RawMessage, session *MCPSession) {
 	var a struct {
-		Channel string `json:"channel"`
-		Message string `json:"message"`
+		Channel  string   `json:"channel"`
+		Message  string   `json:"message"`
+		Mentions []string `json:"mentions"`
+		ThreadID *int64   `json:"thread_id"`
 	}
 	if err := json.Unmarshal(args, &a); err != nil {
 		writeJSONRPCError(w, req.ID, protocol.InvalidParams, "invalid arguments")
@@ -459,7 +465,19 @@ func (h *MCPHandler) handleSendMessage(w http.ResponseWriter, req *protocol.Requ
 		return
 	}
 
-	msgID, err := h.db.SendMessage(ch.ID, sender.ID, a.Message)
+	var mentionUserIDs []int64
+	var mentionUsernames []string
+	for _, username := range a.Mentions {
+		u, err := h.db.GetUserByUsername(username)
+		if err != nil {
+			writeJSONRPCError(w, req.ID, -32001, fmt.Sprintf("mentioned user not found: %s", username))
+			return
+		}
+		mentionUserIDs = append(mentionUserIDs, u.ID)
+		mentionUsernames = append(mentionUsernames, u.Username)
+	}
+
+	msgID, err := h.db.SendMessage(ch.ID, sender.ID, a.Message, a.ThreadID, mentionUserIDs)
 	if err != nil {
 		writeJSONRPCError(w, req.ID, protocol.InternalError, err.Error())
 		return
@@ -476,12 +494,14 @@ func (h *MCPHandler) handleSendMessage(w http.ResponseWriter, req *protocol.Requ
 		CreatedAt: time.Now(),
 		Username:  session.Username,
 	}
-	h.hub.BroadcastMessage(ch.ID, a.Channel, msg, h.db)
+	h.hub.BroadcastMessage(ch.ID, a.Channel, msg, mentionUsernames, a.ThreadID, h.db)
 }
 
 func (h *MCPHandler) handleUnreadMessages(w http.ResponseWriter, req *protocol.Request, args json.RawMessage, session *MCPSession) {
 	var a struct {
-		Channel string `json:"channel"`
+		Channel      string `json:"channel"`
+		MentionsOnly bool   `json:"mentions_only"`
+		ThreadID     *int64 `json:"thread_id"`
 	}
 	if args != nil {
 		json.Unmarshal(args, &a)
@@ -503,7 +523,7 @@ func (h *MCPHandler) handleUnreadMessages(w http.ResponseWriter, req *protocol.R
 		channelID = &ch.ID
 	}
 
-	messages, err := h.db.GetUnreadMessages(user.ID, channelID)
+	messages, err := h.db.GetUnreadMessages(user.ID, channelID, a.MentionsOnly, a.ThreadID)
 	if err != nil {
 		writeJSONRPCError(w, req.ID, protocol.InternalError, err.Error())
 		return
@@ -512,10 +532,12 @@ func (h *MCPHandler) handleUnreadMessages(w http.ResponseWriter, req *protocol.R
 	channelNames := make(map[int64]string)
 
 	type msgInfo struct {
-		Channel string `json:"channel"`
-		From    string `json:"from"`
-		Body    string `json:"body"`
-		SentAt  string `json:"sent_at"`
+		Channel  string   `json:"channel"`
+		From     string   `json:"from"`
+		Body     string   `json:"body"`
+		SentAt   string   `json:"sent_at"`
+		ThreadID *int64   `json:"thread_id,omitempty"`
+		Mentions []string `json:"mentions,omitempty"`
 	}
 	var list []msgInfo
 	for _, m := range messages {
@@ -527,10 +549,12 @@ func (h *MCPHandler) handleUnreadMessages(w http.ResponseWriter, req *protocol.R
 			channelNames[m.ChannelID] = chName
 		}
 		list = append(list, msgInfo{
-			Channel: chName,
-			From:    m.Username,
-			Body:    m.Body,
-			SentAt:  m.CreatedAt.Format("2006-01-02T15:04:05Z"),
+			Channel:  chName,
+			From:     m.Username,
+			Body:     m.Body,
+			SentAt:   m.CreatedAt.Format("2006-01-02T15:04:05Z"),
+			ThreadID: m.ThreadID,
+			Mentions: m.Mentions,
 		})
 	}
 

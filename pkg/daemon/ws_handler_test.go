@@ -51,7 +51,9 @@ func dialWS(t *testing.T, env *wsTestEnv) *websocket.Conn {
 	return conn
 }
 
-// wsReq sends a request and reads the response envelope.
+// wsReq sends a request and reads the response envelope matching the ref.
+// Skips interleaved broadcast messages (presence, message.new) that may arrive
+// between request and response.
 func wsReq(t *testing.T, conn *websocket.Conn, typ string, d interface{}, ref string) wsEnvelope {
 	t.Helper()
 	raw, _ := json.Marshal(d)
@@ -60,7 +62,13 @@ func wsReq(t *testing.T, conn *websocket.Conn, typ string, d interface{}, ref st
 	if err := conn.WriteMessage(websocket.TextMessage, data); err != nil {
 		t.Fatalf("write: %v", err)
 	}
-	return readWSEnvelope(t, conn)
+	for {
+		env := readWSEnvelope(t, conn)
+		if env.Ref == ref {
+			return env
+		}
+		// Discard broadcast messages that arrived between request and response
+	}
 }
 
 func readWSEnvelope(t *testing.T, conn *websocket.Conn) wsEnvelope {
@@ -167,7 +175,7 @@ func TestWSProtectedToolBeforeAuth(t *testing.T) {
 	env := newWSTestEnv(t)
 	conn := dialWS(t, env)
 
-	tools := []string{"user_list", "channel_list", "channel_create", "channel_invite", "send_message", "history", "set_setting", "get_settings"}
+	tools := []string{"user_list", "channel_list", "channel_create", "channel_invite", "send_message", "history", "unread_messages", "set_setting", "get_settings"}
 	for _, tool := range tools {
 		resp := wsReq(t, conn, tool, map[string]interface{}{}, tool)
 		if resp.OK != nil && *resp.OK {
@@ -483,5 +491,220 @@ func TestWSIdentifyAlreadyOnline(t *testing.T) {
 	resp := wsReq(t, conn2, "identify", map[string]string{"username": "alice"}, "i1")
 	if resp.OK != nil && *resp.OK {
 		t.Error("expected error: user already online")
+	}
+}
+
+func TestWSSendMessageWithMentions(t *testing.T) {
+	env := newWSTestEnv(t)
+	aliceConn := registerWSUser(t, env, "alice")
+	bobConn := registerWSUser(t, env, "bob")
+
+	wsReq(t, aliceConn, "channel_create", map[string]interface{}{
+		"name": "general", "public": true,
+	}, "c1")
+	wsReq(t, aliceConn, "channel_invite", map[string]interface{}{
+		"channel": "general", "username": "bob",
+	}, "inv1")
+
+	resp := wsReq(t, aliceConn, "send_message", map[string]interface{}{
+		"channel":  "general",
+		"body":     "hey @bob check this",
+		"mentions": []string{"bob"},
+	}, "m1")
+	if resp.OK == nil || !*resp.OK {
+		t.Fatalf("expected ok, got %+v", resp)
+	}
+
+	// Bob should receive broadcast with mentions
+	bcast := readWSEnvelope(t, bobConn)
+	if bcast.Type != "message.new" {
+		t.Fatalf("type = %q, want message.new", bcast.Type)
+	}
+	d, _ := json.Marshal(bcast.D)
+	var msg struct {
+		Mentions []string `json:"mentions"`
+	}
+	json.Unmarshal(d, &msg)
+	if len(msg.Mentions) != 1 || msg.Mentions[0] != "bob" {
+		t.Errorf("mentions = %v, want [bob]", msg.Mentions)
+	}
+}
+
+func TestWSSendMessageWithThread(t *testing.T) {
+	env := newWSTestEnv(t)
+	aliceConn := registerWSUser(t, env, "alice")
+	bobConn := registerWSUser(t, env, "bob")
+
+	wsReq(t, aliceConn, "channel_create", map[string]interface{}{
+		"name": "general", "public": true,
+	}, "c1")
+	wsReq(t, aliceConn, "channel_invite", map[string]interface{}{
+		"channel": "general", "username": "bob",
+	}, "inv1")
+
+	// Send parent message
+	parentResp := wsReq(t, aliceConn, "send_message", map[string]interface{}{
+		"channel": "general", "body": "parent msg",
+	}, "m1")
+	// Read bob's broadcast for parent
+	readWSEnvelope(t, bobConn)
+
+	d, _ := json.Marshal(parentResp.D)
+	var pr struct{ ID int64 `json:"id"` }
+	json.Unmarshal(d, &pr)
+
+	// Reply in thread
+	resp := wsReq(t, aliceConn, "send_message", map[string]interface{}{
+		"channel":   "general",
+		"body":      "thread reply",
+		"thread_id": pr.ID,
+	}, "m2")
+	if resp.OK == nil || !*resp.OK {
+		t.Fatalf("expected ok, got %+v", resp)
+	}
+
+	// Bob should receive broadcast with thread_id
+	bcast := readWSEnvelope(t, bobConn)
+	d, _ = json.Marshal(bcast.D)
+	var msg struct {
+		ThreadID int64 `json:"thread_id"`
+	}
+	json.Unmarshal(d, &msg)
+	if msg.ThreadID != pr.ID {
+		t.Errorf("thread_id = %d, want %d", msg.ThreadID, pr.ID)
+	}
+}
+
+func TestWSSendMessageRejectNestedReply(t *testing.T) {
+	env := newWSTestEnv(t)
+	conn := registerWSUser(t, env, "alice")
+
+	wsReq(t, conn, "channel_create", map[string]interface{}{
+		"name": "general", "public": true,
+	}, "c1")
+
+	parentResp := wsReq(t, conn, "send_message", map[string]interface{}{
+		"channel": "general", "body": "parent",
+	}, "m1")
+	d, _ := json.Marshal(parentResp.D)
+	var pr struct{ ID int64 `json:"id"` }
+	json.Unmarshal(d, &pr)
+
+	replyResp := wsReq(t, conn, "send_message", map[string]interface{}{
+		"channel": "general", "body": "reply", "thread_id": pr.ID,
+	}, "m2")
+	d, _ = json.Marshal(replyResp.D)
+	var rr struct{ ID int64 `json:"id"` }
+	json.Unmarshal(d, &rr)
+
+	// Try nested reply — should fail
+	resp := wsReq(t, conn, "send_message", map[string]interface{}{
+		"channel": "general", "body": "nested", "thread_id": rr.ID,
+	}, "m3")
+	if resp.OK != nil && *resp.OK {
+		t.Error("expected error for nested reply")
+	}
+}
+
+func TestWSHistoryWithThreadFilter(t *testing.T) {
+	env := newWSTestEnv(t)
+	conn := registerWSUser(t, env, "alice")
+
+	wsReq(t, conn, "channel_create", map[string]interface{}{
+		"name": "general", "public": true,
+	}, "c1")
+
+	parentResp := wsReq(t, conn, "send_message", map[string]interface{}{
+		"channel": "general", "body": "parent",
+	}, "m1")
+	d, _ := json.Marshal(parentResp.D)
+	var pr struct{ ID int64 `json:"id"` }
+	json.Unmarshal(d, &pr)
+
+	wsReq(t, conn, "send_message", map[string]interface{}{
+		"channel": "general", "body": "reply1", "thread_id": pr.ID,
+	}, "m2")
+	wsReq(t, conn, "send_message", map[string]interface{}{
+		"channel": "general", "body": "other top-level",
+	}, "m3")
+
+	resp := wsReq(t, conn, "history", map[string]interface{}{
+		"channel": "general", "thread_id": pr.ID,
+	}, "h1")
+	if resp.OK == nil || !*resp.OK {
+		t.Fatalf("expected ok, got %+v", resp)
+	}
+	d, _ = json.Marshal(resp.D)
+	var result struct {
+		Messages []struct {
+			Body     string `json:"body"`
+			ThreadID int64  `json:"thread_id"`
+		} `json:"messages"`
+	}
+	json.Unmarshal(d, &result)
+	if len(result.Messages) != 1 {
+		t.Fatalf("got %d messages, want 1", len(result.Messages))
+	}
+	if result.Messages[0].Body != "reply1" {
+		t.Errorf("body = %q, want reply1", result.Messages[0].Body)
+	}
+}
+
+func TestWSSendMessageMentionInvalidUser(t *testing.T) {
+	env := newWSTestEnv(t)
+	conn := registerWSUser(t, env, "alice")
+
+	wsReq(t, conn, "channel_create", map[string]interface{}{
+		"name": "general", "public": true,
+	}, "c1")
+
+	resp := wsReq(t, conn, "send_message", map[string]interface{}{
+		"channel":  "general",
+		"body":     "hey @nobody",
+		"mentions": []string{"nobody"},
+	}, "m1")
+	if resp.OK != nil && *resp.OK {
+		t.Error("expected error for invalid mention username")
+	}
+}
+
+func TestWSUnreadMessages(t *testing.T) {
+	env := newWSTestEnv(t)
+	aliceConn := registerWSUser(t, env, "alice")
+	bobConn := registerWSUser(t, env, "bob")
+
+	wsReq(t, aliceConn, "channel_create", map[string]interface{}{
+		"name": "general", "public": true,
+	}, "c1")
+	wsReq(t, aliceConn, "channel_invite", map[string]interface{}{
+		"channel": "general", "username": "bob",
+	}, "inv1")
+
+	wsReq(t, aliceConn, "send_message", map[string]interface{}{
+		"channel": "general", "body": "hello bob",
+	}, "m1")
+	// Drain bob's broadcast
+	readWSEnvelope(t, bobConn)
+
+	resp := wsReq(t, bobConn, "unread_messages", map[string]interface{}{}, "u1")
+	if resp.OK == nil || !*resp.OK {
+		t.Fatalf("expected ok, got %+v", resp)
+	}
+	d, _ := json.Marshal(resp.D)
+	var result struct {
+		Messages []struct {
+			Body    string `json:"body"`
+			Channel string `json:"channel"`
+		} `json:"messages"`
+	}
+	json.Unmarshal(d, &result)
+	if len(result.Messages) != 1 {
+		t.Fatalf("got %d messages, want 1", len(result.Messages))
+	}
+	if result.Messages[0].Body != "hello bob" {
+		t.Errorf("body = %q, want 'hello bob'", result.Messages[0].Body)
+	}
+	if result.Messages[0].Channel != "general" {
+		t.Errorf("channel = %q, want general", result.Messages[0].Channel)
 	}
 }

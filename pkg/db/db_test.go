@@ -182,7 +182,7 @@ func TestSendMessage(t *testing.T) {
 	aliceID, _ := d.CreateUser("alice", "")
 	chID, _ := d.CreateChannel("general", true, []int64{aliceID})
 
-	msgID, err := d.SendMessage(chID, aliceID, "hello world")
+	msgID, err := d.SendMessage(chID, aliceID, "hello world", nil, nil)
 	if err != nil {
 		t.Fatalf("send message: %v", err)
 	}
@@ -197,10 +197,10 @@ func TestUnreadMessagesFirstRead(t *testing.T) {
 	bobID, _ := d.CreateUser("bob", "")
 	chID, _ := d.CreateChannel("dm", false, []int64{aliceID, bobID})
 
-	d.SendMessage(chID, aliceID, "msg1")
-	d.SendMessage(chID, aliceID, "msg2")
+	d.SendMessage(chID, aliceID, "msg1", nil, nil)
+	d.SendMessage(chID, aliceID, "msg2", nil, nil)
 
-	msgs, err := d.GetUnreadMessages(bobID, nil)
+	msgs, err := d.GetUnreadMessages(bobID, nil, false, nil)
 	if err != nil {
 		t.Fatalf("get unread: %v", err)
 	}
@@ -218,11 +218,11 @@ func TestUnreadMessagesAdvancesCursor(t *testing.T) {
 	bobID, _ := d.CreateUser("bob", "")
 	chID, _ := d.CreateChannel("dm", false, []int64{aliceID, bobID})
 
-	d.SendMessage(chID, aliceID, "msg1")
-	d.GetUnreadMessages(bobID, nil)
+	d.SendMessage(chID, aliceID, "msg1", nil, nil)
+	d.GetUnreadMessages(bobID, nil, false, nil)
 
 	// Second call should return nothing
-	msgs, err := d.GetUnreadMessages(bobID, nil)
+	msgs, err := d.GetUnreadMessages(bobID, nil, false, nil)
 	if err != nil {
 		t.Fatalf("get unread: %v", err)
 	}
@@ -231,8 +231,8 @@ func TestUnreadMessagesAdvancesCursor(t *testing.T) {
 	}
 
 	// New message should appear
-	d.SendMessage(chID, aliceID, "msg2")
-	msgs, err = d.GetUnreadMessages(bobID, nil)
+	d.SendMessage(chID, aliceID, "msg2", nil, nil)
+	msgs, err = d.GetUnreadMessages(bobID, nil, false, nil)
 	if err != nil {
 		t.Fatalf("get unread: %v", err)
 	}
@@ -251,10 +251,10 @@ func TestUnreadMessagesFilterByChannel(t *testing.T) {
 	ch1, _ := d.CreateChannel("ch1", false, []int64{aliceID, bobID})
 	ch2, _ := d.CreateChannel("ch2", false, []int64{aliceID, bobID})
 
-	d.SendMessage(ch1, aliceID, "in ch1")
-	d.SendMessage(ch2, aliceID, "in ch2")
+	d.SendMessage(ch1, aliceID, "in ch1", nil, nil)
+	d.SendMessage(ch2, aliceID, "in ch2", nil, nil)
 
-	msgs, err := d.GetUnreadMessages(bobID, &ch1)
+	msgs, err := d.GetUnreadMessages(bobID, &ch1, false, nil)
 	if err != nil {
 		t.Fatalf("get unread: %v", err)
 	}
@@ -266,7 +266,7 @@ func TestUnreadMessagesFilterByChannel(t *testing.T) {
 	}
 
 	// ch2 should still have unread
-	msgs, err = d.GetUnreadMessages(bobID, &ch2)
+	msgs, err = d.GetUnreadMessages(bobID, &ch2, false, nil)
 	if err != nil {
 		t.Fatalf("get unread: %v", err)
 	}
@@ -333,11 +333,11 @@ func TestGetMessages(t *testing.T) {
 	chID, _ := d.CreateChannel("general", true, []int64{aliceID})
 
 	for i := 0; i < 5; i++ {
-		d.SendMessage(chID, aliceID, fmt.Sprintf("msg%d", i))
+		d.SendMessage(chID, aliceID, fmt.Sprintf("msg%d", i), nil, nil)
 	}
 
 	// Get all (no cursor)
-	msgs, err := d.GetMessages(chID, nil, nil, 50)
+	msgs, err := d.GetMessages(chID, nil, nil, 50, nil)
 	if err != nil {
 		t.Fatalf("get messages: %v", err)
 	}
@@ -357,12 +357,12 @@ func TestGetMessagesBefore(t *testing.T) {
 
 	var ids []int64
 	for i := 0; i < 5; i++ {
-		id, _ := d.SendMessage(chID, aliceID, fmt.Sprintf("msg%d", i))
+		id, _ := d.SendMessage(chID, aliceID, fmt.Sprintf("msg%d", i), nil, nil)
 		ids = append(ids, id)
 	}
 
 	// Get messages before msg3 (should return msg0, msg1, msg2)
-	msgs, err := d.GetMessages(chID, &ids[3], nil, 50)
+	msgs, err := d.GetMessages(chID, &ids[3], nil, 50, nil)
 	if err != nil {
 		t.Fatalf("get messages: %v", err)
 	}
@@ -381,12 +381,12 @@ func TestGetMessagesAfter(t *testing.T) {
 
 	var ids []int64
 	for i := 0; i < 5; i++ {
-		id, _ := d.SendMessage(chID, aliceID, fmt.Sprintf("msg%d", i))
+		id, _ := d.SendMessage(chID, aliceID, fmt.Sprintf("msg%d", i), nil, nil)
 		ids = append(ids, id)
 	}
 
 	// Get messages after msg1 (should return msg2, msg3, msg4)
-	msgs, err := d.GetMessages(chID, nil, &ids[1], 50)
+	msgs, err := d.GetMessages(chID, nil, &ids[1], 50, nil)
 	if err != nil {
 		t.Fatalf("get messages: %v", err)
 	}
@@ -404,10 +404,10 @@ func TestGetMessagesLimit(t *testing.T) {
 	chID, _ := d.CreateChannel("general", true, []int64{aliceID})
 
 	for i := 0; i < 10; i++ {
-		d.SendMessage(chID, aliceID, fmt.Sprintf("msg%d", i))
+		d.SendMessage(chID, aliceID, fmt.Sprintf("msg%d", i), nil, nil)
 	}
 
-	msgs, err := d.GetMessages(chID, nil, nil, 3)
+	msgs, err := d.GetMessages(chID, nil, nil, 3, nil)
 	if err != nil {
 		t.Fatalf("get messages: %v", err)
 	}
@@ -424,9 +424,9 @@ func TestGetMessagesIncludesUsername(t *testing.T) {
 	d := newTestDB(t)
 	aliceID, _ := d.CreateUser("alice", "")
 	chID, _ := d.CreateChannel("general", true, []int64{aliceID})
-	d.SendMessage(chID, aliceID, "hello")
+	d.SendMessage(chID, aliceID, "hello", nil, nil)
 
-	msgs, _ := d.GetMessages(chID, nil, nil, 50)
+	msgs, _ := d.GetMessages(chID, nil, nil, 50, nil)
 	if len(msgs) != 1 {
 		t.Fatalf("len = %d, want 1", len(msgs))
 	}
@@ -441,12 +441,12 @@ func TestUnreadExcludesOwnMessages(t *testing.T) {
 	bobID, _ := d.CreateUser("bob", "")
 	chID, _ := d.CreateChannel("dm", false, []int64{aliceID, bobID})
 
-	d.SendMessage(chID, aliceID, "from alice")
-	d.SendMessage(chID, bobID, "from bob")
-	d.SendMessage(chID, aliceID, "from alice again")
+	d.SendMessage(chID, aliceID, "from alice", nil, nil)
+	d.SendMessage(chID, bobID, "from bob", nil, nil)
+	d.SendMessage(chID, aliceID, "from alice again", nil, nil)
 
 	// Bob should only see Alice's messages, not his own
-	msgs, err := d.GetUnreadMessages(bobID, nil)
+	msgs, err := d.GetUnreadMessages(bobID, nil, false, nil)
 	if err != nil {
 		t.Fatalf("get unread: %v", err)
 	}
@@ -458,11 +458,10 @@ func TestUnreadExcludesOwnMessages(t *testing.T) {
 	}
 
 	// Cursor should have advanced past all 3 messages (including bob's own).
-	// A new message from alice should appear, but bob's own should not reappear.
-	d.SendMessage(chID, aliceID, "new from alice")
-	d.SendMessage(chID, bobID, "new from bob")
+	d.SendMessage(chID, aliceID, "new from alice", nil, nil)
+	d.SendMessage(chID, bobID, "new from bob", nil, nil)
 
-	msgs, err = d.GetUnreadMessages(bobID, nil)
+	msgs, err = d.GetUnreadMessages(bobID, nil, false, nil)
 	if err != nil {
 		t.Fatalf("get unread: %v", err)
 	}
@@ -471,5 +470,143 @@ func TestUnreadExcludesOwnMessages(t *testing.T) {
 	}
 	if msgs[0].Body != "new from alice" {
 		t.Errorf("body = %q, want 'new from alice'", msgs[0].Body)
+	}
+}
+
+// --- Threads ---
+
+func TestSendMessageWithThread(t *testing.T) {
+	d := newTestDB(t)
+	aliceID, _ := d.CreateUser("alice", "")
+	chID, _ := d.CreateChannel("general", true, []int64{aliceID})
+
+	parentID, _ := d.SendMessage(chID, aliceID, "parent message", nil, nil)
+	replyID, err := d.SendMessage(chID, aliceID, "reply message", &parentID, nil)
+	if err != nil {
+		t.Fatalf("send reply: %v", err)
+	}
+	if replyID <= 0 {
+		t.Errorf("expected positive reply id, got %d", replyID)
+	}
+}
+
+func TestSendMessageRejectNestedReply(t *testing.T) {
+	d := newTestDB(t)
+	aliceID, _ := d.CreateUser("alice", "")
+	chID, _ := d.CreateChannel("general", true, []int64{aliceID})
+
+	parentID, _ := d.SendMessage(chID, aliceID, "parent", nil, nil)
+	replyID, _ := d.SendMessage(chID, aliceID, "reply", &parentID, nil)
+	_, err := d.SendMessage(chID, aliceID, "nested reply", &replyID, nil)
+	if err == nil {
+		t.Error("expected error for nested reply")
+	}
+}
+
+func TestSendMessageRejectCrossChannelThread(t *testing.T) {
+	d := newTestDB(t)
+	aliceID, _ := d.CreateUser("alice", "")
+	ch1, _ := d.CreateChannel("ch1", true, []int64{aliceID})
+	ch2, _ := d.CreateChannel("ch2", true, []int64{aliceID})
+
+	parentID, _ := d.SendMessage(ch1, aliceID, "parent in ch1", nil, nil)
+	_, err := d.SendMessage(ch2, aliceID, "reply in ch2", &parentID, nil)
+	if err == nil {
+		t.Error("expected error for cross-channel thread")
+	}
+}
+
+func TestGetMessagesThreadFilter(t *testing.T) {
+	d := newTestDB(t)
+	aliceID, _ := d.CreateUser("alice", "")
+	chID, _ := d.CreateChannel("general", true, []int64{aliceID})
+
+	parentID, _ := d.SendMessage(chID, aliceID, "parent", nil, nil)
+	d.SendMessage(chID, aliceID, "reply1", &parentID, nil)
+	d.SendMessage(chID, aliceID, "reply2", &parentID, nil)
+	d.SendMessage(chID, aliceID, "unrelated", nil, nil)
+
+	msgs, err := d.GetMessages(chID, nil, nil, 50, &parentID)
+	if err != nil {
+		t.Fatalf("get messages: %v", err)
+	}
+	if len(msgs) != 2 {
+		t.Fatalf("expected 2 thread replies, got %d", len(msgs))
+	}
+	if msgs[0].Body != "reply1" || msgs[1].Body != "reply2" {
+		t.Errorf("got %q and %q, want reply1 and reply2", msgs[0].Body, msgs[1].Body)
+	}
+}
+
+// --- Mentions ---
+
+func TestSendMessageWithMentions(t *testing.T) {
+	d := newTestDB(t)
+	aliceID, _ := d.CreateUser("alice", "")
+	bobID, _ := d.CreateUser("bob", "")
+	chID, _ := d.CreateChannel("general", true, []int64{aliceID, bobID})
+
+	_, err := d.SendMessage(chID, aliceID, "hey @bob", nil, []int64{bobID})
+	if err != nil {
+		t.Fatalf("send message with mention: %v", err)
+	}
+
+	msgs, _ := d.GetMessages(chID, nil, nil, 50, nil)
+	if len(msgs) != 1 {
+		t.Fatalf("expected 1 message, got %d", len(msgs))
+	}
+	if len(msgs[0].Mentions) != 1 || msgs[0].Mentions[0] != "bob" {
+		t.Errorf("mentions = %v, want [bob]", msgs[0].Mentions)
+	}
+}
+
+func TestUnreadMessagesMentionsOnly(t *testing.T) {
+	d := newTestDB(t)
+	aliceID, _ := d.CreateUser("alice", "")
+	bobID, _ := d.CreateUser("bob", "")
+	chID, _ := d.CreateChannel("dm", false, []int64{aliceID, bobID})
+
+	d.SendMessage(chID, aliceID, "no mention", nil, nil)
+	d.SendMessage(chID, aliceID, "hey @bob", nil, []int64{bobID})
+
+	msgs, err := d.GetUnreadMessages(bobID, nil, true, nil)
+	if err != nil {
+		t.Fatalf("get unread: %v", err)
+	}
+	if len(msgs) != 1 {
+		t.Fatalf("expected 1 mention, got %d", len(msgs))
+	}
+	if msgs[0].Body != "hey @bob" {
+		t.Errorf("body = %q, want 'hey @bob'", msgs[0].Body)
+	}
+}
+
+func TestUnreadMessagesThreadFilter(t *testing.T) {
+	d := newTestDB(t)
+	aliceID, _ := d.CreateUser("alice", "")
+	bobID, _ := d.CreateUser("bob", "")
+	chID, _ := d.CreateChannel("dm", false, []int64{aliceID, bobID})
+
+	parentID, _ := d.SendMessage(chID, aliceID, "parent", nil, nil)
+	d.SendMessage(chID, aliceID, "reply", &parentID, nil)
+	d.SendMessage(chID, aliceID, "top-level", nil, nil)
+
+	// Read all first to advance cursor
+	d.GetUnreadMessages(bobID, nil, false, nil)
+
+	// Now send new messages
+	d.SendMessage(chID, aliceID, "new reply", &parentID, nil)
+	d.SendMessage(chID, aliceID, "new top-level", nil, nil)
+
+	// Filter by thread — should not advance cursor
+	msgs, err := d.GetUnreadMessages(bobID, nil, false, &parentID)
+	if err != nil {
+		t.Fatalf("get unread: %v", err)
+	}
+	if len(msgs) != 1 {
+		t.Fatalf("expected 1 thread reply, got %d", len(msgs))
+	}
+	if msgs[0].Body != "new reply" {
+		t.Errorf("body = %q, want 'new reply'", msgs[0].Body)
 	}
 }
