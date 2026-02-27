@@ -354,17 +354,7 @@ func (h *WSHandler) handleWSSendMessage(sendCh chan<- []byte, ref string, rawD j
 		return
 	}
 
-	var mentionUserIDs []int64
-	var mentionUsernames []string
-	for _, uname := range d.Mentions {
-		u, err := h.db.GetUserByUsername(uname)
-		if err != nil {
-			sendError(sendCh, ref, fmt.Sprintf("mentioned user not found: %s", uname))
-			return
-		}
-		mentionUserIDs = append(mentionUserIDs, u.ID)
-		mentionUsernames = append(mentionUsernames, u.Username)
-	}
+	mentionUserIDs, mentionUsernames := resolveMentions(h.db, d.Body, d.Mentions)
 
 	msgID, err := h.db.SendMessage(ch.ID, userID, d.Body, d.ThreadID, mentionUserIDs)
 	if err != nil {
@@ -429,7 +419,7 @@ func (h *WSHandler) handleWSHistory(sendCh chan<- []byte, ref string, rawD json.
 			ID:       m.ID,
 			From:     m.Username,
 			Body:     m.Body,
-			SentAt:   m.CreatedAt.Format("2006-01-02T15:04:05Z"),
+			SentAt:   m.CreatedAt.UTC().Format(time.RFC3339),
 			ThreadID: m.ThreadID,
 			Mentions: m.Mentions,
 		})
@@ -485,7 +475,7 @@ func (h *WSHandler) handleWSUnreadMessages(sendCh chan<- []byte, ref string, raw
 			Channel:  chName,
 			From:     m.Username,
 			Body:     m.Body,
-			SentAt:   m.CreatedAt.Format("2006-01-02T15:04:05Z"),
+			SentAt:   m.CreatedAt.UTC().Format(time.RFC3339),
 			ThreadID: m.ThreadID,
 			Mentions: m.Mentions,
 		})

@@ -2144,8 +2144,9 @@ func TestWSMentionInvalidUser(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if env.OK != nil && *env.OK {
-		t.Error("expected error for invalid mention")
+	// Invalid mentions are silently ignored
+	if env.OK == nil || !*env.OK {
+		t.Error("expected ok: invalid mentions should be silently ignored")
 	}
 }
 

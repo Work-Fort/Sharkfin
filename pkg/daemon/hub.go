@@ -4,6 +4,7 @@ package daemon
 import (
 	"encoding/json"
 	"sync"
+	"time"
 
 	"github.com/Work-Fort/sharkfin/pkg/db"
 )
@@ -53,7 +54,7 @@ func (h *Hub) BroadcastMessage(channelID int64, channelName string, msg db.Messa
 		"channel": channelName,
 		"from":    msg.Username,
 		"body":    msg.Body,
-		"sent_at": msg.CreatedAt.Format("2006-01-02T15:04:05Z"),
+		"sent_at": msg.CreatedAt.UTC().Format(time.RFC3339),
 	}
 	if threadID != nil {
 		d["thread_id"] = *threadID

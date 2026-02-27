@@ -482,17 +482,7 @@ func (h *MCPHandler) handleSendMessage(w http.ResponseWriter, req *protocol.Requ
 		return
 	}
 
-	var mentionUserIDs []int64
-	var mentionUsernames []string
-	for _, username := range a.Mentions {
-		u, err := h.db.GetUserByUsername(username)
-		if err != nil {
-			writeJSONRPCError(w, req.ID, -32001, fmt.Sprintf("mentioned user not found: %s", username))
-			return
-		}
-		mentionUserIDs = append(mentionUserIDs, u.ID)
-		mentionUsernames = append(mentionUsernames, u.Username)
-	}
+	mentionUserIDs, mentionUsernames := resolveMentions(h.db, a.Message, a.Mentions)
 
 	msgID, err := h.db.SendMessage(ch.ID, sender.ID, a.Message, a.ThreadID, mentionUserIDs)
 	if err != nil {
@@ -569,7 +559,7 @@ func (h *MCPHandler) handleUnreadMessages(w http.ResponseWriter, req *protocol.R
 			Channel:  chName,
 			From:     m.Username,
 			Body:     m.Body,
-			SentAt:   m.CreatedAt.Format("2006-01-02T15:04:05Z"),
+			SentAt:   m.CreatedAt.UTC().Format(time.RFC3339),
 			ThreadID: m.ThreadID,
 			Mentions: m.Mentions,
 		})
@@ -640,7 +630,7 @@ func (h *MCPHandler) handleHistory(w http.ResponseWriter, req *protocol.Request,
 			ID:       m.ID,
 			From:     m.Username,
 			Body:     m.Body,
-			SentAt:   m.CreatedAt.Format("2006-01-02T15:04:05Z"),
+			SentAt:   m.CreatedAt.UTC().Format(time.RFC3339),
 			ThreadID: m.ThreadID,
 			Mentions: m.Mentions,
 		})

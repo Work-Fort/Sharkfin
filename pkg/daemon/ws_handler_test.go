@@ -535,6 +535,42 @@ func TestWSSendMessageWithMentions(t *testing.T) {
 	}
 }
 
+func TestWSSendMessageAutoMention(t *testing.T) {
+	env := newWSTestEnv(t)
+	aliceConn := registerWSUser(t, env, "alice")
+	bobConn := registerWSUser(t, env, "bob")
+
+	wsReq(t, aliceConn, "channel_create", map[string]interface{}{
+		"name": "general", "public": true,
+	}, "c1")
+	wsReq(t, aliceConn, "channel_invite", map[string]interface{}{
+		"channel": "general", "username": "bob",
+	}, "inv1")
+
+	// No explicit mentions — server should extract @bob from body
+	resp := wsReq(t, aliceConn, "send_message", map[string]interface{}{
+		"channel": "general",
+		"body":    "hey @bob check this",
+	}, "m1")
+	if resp.OK == nil || !*resp.OK {
+		t.Fatalf("expected ok, got %+v", resp)
+	}
+
+	// Bob should receive broadcast with auto-extracted mention
+	bcast := readWSEnvelope(t, bobConn)
+	if bcast.Type != "message.new" {
+		t.Fatalf("type = %q, want message.new", bcast.Type)
+	}
+	d, _ := json.Marshal(bcast.D)
+	var msg struct {
+		Mentions []string `json:"mentions"`
+	}
+	json.Unmarshal(d, &msg)
+	if len(msg.Mentions) != 1 || msg.Mentions[0] != "bob" {
+		t.Errorf("mentions = %v, want [bob]", msg.Mentions)
+	}
+}
+
 func TestWSSendMessageWithThread(t *testing.T) {
 	env := newWSTestEnv(t)
 	aliceConn := registerWSUser(t, env, "alice")
@@ -663,13 +699,14 @@ func TestWSSendMessageMentionInvalidUser(t *testing.T) {
 		"name": "general", "public": true,
 	}, "c1")
 
+	// Invalid mentions are silently ignored
 	resp := wsReq(t, conn, "send_message", map[string]interface{}{
 		"channel":  "general",
 		"body":     "hey @nobody",
 		"mentions": []string{"nobody"},
 	}, "m1")
-	if resp.OK != nil && *resp.OK {
-		t.Error("expected error for invalid mention username")
+	if resp.OK == nil || !*resp.OK {
+		t.Error("expected ok: invalid mentions should be silently ignored")
 	}
 }
 
