@@ -8,6 +8,13 @@ import (
 	"time"
 )
 
+// UnreadCount holds per-channel unread and mention counts.
+type UnreadCount struct {
+	ChannelName  string
+	UnreadCount  int
+	MentionCount int
+}
+
 // Message represents a message in a channel.
 type Message struct {
 	ID        int64
@@ -331,4 +338,72 @@ func (d *DB) loadMentions(messages []Message) error {
 		}
 	}
 	return rows.Err()
+}
+
+// GetUnreadCounts returns per-channel unread message and mention counts for a user.
+// Only returns channels with >0 unreads. Excludes the user's own messages.
+func (d *DB) GetUnreadCounts(userID int64) ([]UnreadCount, error) {
+	rows, err := d.db.Query(`
+		SELECT c.name,
+		       COUNT(m.id) AS unread_count,
+		       COUNT(mm.message_id) AS mention_count
+		FROM channel_members cm
+		JOIN channels c ON cm.channel_id = c.id
+		JOIN messages m ON m.channel_id = c.id
+		  AND m.user_id != ?
+		  AND m.id > COALESCE(
+			(SELECT last_read_message_id FROM read_cursors
+			 WHERE channel_id = c.id AND user_id = ?), 0)
+		LEFT JOIN message_mentions mm ON mm.message_id = m.id AND mm.user_id = ?
+		WHERE cm.user_id = ?
+		GROUP BY c.id
+		HAVING unread_count > 0
+	`, userID, userID, userID, userID)
+	if err != nil {
+		return nil, fmt.Errorf("get unread counts: %w", err)
+	}
+	defer rows.Close()
+
+	var counts []UnreadCount
+	for rows.Next() {
+		var c UnreadCount
+		if err := rows.Scan(&c.ChannelName, &c.UnreadCount, &c.MentionCount); err != nil {
+			return nil, fmt.Errorf("scan unread count: %w", err)
+		}
+		counts = append(counts, c)
+	}
+	return counts, rows.Err()
+}
+
+// MarkRead advances the read cursor for a user in a channel.
+// If messageID is nil, advances to the latest message.
+// Forward-only: never moves the cursor backwards.
+func (d *DB) MarkRead(userID, channelID int64, messageID *int64) error {
+	var targetID int64
+	if messageID != nil {
+		targetID = *messageID
+	} else {
+		err := d.db.QueryRow(
+			"SELECT COALESCE(MAX(id), 0) FROM messages WHERE channel_id = ?",
+			channelID,
+		).Scan(&targetID)
+		if err != nil {
+			return fmt.Errorf("get max message id: %w", err)
+		}
+	}
+
+	if targetID == 0 {
+		return nil // no messages in channel
+	}
+
+	_, err := d.db.Exec(`
+		INSERT INTO read_cursors (channel_id, user_id, last_read_message_id)
+		VALUES (?, ?, ?)
+		ON CONFLICT(channel_id, user_id)
+		DO UPDATE SET last_read_message_id = MAX(excluded.last_read_message_id, last_read_message_id)
+	`, channelID, userID, targetID)
+	if err != nil {
+		return fmt.Errorf("mark read: %w", err)
+	}
+	return nil
 }

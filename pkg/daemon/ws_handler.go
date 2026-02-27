@@ -205,6 +205,10 @@ func (h *WSHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			h.handleWSHistory(sendCh, req.Ref, req.D, userID)
 		case "unread_messages":
 			h.handleWSUnreadMessages(sendCh, req.Ref, req.D, userID)
+		case "unread_counts":
+			h.handleWSUnreadCounts(sendCh, req.Ref, userID)
+		case "mark_read":
+			h.handleWSMarkRead(sendCh, req.Ref, req.D, userID)
 		case "set_setting":
 			h.handleWSSetSetting(sendCh, req.Ref, req.D)
 		case "get_settings":
@@ -493,6 +497,65 @@ func (h *WSHandler) handleWSUnreadMessages(sendCh chan<- []byte, ref string, raw
 		})
 	}
 	sendReply(sendCh, ref, true, map[string]interface{}{"messages": list})
+}
+
+func (h *WSHandler) handleWSUnreadCounts(sendCh chan<- []byte, ref string, userID int64) {
+	counts, err := h.db.GetUnreadCounts(userID)
+	if err != nil {
+		sendError(sendCh, ref, err.Error())
+		return
+	}
+	type countInfo struct {
+		Channel      string `json:"channel"`
+		UnreadCount  int    `json:"unread_count"`
+		MentionCount int    `json:"mention_count"`
+	}
+	var list []countInfo
+	for _, c := range counts {
+		list = append(list, countInfo{
+			Channel:      c.ChannelName,
+			UnreadCount:  c.UnreadCount,
+			MentionCount: c.MentionCount,
+		})
+	}
+	sendReply(sendCh, ref, true, map[string]interface{}{"counts": list})
+}
+
+func (h *WSHandler) handleWSMarkRead(sendCh chan<- []byte, ref string, rawD json.RawMessage, userID int64) {
+	var d struct {
+		Channel   string `json:"channel"`
+		MessageID *int64 `json:"message_id"`
+	}
+	if err := json.Unmarshal(rawD, &d); err != nil {
+		sendError(sendCh, ref, "invalid arguments")
+		return
+	}
+	if d.Channel == "" {
+		sendError(sendCh, ref, "channel is required")
+		return
+	}
+
+	ch, err := h.db.GetChannelByName(d.Channel)
+	if err != nil {
+		sendError(sendCh, ref, err.Error())
+		return
+	}
+
+	isMember, err := h.db.IsChannelMember(ch.ID, userID)
+	if err != nil {
+		sendError(sendCh, ref, err.Error())
+		return
+	}
+	if !isMember {
+		sendError(sendCh, ref, "you are not a participant of this channel")
+		return
+	}
+
+	if err := h.db.MarkRead(userID, ch.ID, d.MessageID); err != nil {
+		sendError(sendCh, ref, err.Error())
+		return
+	}
+	sendReply(sendCh, ref, true, nil)
 }
 
 func (h *WSHandler) handleWSSetSetting(sendCh chan<- []byte, ref string, rawD json.RawMessage) {

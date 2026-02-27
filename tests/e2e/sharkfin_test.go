@@ -480,7 +480,8 @@ func TestToolsList(t *testing.T) {
 
 	expected := []string{
 		"get_identity_token", "register", "identify", "user_list", "channel_list",
-		"channel_create", "channel_invite", "send_message", "unread_messages", "history",
+		"channel_create", "channel_invite", "send_message", "unread_messages",
+		"unread_counts", "mark_read", "history",
 	}
 	if len(listResult.Tools) != len(expected) {
 		names := make([]string, len(listResult.Tools))
@@ -2365,5 +2366,305 @@ func TestWSAndMCPInterop(t *testing.T) {
 	}
 	if msg.Body != "from mcp" {
 		t.Errorf("body = %q, want 'from mcp'", msg.Body)
+	}
+}
+
+// --- Unread counts and mark_read tests ---
+
+func TestUnreadCounts(t *testing.T) {
+	addr, err := harness.FreePort()
+	if err != nil {
+		t.Fatal(err)
+	}
+	d, err := harness.StartDaemon(sharkfinBin, addr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.StopFatal(t)
+
+	alice := harness.NewClient(addr)
+	if err := alice.RegisterFlow("alice"); err != nil {
+		t.Fatal(err)
+	}
+	defer alice.DisconnectPresence()
+
+	bob := harness.NewClient(addr)
+	if err := bob.RegisterFlow("bob"); err != nil {
+		t.Fatal(err)
+	}
+	defer bob.DisconnectPresence()
+
+	// Create channel with both users
+	r, err := alice.ToolCall("channel_create", map[string]any{
+		"name": "counts-test", "public": false, "members": []string{"bob"},
+	})
+	if err != nil || r.Error != nil {
+		t.Fatalf("create channel: err=%v rpc=%+v", err, r.Error)
+	}
+
+	// Alice sends 3 messages, one mentioning bob
+	for i, body := range []string{"hello", "world", "hey @bob check this"} {
+		r, err := alice.ToolCall("send_message", map[string]any{
+			"channel": "counts-test", "message": body,
+		})
+		if err != nil || r.Error != nil {
+			t.Fatalf("send message %d: err=%v rpc=%+v", i, err, r.Error)
+		}
+	}
+
+	// Bob checks unread counts
+	r, err = bob.ToolCall("unread_counts", map[string]any{})
+	if err != nil || r.Error != nil {
+		t.Fatalf("unread_counts: err=%v rpc=%+v", err, r.Error)
+	}
+
+	var counts []struct {
+		Channel      string `json:"channel"`
+		UnreadCount  int    `json:"unread_count"`
+		MentionCount int    `json:"mention_count"`
+	}
+	if err := json.Unmarshal([]byte(r.Text), &counts); err != nil {
+		t.Fatalf("unmarshal counts: %v (text: %s)", err, r.Text)
+	}
+
+	found := false
+	for _, c := range counts {
+		if c.Channel == "counts-test" {
+			found = true
+			if c.UnreadCount != 3 {
+				t.Errorf("unread_count = %d, want 3", c.UnreadCount)
+			}
+			if c.MentionCount != 1 {
+				t.Errorf("mention_count = %d, want 1", c.MentionCount)
+			}
+		}
+	}
+	if !found {
+		t.Errorf("counts-test not in unread_counts response: %s", r.Text)
+	}
+
+	// Bob marks channel as read
+	r, err = bob.ToolCall("mark_read", map[string]any{"channel": "counts-test"})
+	if err != nil || r.Error != nil {
+		t.Fatalf("mark_read: err=%v rpc=%+v", err, r.Error)
+	}
+
+	// Unread counts should now be empty for this channel
+	r, err = bob.ToolCall("unread_counts", map[string]any{})
+	if err != nil || r.Error != nil {
+		t.Fatalf("unread_counts after mark_read: err=%v rpc=%+v", err, r.Error)
+	}
+
+	if r.Text != "null" && r.Text != "[]" {
+		var countsAfter []struct {
+			Channel string `json:"channel"`
+		}
+		if err := json.Unmarshal([]byte(r.Text), &countsAfter); err != nil {
+			t.Fatalf("unmarshal counts after: %v", err)
+		}
+		for _, c := range countsAfter {
+			if c.Channel == "counts-test" {
+				t.Error("counts-test still in unread_counts after mark_read")
+			}
+		}
+	}
+}
+
+func TestMarkReadForwardOnly(t *testing.T) {
+	addr, err := harness.FreePort()
+	if err != nil {
+		t.Fatal(err)
+	}
+	d, err := harness.StartDaemon(sharkfinBin, addr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.StopFatal(t)
+
+	alice := harness.NewClient(addr)
+	if err := alice.RegisterFlow("alice"); err != nil {
+		t.Fatal(err)
+	}
+	defer alice.DisconnectPresence()
+
+	bob := harness.NewClient(addr)
+	if err := bob.RegisterFlow("bob"); err != nil {
+		t.Fatal(err)
+	}
+	defer bob.DisconnectPresence()
+
+	// Create channel
+	r, err := alice.ToolCall("channel_create", map[string]any{
+		"name": "fwd-test", "public": false, "members": []string{"bob"},
+	})
+	if err != nil || r.Error != nil {
+		t.Fatalf("create channel: err=%v rpc=%+v", err, r.Error)
+	}
+
+	// Alice sends 3 messages
+	var msgIDs []int64
+	for i := 0; i < 3; i++ {
+		r, err := alice.ToolCall("send_message", map[string]any{
+			"channel": "fwd-test", "message": fmt.Sprintf("msg %d", i),
+		})
+		if err != nil || r.Error != nil {
+			t.Fatalf("send message %d: err=%v rpc=%+v", i, err, r.Error)
+		}
+		var id int64
+		fmt.Sscanf(r.Text, "message sent (id: %d)", &id)
+		msgIDs = append(msgIDs, id)
+	}
+
+	// Bob marks read up to message 3 (latest)
+	r, err = bob.ToolCall("mark_read", map[string]any{
+		"channel": "fwd-test", "message_id": msgIDs[2],
+	})
+	if err != nil || r.Error != nil {
+		t.Fatalf("mark_read latest: err=%v rpc=%+v", err, r.Error)
+	}
+
+	// Bob tries to mark read at message 1 (older) — should be a no-op
+	r, err = bob.ToolCall("mark_read", map[string]any{
+		"channel": "fwd-test", "message_id": msgIDs[0],
+	})
+	if err != nil || r.Error != nil {
+		t.Fatalf("mark_read older: err=%v rpc=%+v", err, r.Error)
+	}
+
+	// Alice sends a 4th message
+	r, err = alice.ToolCall("send_message", map[string]any{
+		"channel": "fwd-test", "message": "msg 3",
+	})
+	if err != nil || r.Error != nil {
+		t.Fatalf("send msg 3: err=%v rpc=%+v", err, r.Error)
+	}
+
+	// Bob should have exactly 1 unread (the 4th message)
+	r, err = bob.ToolCall("unread_counts", map[string]any{})
+	if err != nil || r.Error != nil {
+		t.Fatalf("unread_counts: err=%v rpc=%+v", err, r.Error)
+	}
+
+	var counts []struct {
+		Channel     string `json:"channel"`
+		UnreadCount int    `json:"unread_count"`
+	}
+	if err := json.Unmarshal([]byte(r.Text), &counts); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+
+	found := false
+	for _, c := range counts {
+		if c.Channel == "fwd-test" {
+			found = true
+			if c.UnreadCount != 1 {
+				t.Errorf("unread_count = %d, want 1 (forward-only cursor should not have regressed)", c.UnreadCount)
+			}
+		}
+	}
+	if !found {
+		t.Error("fwd-test not in unread_counts (expected 1 unread)")
+	}
+}
+
+func TestWSUnreadCountsAndMarkRead(t *testing.T) {
+	addr, err := harness.FreePort()
+	if err != nil {
+		t.Fatal(err)
+	}
+	d, err := harness.StartDaemon(sharkfinBin, addr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.StopFatal(t)
+
+	// Register alice via MCP
+	alice := harness.NewClient(addr)
+	if err := alice.RegisterFlow("alice"); err != nil {
+		t.Fatal(err)
+	}
+	defer alice.DisconnectPresence()
+
+	// Bob connects via WS
+	ws, err := harness.NewWSClient(addr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ws.Close()
+	if err := ws.WSRegister("bob"); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create channel with both users
+	r, err := alice.ToolCall("channel_create", map[string]any{
+		"name": "ws-counts", "public": false, "members": []string{"bob"},
+	})
+	if err != nil || r.Error != nil {
+		t.Fatalf("create channel: err=%v rpc=%+v", err, r.Error)
+	}
+
+	// Alice sends 2 messages
+	for _, body := range []string{"hello", "world"} {
+		alice.ToolCall("send_message", map[string]any{
+			"channel": "ws-counts", "message": body,
+		})
+	}
+
+	// Bob checks unread_counts via WS
+	env, err := ws.Req("unread_counts", nil, "uc1")
+	if err != nil {
+		t.Fatalf("ws unread_counts: %v", err)
+	}
+	if env.OK == nil || !*env.OK {
+		t.Fatalf("ws unread_counts failed: %s", string(env.D))
+	}
+
+	// Verify counts
+	var resp struct {
+		Counts []struct {
+			Channel      string `json:"channel"`
+			UnreadCount  int    `json:"unread_count"`
+			MentionCount int    `json:"mention_count"`
+		} `json:"counts"`
+	}
+	json.Unmarshal(env.D, &resp)
+	found := false
+	for _, c := range resp.Counts {
+		if c.Channel == "ws-counts" {
+			found = true
+			if c.UnreadCount != 2 {
+				t.Errorf("ws unread_count = %d, want 2", c.UnreadCount)
+			}
+		}
+	}
+	if !found {
+		t.Errorf("ws-counts not in response: %s", string(env.D))
+	}
+
+	// Bob marks read via WS
+	env, err = ws.Req("mark_read", map[string]string{"channel": "ws-counts"}, "mr1")
+	if err != nil {
+		t.Fatalf("ws mark_read: %v", err)
+	}
+	if env.OK == nil || !*env.OK {
+		t.Fatalf("ws mark_read failed: %s", string(env.D))
+	}
+
+	// Verify cleared
+	env, err = ws.Req("unread_counts", nil, "uc2")
+	if err != nil {
+		t.Fatalf("ws unread_counts after mark: %v", err)
+	}
+
+	var resp2 struct {
+		Counts []struct {
+			Channel string `json:"channel"`
+		} `json:"counts"`
+	}
+	json.Unmarshal(env.D, &resp2)
+	for _, c := range resp2.Counts {
+		if c.Channel == "ws-counts" {
+			t.Error("ws-counts still in unread_counts after mark_read")
+		}
 	}
 }

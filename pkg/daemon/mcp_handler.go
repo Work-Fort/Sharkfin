@@ -183,6 +183,26 @@ func (h *MCPHandler) handleToolsList(w http.ResponseWriter, req *protocol.Reques
 				},
 			},
 			{
+				"name":        "unread_counts",
+				"description": "Get unread message and mention counts per channel. Returns only channels with unreads.",
+				"inputSchema": map[string]interface{}{
+					"type":       "object",
+					"properties": map[string]interface{}{},
+				},
+			},
+			{
+				"name":        "mark_read",
+				"description": "Mark a channel as read up to a specific message, or the latest message if not specified. Forward-only: cannot move cursor backwards.",
+				"inputSchema": map[string]interface{}{
+					"type": "object",
+					"properties": map[string]interface{}{
+						"channel":    map[string]string{"type": "string", "description": "Channel name"},
+						"message_id": map[string]interface{}{"type": "integer", "description": "Message ID to mark as read up to (default: latest)"},
+					},
+					"required": []string{"channel"},
+				},
+			},
+			{
 				"name":        "history",
 				"description": "Get message history for a channel. Returns the most recent messages in chronological order.",
 				"inputSchema": map[string]interface{}{
@@ -244,6 +264,10 @@ func (h *MCPHandler) handleToolsCall(w http.ResponseWriter, req *protocol.Reques
 		h.handleSendMessage(w, req, params.Arguments, session)
 	case "unread_messages":
 		h.handleUnreadMessages(w, req, params.Arguments, session)
+	case "unread_counts":
+		h.handleUnreadCounts(w, req, session)
+	case "mark_read":
+		h.handleMarkRead(w, req, params.Arguments, session)
 	case "history":
 		h.handleHistory(w, req, params.Arguments, session)
 	default:
@@ -644,6 +668,77 @@ func (h *MCPHandler) handleHistory(w http.ResponseWriter, req *protocol.Request,
 
 	data, _ := json.Marshal(list)
 	writeToolResult(w, req.ID, string(data))
+}
+
+func (h *MCPHandler) handleUnreadCounts(w http.ResponseWriter, req *protocol.Request, session *MCPSession) {
+	user, err := h.db.GetUserByUsername(session.Username)
+	if err != nil {
+		writeJSONRPCError(w, req.ID, protocol.InternalError, err.Error())
+		return
+	}
+
+	counts, err := h.db.GetUnreadCounts(user.ID)
+	if err != nil {
+		writeJSONRPCError(w, req.ID, protocol.InternalError, err.Error())
+		return
+	}
+
+	type countInfo struct {
+		Channel      string `json:"channel"`
+		UnreadCount  int    `json:"unread_count"`
+		MentionCount int    `json:"mention_count"`
+	}
+	var list []countInfo
+	for _, c := range counts {
+		list = append(list, countInfo{
+			Channel:      c.ChannelName,
+			UnreadCount:  c.UnreadCount,
+			MentionCount: c.MentionCount,
+		})
+	}
+
+	data, _ := json.Marshal(list)
+	writeToolResult(w, req.ID, string(data))
+}
+
+func (h *MCPHandler) handleMarkRead(w http.ResponseWriter, req *protocol.Request, args json.RawMessage, session *MCPSession) {
+	var a struct {
+		Channel   string `json:"channel"`
+		MessageID *int64 `json:"message_id"`
+	}
+	if err := json.Unmarshal(args, &a); err != nil {
+		writeJSONRPCError(w, req.ID, protocol.InvalidParams, "invalid arguments")
+		return
+	}
+
+	user, err := h.db.GetUserByUsername(session.Username)
+	if err != nil {
+		writeJSONRPCError(w, req.ID, protocol.InternalError, err.Error())
+		return
+	}
+
+	ch, err := h.getChannelByName(a.Channel)
+	if err != nil {
+		writeJSONRPCError(w, req.ID, -32001, err.Error())
+		return
+	}
+
+	isMember, err := h.db.IsChannelMember(ch.ID, user.ID)
+	if err != nil {
+		writeJSONRPCError(w, req.ID, protocol.InternalError, err.Error())
+		return
+	}
+	if !isMember {
+		writeJSONRPCError(w, req.ID, -32001, "you are not a participant of this channel")
+		return
+	}
+
+	if err := h.db.MarkRead(user.ID, ch.ID, a.MessageID); err != nil {
+		writeJSONRPCError(w, req.ID, protocol.InternalError, err.Error())
+		return
+	}
+
+	writeToolResult(w, req.ID, fmt.Sprintf("marked %s as read", a.Channel))
 }
 
 func (h *MCPHandler) getChannelByName(name string) (*db.Channel, error) {
