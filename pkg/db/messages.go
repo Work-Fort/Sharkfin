@@ -11,6 +11,7 @@ import (
 // UnreadCount holds per-channel unread and mention counts.
 type UnreadCount struct {
 	ChannelName  string
+	ChannelType  string
 	UnreadCount  int
 	MentionCount int
 }
@@ -344,7 +345,7 @@ func (d *DB) loadMentions(messages []Message) error {
 // Only returns channels with >0 unreads. Excludes the user's own messages.
 func (d *DB) GetUnreadCounts(userID int64) ([]UnreadCount, error) {
 	rows, err := d.db.Query(`
-		SELECT c.name,
+		SELECT c.name, c.type,
 		       COUNT(m.id) AS unread_count,
 		       COUNT(mm.message_id) AS mention_count
 		FROM channel_members cm
@@ -367,7 +368,7 @@ func (d *DB) GetUnreadCounts(userID int64) ([]UnreadCount, error) {
 	var counts []UnreadCount
 	for rows.Next() {
 		var c UnreadCount
-		if err := rows.Scan(&c.ChannelName, &c.UnreadCount, &c.MentionCount); err != nil {
+		if err := rows.Scan(&c.ChannelName, &c.ChannelType, &c.UnreadCount, &c.MentionCount); err != nil {
 			return nil, fmt.Errorf("scan unread count: %w", err)
 		}
 		counts = append(counts, c)

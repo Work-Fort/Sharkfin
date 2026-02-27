@@ -57,13 +57,14 @@ func (h *Hub) Unregister(client *WSClient) {
 }
 
 // BroadcastMessage sends a message.new event to all connected members of a channel.
-func (h *Hub) BroadcastMessage(channelID int64, channelName string, msg db.Message, mentions []string, threadID *int64, database *db.DB) {
+func (h *Hub) BroadcastMessage(channelID int64, channelName string, channelType string, msg db.Message, mentions []string, threadID *int64, database *db.DB) {
 	d := map[string]interface{}{
-		"id":      msg.ID,
-		"channel": channelName,
-		"from":    msg.Username,
-		"body":    msg.Body,
-		"sent_at": msg.CreatedAt.UTC().Format(time.RFC3339),
+		"id":           msg.ID,
+		"channel":      channelName,
+		"channel_type": channelType,
+		"from":         msg.Username,
+		"body":         msg.Body,
+		"sent_at":      msg.CreatedAt.UTC().Format(time.RFC3339),
 	}
 	if threadID != nil {
 		d["thread_id"] = *threadID

@@ -217,6 +217,25 @@ func (h *MCPHandler) handleToolsList(w http.ResponseWriter, req *protocol.Reques
 					"required": []string{"channel"},
 				},
 			},
+			{
+				"name":        "dm_list",
+				"description": "List your direct message conversations with other users",
+				"inputSchema": map[string]interface{}{
+					"type":       "object",
+					"properties": map[string]interface{}{},
+				},
+			},
+			{
+				"name":        "dm_open",
+				"description": "Open or create a direct message conversation with another user. Returns the DM channel name.",
+				"inputSchema": map[string]interface{}{
+					"type": "object",
+					"properties": map[string]interface{}{
+						"username": map[string]string{"type": "string", "description": "Username of the person to DM"},
+					},
+					"required": []string{"username"},
+				},
+			},
 		},
 	}
 
@@ -270,6 +289,10 @@ func (h *MCPHandler) handleToolsCall(w http.ResponseWriter, req *protocol.Reques
 		h.handleMarkRead(w, req, params.Arguments, session)
 	case "history":
 		h.handleHistory(w, req, params.Arguments, session)
+	case "dm_list":
+		h.handleDMList(w, req, session)
+	case "dm_open":
+		h.handleDMOpen(w, req, params.Arguments, session)
 	default:
 		writeJSONRPCError(w, req.ID, protocol.MethodNotFound, fmt.Sprintf("unknown tool: %s", params.Name))
 	}
@@ -422,7 +445,7 @@ func (h *MCPHandler) handleChannelCreate(w http.ResponseWriter, req *protocol.Re
 		}
 	}
 
-	chID, err := h.db.CreateChannel(a.Name, a.Public, memberIDs)
+	chID, err := h.db.CreateChannel(a.Name, a.Public, memberIDs, "channel")
 	if err != nil {
 		writeJSONRPCError(w, req.ID, protocol.InternalError, err.Error())
 		return
@@ -531,7 +554,7 @@ func (h *MCPHandler) handleSendMessage(w http.ResponseWriter, req *protocol.Requ
 		CreatedAt: time.Now(),
 		Username:  session.Username,
 	}
-	h.hub.BroadcastMessage(ch.ID, a.Channel, msg, mentionUsernames, a.ThreadID, h.db)
+	h.hub.BroadcastMessage(ch.ID, a.Channel, ch.Type, msg, mentionUsernames, a.ThreadID, h.db)
 }
 
 func (h *MCPHandler) handleUnreadMessages(w http.ResponseWriter, req *protocol.Request, args json.RawMessage, session *MCPSession) {
@@ -685,6 +708,7 @@ func (h *MCPHandler) handleUnreadCounts(w http.ResponseWriter, req *protocol.Req
 
 	type countInfo struct {
 		Channel      string `json:"channel"`
+		Type         string `json:"type"`
 		UnreadCount  int    `json:"unread_count"`
 		MentionCount int    `json:"mention_count"`
 	}
@@ -692,6 +716,7 @@ func (h *MCPHandler) handleUnreadCounts(w http.ResponseWriter, req *protocol.Req
 	for _, c := range counts {
 		list = append(list, countInfo{
 			Channel:      c.ChannelName,
+			Type:         c.ChannelType,
 			UnreadCount:  c.UnreadCount,
 			MentionCount: c.MentionCount,
 		})
@@ -739,6 +764,73 @@ func (h *MCPHandler) handleMarkRead(w http.ResponseWriter, req *protocol.Request
 	}
 
 	writeToolResult(w, req.ID, fmt.Sprintf("marked %s as read", a.Channel))
+}
+
+func (h *MCPHandler) handleDMList(w http.ResponseWriter, req *protocol.Request, session *MCPSession) {
+	user, err := h.db.GetUserByUsername(session.Username)
+	if err != nil {
+		writeJSONRPCError(w, req.ID, protocol.InternalError, err.Error())
+		return
+	}
+
+	dms, err := h.db.ListDMsForUser(user.ID)
+	if err != nil {
+		writeJSONRPCError(w, req.ID, protocol.InternalError, err.Error())
+		return
+	}
+
+	type dmInfo struct {
+		Channel     string `json:"channel"`
+		Participant string `json:"participant"`
+	}
+	var list []dmInfo
+	for _, dm := range dms {
+		list = append(list, dmInfo{Channel: dm.Channel, Participant: dm.Participant})
+	}
+
+	data, _ := json.Marshal(list)
+	writeToolResult(w, req.ID, string(data))
+}
+
+func (h *MCPHandler) handleDMOpen(w http.ResponseWriter, req *protocol.Request, args json.RawMessage, session *MCPSession) {
+	var a struct {
+		Username string `json:"username"`
+	}
+	if err := json.Unmarshal(args, &a); err != nil {
+		writeJSONRPCError(w, req.ID, protocol.InvalidParams, "invalid arguments")
+		return
+	}
+
+	if a.Username == session.Username {
+		writeJSONRPCError(w, req.ID, -32001, "cannot open DM with yourself")
+		return
+	}
+
+	caller, err := h.db.GetUserByUsername(session.Username)
+	if err != nil {
+		writeJSONRPCError(w, req.ID, protocol.InternalError, err.Error())
+		return
+	}
+
+	other, err := h.db.GetUserByUsername(a.Username)
+	if err != nil {
+		writeJSONRPCError(w, req.ID, -32001, fmt.Sprintf("user not found: %s", a.Username))
+		return
+	}
+
+	dmName, created, err := h.db.OpenDM(caller.ID, other.ID, a.Username)
+	if err != nil {
+		writeJSONRPCError(w, req.ID, protocol.InternalError, err.Error())
+		return
+	}
+
+	result := map[string]interface{}{
+		"channel":     dmName,
+		"participant": a.Username,
+		"created":     created,
+	}
+	data, _ := json.Marshal(result)
+	writeToolResult(w, req.ID, string(data))
 }
 
 func (h *MCPHandler) getChannelByName(name string) (*db.Channel, error) {

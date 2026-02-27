@@ -79,7 +79,7 @@ func TestCreateChannel(t *testing.T) {
 	aliceID, _ := d.CreateUser("alice", "")
 	bobID, _ := d.CreateUser("bob", "")
 
-	chID, err := d.CreateChannel("general", true, []int64{aliceID, bobID})
+	chID, err := d.CreateChannel("general", true, []int64{aliceID, bobID}, "channel")
 	if err != nil {
 		t.Fatalf("create channel: %v", err)
 	}
@@ -94,7 +94,7 @@ func TestListChannelsPublicVisibility(t *testing.T) {
 	bobID, _ := d.CreateUser("bob", "")
 	charlieID, _ := d.CreateUser("charlie", "")
 
-	d.CreateChannel("public-ch", true, []int64{aliceID, bobID})
+	d.CreateChannel("public-ch", true, []int64{aliceID, bobID}, "channel")
 
 	// Charlie is not a member but should see public channels
 	channels, err := d.ListChannelsForUser(charlieID)
@@ -115,7 +115,7 @@ func TestListChannelsPrivateNotVisible(t *testing.T) {
 	bobID, _ := d.CreateUser("bob", "")
 	charlieID, _ := d.CreateUser("charlie", "")
 
-	d.CreateChannel("secret", false, []int64{aliceID, bobID})
+	d.CreateChannel("secret", false, []int64{aliceID, bobID}, "channel")
 
 	// Charlie should not see private channel
 	channels, err := d.ListChannelsForUser(charlieID)
@@ -142,7 +142,7 @@ func TestAddChannelMember(t *testing.T) {
 	bobID, _ := d.CreateUser("bob", "")
 	charlieID, _ := d.CreateUser("charlie", "")
 
-	chID, _ := d.CreateChannel("private", false, []int64{aliceID, bobID})
+	chID, _ := d.CreateChannel("private", false, []int64{aliceID, bobID}, "channel")
 
 	if err := d.AddChannelMember(chID, charlieID); err != nil {
 		t.Fatalf("add member: %v", err)
@@ -162,7 +162,7 @@ func TestIsChannelMember(t *testing.T) {
 	aliceID, _ := d.CreateUser("alice", "")
 	bobID, _ := d.CreateUser("bob", "")
 
-	chID, _ := d.CreateChannel("dm", false, []int64{aliceID})
+	chID, _ := d.CreateChannel("dm", false, []int64{aliceID}, "channel")
 
 	ok, _ := d.IsChannelMember(chID, aliceID)
 	if !ok {
@@ -180,7 +180,7 @@ func TestIsChannelMember(t *testing.T) {
 func TestSendMessage(t *testing.T) {
 	d := newTestDB(t)
 	aliceID, _ := d.CreateUser("alice", "")
-	chID, _ := d.CreateChannel("general", true, []int64{aliceID})
+	chID, _ := d.CreateChannel("general", true, []int64{aliceID}, "channel")
 
 	msgID, err := d.SendMessage(chID, aliceID, "hello world", nil, nil)
 	if err != nil {
@@ -195,7 +195,7 @@ func TestUnreadMessagesFirstRead(t *testing.T) {
 	d := newTestDB(t)
 	aliceID, _ := d.CreateUser("alice", "")
 	bobID, _ := d.CreateUser("bob", "")
-	chID, _ := d.CreateChannel("dm", false, []int64{aliceID, bobID})
+	chID, _ := d.CreateChannel("dm", false, []int64{aliceID, bobID}, "channel")
 
 	d.SendMessage(chID, aliceID, "msg1", nil, nil)
 	d.SendMessage(chID, aliceID, "msg2", nil, nil)
@@ -216,7 +216,7 @@ func TestUnreadMessagesAdvancesCursor(t *testing.T) {
 	d := newTestDB(t)
 	aliceID, _ := d.CreateUser("alice", "")
 	bobID, _ := d.CreateUser("bob", "")
-	chID, _ := d.CreateChannel("dm", false, []int64{aliceID, bobID})
+	chID, _ := d.CreateChannel("dm", false, []int64{aliceID, bobID}, "channel")
 
 	d.SendMessage(chID, aliceID, "msg1", nil, nil)
 	d.GetUnreadMessages(bobID, nil, false, nil)
@@ -248,8 +248,8 @@ func TestUnreadMessagesFilterByChannel(t *testing.T) {
 	d := newTestDB(t)
 	aliceID, _ := d.CreateUser("alice", "")
 	bobID, _ := d.CreateUser("bob", "")
-	ch1, _ := d.CreateChannel("ch1", false, []int64{aliceID, bobID})
-	ch2, _ := d.CreateChannel("ch2", false, []int64{aliceID, bobID})
+	ch1, _ := d.CreateChannel("ch1", false, []int64{aliceID, bobID}, "channel")
+	ch2, _ := d.CreateChannel("ch2", false, []int64{aliceID, bobID}, "channel")
 
 	d.SendMessage(ch1, aliceID, "in ch1", nil, nil)
 	d.SendMessage(ch2, aliceID, "in ch2", nil, nil)
@@ -330,7 +330,7 @@ func TestListSettings(t *testing.T) {
 func TestGetMessages(t *testing.T) {
 	d := newTestDB(t)
 	aliceID, _ := d.CreateUser("alice", "")
-	chID, _ := d.CreateChannel("general", true, []int64{aliceID})
+	chID, _ := d.CreateChannel("general", true, []int64{aliceID}, "channel")
 
 	for i := 0; i < 5; i++ {
 		d.SendMessage(chID, aliceID, fmt.Sprintf("msg%d", i), nil, nil)
@@ -353,7 +353,7 @@ func TestGetMessages(t *testing.T) {
 func TestGetMessagesBefore(t *testing.T) {
 	d := newTestDB(t)
 	aliceID, _ := d.CreateUser("alice", "")
-	chID, _ := d.CreateChannel("general", true, []int64{aliceID})
+	chID, _ := d.CreateChannel("general", true, []int64{aliceID}, "channel")
 
 	var ids []int64
 	for i := 0; i < 5; i++ {
@@ -377,7 +377,7 @@ func TestGetMessagesBefore(t *testing.T) {
 func TestGetMessagesAfter(t *testing.T) {
 	d := newTestDB(t)
 	aliceID, _ := d.CreateUser("alice", "")
-	chID, _ := d.CreateChannel("general", true, []int64{aliceID})
+	chID, _ := d.CreateChannel("general", true, []int64{aliceID}, "channel")
 
 	var ids []int64
 	for i := 0; i < 5; i++ {
@@ -401,7 +401,7 @@ func TestGetMessagesAfter(t *testing.T) {
 func TestGetMessagesLimit(t *testing.T) {
 	d := newTestDB(t)
 	aliceID, _ := d.CreateUser("alice", "")
-	chID, _ := d.CreateChannel("general", true, []int64{aliceID})
+	chID, _ := d.CreateChannel("general", true, []int64{aliceID}, "channel")
 
 	for i := 0; i < 10; i++ {
 		d.SendMessage(chID, aliceID, fmt.Sprintf("msg%d", i), nil, nil)
@@ -423,7 +423,7 @@ func TestGetMessagesLimit(t *testing.T) {
 func TestGetMessagesIncludesUsername(t *testing.T) {
 	d := newTestDB(t)
 	aliceID, _ := d.CreateUser("alice", "")
-	chID, _ := d.CreateChannel("general", true, []int64{aliceID})
+	chID, _ := d.CreateChannel("general", true, []int64{aliceID}, "channel")
 	d.SendMessage(chID, aliceID, "hello", nil, nil)
 
 	msgs, _ := d.GetMessages(chID, nil, nil, 50, nil)
@@ -439,7 +439,7 @@ func TestUnreadExcludesOwnMessages(t *testing.T) {
 	d := newTestDB(t)
 	aliceID, _ := d.CreateUser("alice", "")
 	bobID, _ := d.CreateUser("bob", "")
-	chID, _ := d.CreateChannel("dm", false, []int64{aliceID, bobID})
+	chID, _ := d.CreateChannel("dm", false, []int64{aliceID, bobID}, "channel")
 
 	d.SendMessage(chID, aliceID, "from alice", nil, nil)
 	d.SendMessage(chID, bobID, "from bob", nil, nil)
@@ -478,7 +478,7 @@ func TestUnreadExcludesOwnMessages(t *testing.T) {
 func TestSendMessageWithThread(t *testing.T) {
 	d := newTestDB(t)
 	aliceID, _ := d.CreateUser("alice", "")
-	chID, _ := d.CreateChannel("general", true, []int64{aliceID})
+	chID, _ := d.CreateChannel("general", true, []int64{aliceID}, "channel")
 
 	parentID, _ := d.SendMessage(chID, aliceID, "parent message", nil, nil)
 	replyID, err := d.SendMessage(chID, aliceID, "reply message", &parentID, nil)
@@ -493,7 +493,7 @@ func TestSendMessageWithThread(t *testing.T) {
 func TestSendMessageRejectNestedReply(t *testing.T) {
 	d := newTestDB(t)
 	aliceID, _ := d.CreateUser("alice", "")
-	chID, _ := d.CreateChannel("general", true, []int64{aliceID})
+	chID, _ := d.CreateChannel("general", true, []int64{aliceID}, "channel")
 
 	parentID, _ := d.SendMessage(chID, aliceID, "parent", nil, nil)
 	replyID, _ := d.SendMessage(chID, aliceID, "reply", &parentID, nil)
@@ -506,8 +506,8 @@ func TestSendMessageRejectNestedReply(t *testing.T) {
 func TestSendMessageRejectCrossChannelThread(t *testing.T) {
 	d := newTestDB(t)
 	aliceID, _ := d.CreateUser("alice", "")
-	ch1, _ := d.CreateChannel("ch1", true, []int64{aliceID})
-	ch2, _ := d.CreateChannel("ch2", true, []int64{aliceID})
+	ch1, _ := d.CreateChannel("ch1", true, []int64{aliceID}, "channel")
+	ch2, _ := d.CreateChannel("ch2", true, []int64{aliceID}, "channel")
 
 	parentID, _ := d.SendMessage(ch1, aliceID, "parent in ch1", nil, nil)
 	_, err := d.SendMessage(ch2, aliceID, "reply in ch2", &parentID, nil)
@@ -519,7 +519,7 @@ func TestSendMessageRejectCrossChannelThread(t *testing.T) {
 func TestGetMessagesThreadFilter(t *testing.T) {
 	d := newTestDB(t)
 	aliceID, _ := d.CreateUser("alice", "")
-	chID, _ := d.CreateChannel("general", true, []int64{aliceID})
+	chID, _ := d.CreateChannel("general", true, []int64{aliceID}, "channel")
 
 	parentID, _ := d.SendMessage(chID, aliceID, "parent", nil, nil)
 	d.SendMessage(chID, aliceID, "reply1", &parentID, nil)
@@ -544,7 +544,7 @@ func TestSendMessageWithMentions(t *testing.T) {
 	d := newTestDB(t)
 	aliceID, _ := d.CreateUser("alice", "")
 	bobID, _ := d.CreateUser("bob", "")
-	chID, _ := d.CreateChannel("general", true, []int64{aliceID, bobID})
+	chID, _ := d.CreateChannel("general", true, []int64{aliceID, bobID}, "channel")
 
 	_, err := d.SendMessage(chID, aliceID, "hey @bob", nil, []int64{bobID})
 	if err != nil {
@@ -564,7 +564,7 @@ func TestUnreadMessagesMentionsOnly(t *testing.T) {
 	d := newTestDB(t)
 	aliceID, _ := d.CreateUser("alice", "")
 	bobID, _ := d.CreateUser("bob", "")
-	chID, _ := d.CreateChannel("dm", false, []int64{aliceID, bobID})
+	chID, _ := d.CreateChannel("dm", false, []int64{aliceID, bobID}, "channel")
 
 	d.SendMessage(chID, aliceID, "no mention", nil, nil)
 	d.SendMessage(chID, aliceID, "hey @bob", nil, []int64{bobID})
@@ -585,7 +585,7 @@ func TestUnreadMessagesThreadFilter(t *testing.T) {
 	d := newTestDB(t)
 	aliceID, _ := d.CreateUser("alice", "")
 	bobID, _ := d.CreateUser("bob", "")
-	chID, _ := d.CreateChannel("dm", false, []int64{aliceID, bobID})
+	chID, _ := d.CreateChannel("dm", false, []int64{aliceID, bobID}, "channel")
 
 	parentID, _ := d.SendMessage(chID, aliceID, "parent", nil, nil)
 	d.SendMessage(chID, aliceID, "reply", &parentID, nil)
@@ -608,5 +608,127 @@ func TestUnreadMessagesThreadFilter(t *testing.T) {
 	}
 	if msgs[0].Body != "new reply" {
 		t.Errorf("body = %q, want 'new reply'", msgs[0].Body)
+	}
+}
+
+// --- DMs ---
+
+func TestOpenDMCreatesAndFinds(t *testing.T) {
+	d := newTestDB(t)
+	aliceID, _ := d.CreateUser("alice", "")
+	bobID, _ := d.CreateUser("bob", "")
+
+	// First call creates
+	name, created, err := d.OpenDM(aliceID, bobID, "bob")
+	if err != nil {
+		t.Fatalf("open dm: %v", err)
+	}
+	if !created {
+		t.Error("expected created=true on first call")
+	}
+	if name != "dm-alice-bob" {
+		t.Errorf("name = %q, want dm-alice-bob", name)
+	}
+
+	// Second call finds existing
+	name2, created2, err := d.OpenDM(bobID, aliceID, "alice")
+	if err != nil {
+		t.Fatalf("open dm again: %v", err)
+	}
+	if created2 {
+		t.Error("expected created=false on second call")
+	}
+	if name2 != name {
+		t.Errorf("name = %q, want %q", name2, name)
+	}
+}
+
+func TestListDMsForUser(t *testing.T) {
+	d := newTestDB(t)
+	aliceID, _ := d.CreateUser("alice", "")
+	bobID, _ := d.CreateUser("bob", "")
+	charlieID, _ := d.CreateUser("charlie", "")
+
+	d.OpenDM(aliceID, bobID, "bob")
+	d.OpenDM(aliceID, charlieID, "charlie")
+
+	dms, err := d.ListDMsForUser(aliceID)
+	if err != nil {
+		t.Fatalf("list dms: %v", err)
+	}
+	if len(dms) != 2 {
+		t.Fatalf("expected 2 dms, got %d", len(dms))
+	}
+	// Ordered by participant username
+	if dms[0].Participant != "bob" || dms[1].Participant != "charlie" {
+		t.Errorf("participants = [%s, %s], want [bob, charlie]", dms[0].Participant, dms[1].Participant)
+	}
+
+	// Bob should only see one DM
+	bobDMs, err := d.ListDMsForUser(bobID)
+	if err != nil {
+		t.Fatalf("list bob dms: %v", err)
+	}
+	if len(bobDMs) != 1 {
+		t.Fatalf("expected 1 dm for bob, got %d", len(bobDMs))
+	}
+	if bobDMs[0].Participant != "alice" {
+		t.Errorf("participant = %q, want alice", bobDMs[0].Participant)
+	}
+}
+
+func TestChannelListExcludesDMs(t *testing.T) {
+	d := newTestDB(t)
+	aliceID, _ := d.CreateUser("alice", "")
+	bobID, _ := d.CreateUser("bob", "")
+
+	d.CreateChannel("general", true, []int64{aliceID, bobID}, "channel")
+	d.OpenDM(aliceID, bobID, "bob")
+
+	channels, err := d.ListChannelsForUser(aliceID)
+	if err != nil {
+		t.Fatalf("list channels: %v", err)
+	}
+	for _, ch := range channels {
+		if ch.Type == "dm" {
+			t.Errorf("channel_list should not include DMs, got %q", ch.Name)
+		}
+	}
+	if len(channels) != 1 {
+		t.Errorf("expected 1 channel, got %d", len(channels))
+	}
+}
+
+func TestUnreadCountsIncludesType(t *testing.T) {
+	d := newTestDB(t)
+	aliceID, _ := d.CreateUser("alice", "")
+	bobID, _ := d.CreateUser("bob", "")
+
+	d.CreateChannel("general", true, []int64{aliceID, bobID}, "channel")
+	d.OpenDM(aliceID, bobID, "bob")
+
+	ch, _ := d.GetChannelByName("general")
+	dm, _ := d.GetChannelByName("dm-alice-bob")
+
+	d.SendMessage(ch.ID, aliceID, "hello channel", nil, nil)
+	d.SendMessage(dm.ID, aliceID, "hello dm", nil, nil)
+
+	counts, err := d.GetUnreadCounts(bobID)
+	if err != nil {
+		t.Fatalf("get unread counts: %v", err)
+	}
+	if len(counts) != 2 {
+		t.Fatalf("expected 2 counts, got %d", len(counts))
+	}
+
+	typeMap := make(map[string]string)
+	for _, c := range counts {
+		typeMap[c.ChannelName] = c.ChannelType
+	}
+	if typeMap["general"] != "channel" {
+		t.Errorf("general type = %q, want channel", typeMap["general"])
+	}
+	if typeMap["dm-alice-bob"] != "dm" {
+		t.Errorf("dm type = %q, want dm", typeMap["dm-alice-bob"])
 	}
 }

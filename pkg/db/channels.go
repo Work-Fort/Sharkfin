@@ -12,18 +12,23 @@ type Channel struct {
 	ID        int64
 	Name      string
 	Public    bool
+	Type      string // "channel" or "dm"
 	CreatedAt time.Time
 }
 
 // CreateChannel creates a channel with the given members in a transaction.
-func (d *DB) CreateChannel(name string, public bool, memberIDs []int64) (int64, error) {
+// channelType should be "channel" or "dm".
+func (d *DB) CreateChannel(name string, public bool, memberIDs []int64, channelType string) (int64, error) {
+	if channelType == "" {
+		channelType = "channel"
+	}
 	tx, err := d.db.Begin()
 	if err != nil {
 		return 0, fmt.Errorf("begin tx: %w", err)
 	}
 	defer tx.Rollback()
 
-	res, err := tx.Exec("INSERT INTO channels (name, public) VALUES (?, ?)", name, public)
+	res, err := tx.Exec("INSERT INTO channels (name, public, type) VALUES (?, ?, ?)", name, public, channelType)
 	if err != nil {
 		return 0, fmt.Errorf("insert channel: %w", err)
 	}
@@ -51,16 +56,16 @@ type ChannelWithMembership struct {
 	Member bool
 }
 
-// ListChannelsForUser returns channels visible to a user:
+// ListChannelsForUser returns non-DM channels visible to a user:
 // all public channels plus private channels where the user is a member.
 // Each result includes whether the user is a member.
 func (d *DB) ListChannelsForUser(userID int64) ([]ChannelWithMembership, error) {
 	rows, err := d.db.Query(`
-		SELECT DISTINCT c.id, c.name, c.public, c.created_at,
+		SELECT DISTINCT c.id, c.name, c.public, c.type, c.created_at,
 			CASE WHEN cm.user_id IS NOT NULL THEN 1 ELSE 0 END AS member
 		FROM channels c
 		LEFT JOIN channel_members cm ON c.id = cm.channel_id AND cm.user_id = ?
-		WHERE c.public = 1 OR cm.user_id IS NOT NULL
+		WHERE c.type = 'channel' AND (c.public = 1 OR cm.user_id IS NOT NULL)
 		ORDER BY c.name
 	`, userID)
 	if err != nil {
@@ -71,7 +76,7 @@ func (d *DB) ListChannelsForUser(userID int64) ([]ChannelWithMembership, error) 
 	var channels []ChannelWithMembership
 	for rows.Next() {
 		var ch ChannelWithMembership
-		if err := rows.Scan(&ch.ID, &ch.Name, &ch.Public, &ch.CreatedAt, &ch.Member); err != nil {
+		if err := rows.Scan(&ch.ID, &ch.Name, &ch.Public, &ch.Type, &ch.CreatedAt, &ch.Member); err != nil {
 			return nil, fmt.Errorf("scan channel: %w", err)
 		}
 		channels = append(channels, ch)
@@ -79,13 +84,14 @@ func (d *DB) ListChannelsForUser(userID int64) ([]ChannelWithMembership, error) 
 	return channels, rows.Err()
 }
 
-// ListAllChannelsWithMembership returns all channels with membership status for the given user.
+// ListAllChannelsWithMembership returns all non-DM channels with membership status for the given user.
 func (d *DB) ListAllChannelsWithMembership(userID int64) ([]ChannelWithMembership, error) {
 	rows, err := d.db.Query(`
-		SELECT c.id, c.name, c.public, c.created_at,
+		SELECT c.id, c.name, c.public, c.type, c.created_at,
 			CASE WHEN cm.user_id IS NOT NULL THEN 1 ELSE 0 END AS member
 		FROM channels c
 		LEFT JOIN channel_members cm ON c.id = cm.channel_id AND cm.user_id = ?
+		WHERE c.type = 'channel'
 		ORDER BY c.name
 	`, userID)
 	if err != nil {
@@ -96,7 +102,7 @@ func (d *DB) ListAllChannelsWithMembership(userID int64) ([]ChannelWithMembershi
 	var channels []ChannelWithMembership
 	for rows.Next() {
 		var ch ChannelWithMembership
-		if err := rows.Scan(&ch.ID, &ch.Name, &ch.Public, &ch.CreatedAt, &ch.Member); err != nil {
+		if err := rows.Scan(&ch.ID, &ch.Name, &ch.Public, &ch.Type, &ch.CreatedAt, &ch.Member); err != nil {
 			return nil, fmt.Errorf("scan channel: %w", err)
 		}
 		channels = append(channels, ch)
@@ -108,9 +114,9 @@ func (d *DB) ListAllChannelsWithMembership(userID int64) ([]ChannelWithMembershi
 func (d *DB) GetChannelByID(id int64) (*Channel, error) {
 	var ch Channel
 	err := d.db.QueryRow(
-		"SELECT id, name, public, created_at FROM channels WHERE id = ?",
+		"SELECT id, name, public, type, created_at FROM channels WHERE id = ?",
 		id,
-	).Scan(&ch.ID, &ch.Name, &ch.Public, &ch.CreatedAt)
+	).Scan(&ch.ID, &ch.Name, &ch.Public, &ch.Type, &ch.CreatedAt)
 	if err == sql.ErrNoRows {
 		return nil, fmt.Errorf("channel not found: %d", id)
 	}
@@ -124,9 +130,9 @@ func (d *DB) GetChannelByID(id int64) (*Channel, error) {
 func (d *DB) GetChannelByName(name string) (*Channel, error) {
 	var ch Channel
 	err := d.db.QueryRow(
-		"SELECT id, name, public, created_at FROM channels WHERE name = ?",
+		"SELECT id, name, public, type, created_at FROM channels WHERE name = ?",
 		name,
-	).Scan(&ch.ID, &ch.Name, &ch.Public, &ch.CreatedAt)
+	).Scan(&ch.ID, &ch.Name, &ch.Public, &ch.Type, &ch.CreatedAt)
 	if err == sql.ErrNoRows {
 		return nil, fmt.Errorf("channel not found: %s", name)
 	}
@@ -159,4 +165,78 @@ func (d *DB) IsChannelMember(channelID, userID int64) (bool, error) {
 		return false, fmt.Errorf("check membership: %w", err)
 	}
 	return count > 0, nil
+}
+
+// DMInfo holds a DM channel with the other participant's username.
+type DMInfo struct {
+	Channel     string
+	Participant string
+}
+
+// ListDMsForUser returns all DM channels the user is a member of,
+// with the other participant's username.
+func (d *DB) ListDMsForUser(userID int64) ([]DMInfo, error) {
+	rows, err := d.db.Query(`
+		SELECT c.name, u.username
+		FROM channels c
+		JOIN channel_members cm1 ON c.id = cm1.channel_id AND cm1.user_id = ?
+		JOIN channel_members cm2 ON c.id = cm2.channel_id AND cm2.user_id != ?
+		JOIN users u ON cm2.user_id = u.id
+		WHERE c.type = 'dm'
+		ORDER BY u.username
+	`, userID, userID)
+	if err != nil {
+		return nil, fmt.Errorf("list dms: %w", err)
+	}
+	defer rows.Close()
+
+	var dms []DMInfo
+	for rows.Next() {
+		var dm DMInfo
+		if err := rows.Scan(&dm.Channel, &dm.Participant); err != nil {
+			return nil, fmt.Errorf("scan dm: %w", err)
+		}
+		dms = append(dms, dm)
+	}
+	return dms, rows.Err()
+}
+
+// OpenDM finds or creates a DM channel between two users.
+// Returns the channel name and whether it was newly created.
+func (d *DB) OpenDM(userID, otherUserID int64, otherUsername string) (string, bool, error) {
+	// Look for existing DM between the two users.
+	var name string
+	err := d.db.QueryRow(`
+		SELECT c.name FROM channels c
+		JOIN channel_members cm1 ON c.id = cm1.channel_id AND cm1.user_id = ?
+		JOIN channel_members cm2 ON c.id = cm2.channel_id AND cm2.user_id = ?
+		WHERE c.type = 'dm'
+		LIMIT 1
+	`, userID, otherUserID).Scan(&name)
+	if err == nil {
+		return name, false, nil
+	}
+	if err != sql.ErrNoRows {
+		return "", false, fmt.Errorf("find dm: %w", err)
+	}
+
+	// Create a new DM channel.
+	// Use a deterministic name: dm-<lower-username>-<higher-username>
+	callerUsername := ""
+	if err := d.db.QueryRow("SELECT username FROM users WHERE id = ?", userID).Scan(&callerUsername); err != nil {
+		return "", false, fmt.Errorf("get caller username: %w", err)
+	}
+
+	first, second := callerUsername, otherUsername
+	if first > second {
+		first, second = second, first
+	}
+	dmName := fmt.Sprintf("dm-%s-%s", first, second)
+
+	chID, err := d.CreateChannel(dmName, false, []int64{userID, otherUserID}, "dm")
+	if err != nil {
+		return "", false, fmt.Errorf("create dm: %w", err)
+	}
+	_ = chID
+	return dmName, true, nil
 }

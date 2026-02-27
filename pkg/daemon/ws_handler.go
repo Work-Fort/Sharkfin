@@ -207,6 +207,10 @@ func (h *WSHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			h.handleWSUnreadMessages(sendCh, req.Ref, req.D, userID)
 		case "unread_counts":
 			h.handleWSUnreadCounts(sendCh, req.Ref, userID)
+		case "dm_list":
+			h.handleWSDMList(sendCh, req.Ref, userID)
+		case "dm_open":
+			h.handleWSDMOpen(sendCh, req.Ref, req.D, username, userID)
 		case "mark_read":
 			h.handleWSMarkRead(sendCh, req.Ref, req.D, userID)
 		case "set_setting":
@@ -295,7 +299,7 @@ func (h *WSHandler) handleWSChannelCreate(sendCh chan<- []byte, ref string, rawD
 		}
 	}
 
-	_, err = h.db.CreateChannel(d.Name, d.Public, memberIDs)
+	_, err = h.db.CreateChannel(d.Name, d.Public, memberIDs, "channel")
 	if err != nil {
 		sendError(sendCh, ref, err.Error())
 		return
@@ -389,7 +393,7 @@ func (h *WSHandler) handleWSSendMessage(sendCh chan<- []byte, ref string, rawD j
 		CreatedAt: time.Now(),
 		Username:  username,
 	}
-	h.hub.BroadcastMessage(ch.ID, ch.Name, msg, mentionUsernames, d.ThreadID, h.db)
+	h.hub.BroadcastMessage(ch.ID, ch.Name, ch.Type, msg, mentionUsernames, d.ThreadID, h.db)
 }
 
 func (h *WSHandler) handleWSHistory(sendCh chan<- []byte, ref string, rawD json.RawMessage, userID int64) {
@@ -507,6 +511,7 @@ func (h *WSHandler) handleWSUnreadCounts(sendCh chan<- []byte, ref string, userI
 	}
 	type countInfo struct {
 		Channel      string `json:"channel"`
+		Type         string `json:"type"`
 		UnreadCount  int    `json:"unread_count"`
 		MentionCount int    `json:"mention_count"`
 	}
@@ -514,11 +519,64 @@ func (h *WSHandler) handleWSUnreadCounts(sendCh chan<- []byte, ref string, userI
 	for _, c := range counts {
 		list = append(list, countInfo{
 			Channel:      c.ChannelName,
+			Type:         c.ChannelType,
 			UnreadCount:  c.UnreadCount,
 			MentionCount: c.MentionCount,
 		})
 	}
 	sendReply(sendCh, ref, true, map[string]interface{}{"counts": list})
+}
+
+func (h *WSHandler) handleWSDMList(sendCh chan<- []byte, ref string, userID int64) {
+	dms, err := h.db.ListDMsForUser(userID)
+	if err != nil {
+		sendError(sendCh, ref, err.Error())
+		return
+	}
+	type dmInfo struct {
+		Channel     string `json:"channel"`
+		Participant string `json:"participant"`
+	}
+	var list []dmInfo
+	for _, dm := range dms {
+		list = append(list, dmInfo{Channel: dm.Channel, Participant: dm.Participant})
+	}
+	sendReply(sendCh, ref, true, map[string]interface{}{"dms": list})
+}
+
+func (h *WSHandler) handleWSDMOpen(sendCh chan<- []byte, ref string, rawD json.RawMessage, username string, userID int64) {
+	var d struct {
+		Username string `json:"username"`
+	}
+	if err := json.Unmarshal(rawD, &d); err != nil {
+		sendError(sendCh, ref, "invalid arguments")
+		return
+	}
+	if d.Username == "" {
+		sendError(sendCh, ref, "username is required")
+		return
+	}
+	if d.Username == username {
+		sendError(sendCh, ref, "cannot open DM with yourself")
+		return
+	}
+
+	other, err := h.db.GetUserByUsername(d.Username)
+	if err != nil {
+		sendError(sendCh, ref, fmt.Sprintf("user not found: %s", d.Username))
+		return
+	}
+
+	dmName, created, err := h.db.OpenDM(userID, other.ID, d.Username)
+	if err != nil {
+		sendError(sendCh, ref, err.Error())
+		return
+	}
+	sendReply(sendCh, ref, true, map[string]interface{}{
+		"channel":     dmName,
+		"participant": d.Username,
+		"created":     created,
+	})
 }
 
 func (h *WSHandler) handleWSMarkRead(sendCh chan<- []byte, ref string, rawD json.RawMessage, userID int64) {

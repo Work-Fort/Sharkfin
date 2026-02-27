@@ -156,6 +156,7 @@ func TestToolsList(t *testing.T) {
 		"user_list": true, "channel_list": true, "channel_create": true,
 		"channel_invite": true, "send_message": true, "unread_messages": true,
 		"unread_counts": true, "mark_read": true, "history": true,
+		"dm_list": true, "dm_open": true,
 	}
 	if len(result.Tools) != len(expected) {
 		t.Errorf("got %d tools, want %d", len(result.Tools), len(expected))
