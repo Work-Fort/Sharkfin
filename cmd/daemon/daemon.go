@@ -21,6 +21,7 @@ import (
 // NewDaemonCmd creates the daemon subcommand.
 func NewDaemonCmd() *cobra.Command {
 	var allowChannelCreation bool
+	var webhookURL string
 
 	cmd := &cobra.Command{
 		Use:   "daemon",
@@ -36,7 +37,7 @@ func NewDaemonCmd() *cobra.Command {
 				return fmt.Errorf("invalid presence-timeout %q: %w", timeoutStr, err)
 			}
 
-			srv, err := pkgdaemon.NewServer(addr, dbPath, allowChannelCreation, pongTimeout)
+			srv, err := pkgdaemon.NewServer(addr, dbPath, allowChannelCreation, pongTimeout, webhookURL)
 			if err != nil {
 				return fmt.Errorf("create server: %w", err)
 			}
@@ -66,6 +67,7 @@ func NewDaemonCmd() *cobra.Command {
 	}
 
 	cmd.Flags().BoolVar(&allowChannelCreation, "allow-channel-creation", true, "Allow users to create channels")
+	cmd.Flags().StringVar(&webhookURL, "webhook-url", "", "URL to POST webhook notifications to on mentions and DMs")
 
 	return cmd
 }

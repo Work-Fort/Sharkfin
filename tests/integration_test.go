@@ -37,7 +37,7 @@ func startTestServer(t *testing.T, allowChannelCreation bool) *testEnv {
 	addr := ln.Addr().String()
 	ln.Close()
 
-	srv, err := pkgdaemon.NewServer(addr, ":memory:", allowChannelCreation, 20*time.Second)
+	srv, err := pkgdaemon.NewServer(addr, ":memory:", allowChannelCreation, 20*time.Second, "")
 	if err != nil {
 		t.Fatalf("create server: %v", err)
 	}
