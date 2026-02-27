@@ -528,18 +528,18 @@ func (h *WSHandler) handleWSUnreadCounts(sendCh chan<- []byte, ref string, userI
 }
 
 func (h *WSHandler) handleWSDMList(sendCh chan<- []byte, ref string, userID int64) {
-	dms, err := h.db.ListDMsForUser(userID)
+	dms, err := h.db.ListAllDMs()
 	if err != nil {
 		sendError(sendCh, ref, err.Error())
 		return
 	}
 	type dmInfo struct {
-		Channel     string `json:"channel"`
-		Participant string `json:"participant"`
+		Channel      string   `json:"channel"`
+		Participants []string `json:"participants"`
 	}
 	var list []dmInfo
 	for _, dm := range dms {
-		list = append(list, dmInfo{Channel: dm.Channel, Participant: dm.Participant})
+		list = append(list, dmInfo{Channel: dm.Channel, Participants: dm.Participants})
 	}
 	sendReply(sendCh, ref, true, map[string]interface{}{"dms": list})
 }

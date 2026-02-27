@@ -201,6 +201,51 @@ func (d *DB) ListDMsForUser(userID int64) ([]DMInfo, error) {
 	return dms, rows.Err()
 }
 
+// AllDMInfo holds a DM channel with both participants' usernames.
+type AllDMInfo struct {
+	Channel      string
+	Participants []string
+}
+
+// ListAllDMs returns all DM channels with their participants (admin view).
+func (d *DB) ListAllDMs() ([]AllDMInfo, error) {
+	rows, err := d.db.Query(`
+		SELECT c.name, u.username
+		FROM channels c
+		JOIN channel_members cm ON c.id = cm.channel_id
+		JOIN users u ON cm.user_id = u.id
+		WHERE c.type = 'dm'
+		ORDER BY c.name, u.username
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("list all dms: %w", err)
+	}
+	defer rows.Close()
+
+	dmMap := make(map[string]*AllDMInfo)
+	var order []string
+	for rows.Next() {
+		var chName, username string
+		if err := rows.Scan(&chName, &username); err != nil {
+			return nil, fmt.Errorf("scan dm: %w", err)
+		}
+		if _, ok := dmMap[chName]; !ok {
+			dmMap[chName] = &AllDMInfo{Channel: chName}
+			order = append(order, chName)
+		}
+		dmMap[chName].Participants = append(dmMap[chName].Participants, username)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	dms := make([]AllDMInfo, 0, len(order))
+	for _, name := range order {
+		dms = append(dms, *dmMap[name])
+	}
+	return dms, nil
+}
+
 // OpenDM finds or creates a DM channel between two users.
 // Returns the channel name and whether it was newly created.
 func (d *DB) OpenDM(userID, otherUserID int64, otherUsername string) (string, bool, error) {
