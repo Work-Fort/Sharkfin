@@ -50,6 +50,18 @@ echo "Installed $BINARY_NAME to ~/.local/bin and systemd user service"
 echo "Run: systemctl --user enable --now sharkfin"
 """
 
+[tasks.deploy]
+description = "Stop service, rebuild + install, restart service"
+depends = ["build"]
+run = """
+systemctl --user stop sharkfin.service
+install -Dm755 "$BUILD_DIR/$BINARY_NAME" ~/.local/bin/$BINARY_NAME
+install -Dm644 dist/sharkfin.user.service ~/.config/systemd/user/sharkfin.service
+systemctl --user daemon-reload
+systemctl --user start sharkfin.service
+systemctl --user status sharkfin.service
+"""
+
 [tasks.ci]
 description = "Run all CI checks"
 depends = ["lint", "test", "e2e"]

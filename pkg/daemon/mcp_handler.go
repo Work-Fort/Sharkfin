@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/charmbracelet/log"
+
 	"github.com/Work-Fort/sharkfin/pkg/db"
 	"github.com/Work-Fort/sharkfin/pkg/protocol"
 )
@@ -228,6 +230,7 @@ func (h *MCPHandler) handleToolsCall(w http.ResponseWriter, req *protocol.Reques
 		return
 	}
 
+	t0 := time.Now()
 	switch params.Name {
 	case "user_list":
 		h.handleUserList(w, req, session)
@@ -245,6 +248,9 @@ func (h *MCPHandler) handleToolsCall(w http.ResponseWriter, req *protocol.Reques
 		h.handleHistory(w, req, params.Arguments, session)
 	default:
 		writeJSONRPCError(w, req.ID, protocol.MethodNotFound, fmt.Sprintf("unknown tool: %s", params.Name))
+	}
+	if elapsed := time.Since(t0); elapsed > 50*time.Millisecond {
+		log.Warn("mcp: slow tool", "tool", params.Name, "user", session.Username, "elapsed", elapsed)
 	}
 }
 

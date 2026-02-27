@@ -3,6 +3,7 @@ package harness
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -13,6 +14,7 @@ import (
 	"strings"
 	"sync"
 	"syscall"
+	"testing"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -39,6 +41,7 @@ type Daemon struct {
 	cmd    *exec.Cmd
 	addr   string
 	xdgDir string
+	stderr *bytes.Buffer
 }
 
 func StartDaemon(binary, addr string, opts ...DaemonOption) (*Daemon, error) {
@@ -62,6 +65,8 @@ func StartDaemon(binary, addr string, opts ...DaemonOption) (*Daemon, error) {
 		fmt.Sprintf("--allow-channel-creation=%t", cfg.allowChannelCreation),
 	}
 
+	var stderrBuf bytes.Buffer
+
 	cmd := exec.Command(binary, args...)
 	cmd.Env = append(os.Environ(),
 		"XDG_CONFIG_HOME="+xdgDir+"/config",
@@ -69,7 +74,7 @@ func StartDaemon(binary, addr string, opts ...DaemonOption) (*Daemon, error) {
 		fmt.Sprintf("SHARKFIN_PRESENCE_TIMEOUT=%s", cfg.presenceTimeout),
 	)
 	cmd.Stdout = os.Stderr
-	cmd.Stderr = os.Stderr
+	cmd.Stderr = io.MultiWriter(os.Stderr, &stderrBuf)
 
 	if err := cmd.Start(); err != nil {
 		os.RemoveAll(xdgDir)
@@ -81,7 +86,7 @@ func StartDaemon(binary, addr string, opts ...DaemonOption) (*Daemon, error) {
 		conn, err := net.DialTimeout("tcp", addr, 100*time.Millisecond)
 		if err == nil {
 			conn.Close()
-			return &Daemon{cmd: cmd, addr: addr, xdgDir: xdgDir}, nil
+			return &Daemon{cmd: cmd, addr: addr, xdgDir: xdgDir, stderr: &stderrBuf}, nil
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
@@ -94,6 +99,17 @@ func StartDaemon(binary, addr string, opts ...DaemonOption) (*Daemon, error) {
 
 func (d *Daemon) Addr() string   { return d.addr }
 func (d *Daemon) XDGDir() string { return d.xdgDir }
+
+// StopFatal stops the daemon and fails the test if a data race was detected.
+func (d *Daemon) StopFatal(t testing.TB) {
+	t.Helper()
+	if err := d.Stop(); err != nil {
+		t.Logf("daemon stop: %v", err)
+	}
+	if d.stderr != nil && strings.Contains(d.stderr.String(), "DATA RACE") {
+		t.Fatal("data race detected in daemon (see stderr output above)")
+	}
+}
 
 func (d *Daemon) Stop() error {
 	if d.cmd.Process == nil {

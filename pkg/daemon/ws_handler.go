@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/charmbracelet/log"
 	"github.com/gorilla/websocket"
 
 	"github.com/Work-Fort/sharkfin/pkg/db"
@@ -61,6 +62,7 @@ func (h *WSHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if identified {
 			h.hub.Unregister(client)
 			h.hub.BroadcastPresence(username, false)
+			log.Info("ws: disconnect", "user", username, "clients", h.hub.ClientCount())
 		}
 		h.sessions.DisconnectPresence(token)
 	}()
@@ -125,6 +127,7 @@ func (h *WSHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 					sendReply(sendCh, req.Ref, false, map[string]string{"message": "username required"})
 					continue
 				}
+				t0 := time.Now()
 				_, err := h.sessions.Identify(token, d.Username, "")
 				if err != nil {
 					sendReply(sendCh, req.Ref, false, map[string]string{"message": err.Error()})
@@ -142,6 +145,7 @@ func (h *WSHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				h.hub.Register(client)
 				h.hub.BroadcastPresence(username, true)
 				sendReply(sendCh, req.Ref, true, nil)
+				log.Info("ws: connect", "user", username, "clients", h.hub.ClientCount(), "elapsed", time.Since(t0))
 
 			case "register":
 				var d struct {
@@ -169,6 +173,7 @@ func (h *WSHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				h.hub.Register(client)
 				h.hub.BroadcastPresence(username, true)
 				sendReply(sendCh, req.Ref, true, nil)
+				log.Info("ws: connect", "user", username, "clients", h.hub.ClientCount())
 
 			case "ping":
 				sendPong(sendCh, req.Ref)
@@ -180,6 +185,7 @@ func (h *WSHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// After identification: dispatch all request types
+		t0 := time.Now()
 		switch req.Type {
 		case "identify", "register":
 			sendError(sendCh, req.Ref, "already identified")
@@ -205,6 +211,9 @@ func (h *WSHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			h.handleWSGetSettings(sendCh, req.Ref)
 		default:
 			sendError(sendCh, req.Ref, fmt.Sprintf("unknown type: %s", req.Type))
+		}
+		if elapsed := time.Since(t0); elapsed > 50*time.Millisecond {
+			log.Warn("ws: slow handler", "type", req.Type, "user", username, "elapsed", elapsed)
 		}
 	}
 }
@@ -232,11 +241,13 @@ func (h *WSHandler) handleWSUserList(sendCh chan<- []byte, ref string) {
 }
 
 func (h *WSHandler) handleWSChannelList(sendCh chan<- []byte, ref string, userID int64) {
+	t0 := time.Now()
 	channels, err := h.db.ListAllChannelsWithMembership(userID)
 	if err != nil {
 		sendError(sendCh, ref, err.Error())
 		return
 	}
+	dbElapsed := time.Since(t0)
 	type channelInfo struct {
 		Name   string `json:"name"`
 		Public bool   `json:"public"`
@@ -247,6 +258,7 @@ func (h *WSHandler) handleWSChannelList(sendCh chan<- []byte, ref string, userID
 		list = append(list, channelInfo{Name: ch.Name, Public: ch.Public, Member: ch.Member})
 	}
 	sendReply(sendCh, ref, true, map[string]interface{}{"channels": list})
+	log.Debug("ws: channel_list", "user_id", userID, "count", len(list), "db", dbElapsed, "total", time.Since(t0))
 }
 
 func (h *WSHandler) handleWSChannelCreate(sendCh chan<- []byte, ref string, rawD json.RawMessage, username string, userID int64) {

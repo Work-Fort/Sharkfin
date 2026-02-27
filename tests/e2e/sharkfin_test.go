@@ -58,7 +58,7 @@ func TestPresenceConnect(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer d.Stop()
+	defer d.StopFatal(t)
 
 	c := harness.NewClient(addr)
 	if err := c.ConnectPresence(); err != nil {
@@ -81,7 +81,7 @@ func TestPresenceDisconnectMarksOffline(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer d.Stop()
+	defer d.StopFatal(t)
 
 	alice := harness.NewClient(addr)
 	if err := alice.RegisterFlow("alice"); err != nil {
@@ -132,7 +132,7 @@ func TestPresenceRejectsPlainHTTP(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer d.Stop()
+	defer d.StopFatal(t)
 
 	resp, err := http.Get(fmt.Sprintf("http://%s/presence", addr))
 	if err != nil {
@@ -154,7 +154,7 @@ func TestPresenceHardKillMarksOffline(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer d.Stop()
+	defer d.StopFatal(t)
 
 	bridge, err := harness.StartBridge(sharkfinBin, addr, d.XDGDir())
 	if err != nil {
@@ -248,7 +248,7 @@ func TestRegisterAndIdentify(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer d.Stop()
+	defer d.StopFatal(t)
 
 	alice := harness.NewClient(addr)
 	if err := alice.RegisterFlow("alice"); err != nil {
@@ -273,7 +273,7 @@ func TestDoubleRegisterFails(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer d.Stop()
+	defer d.StopFatal(t)
 
 	alice := harness.NewClient(addr)
 	if err := alice.RegisterFlow("alice"); err != nil {
@@ -301,7 +301,7 @@ func TestIdentifyAfterRegisterFails(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer d.Stop()
+	defer d.StopFatal(t)
 
 	alice := harness.NewClient(addr)
 	if err := alice.RegisterFlow("alice"); err != nil {
@@ -329,7 +329,7 @@ func TestDoubleLoginPrevention(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer d.Stop()
+	defer d.StopFatal(t)
 
 	alice := harness.NewClient(addr)
 	if err := alice.RegisterFlow("alice"); err != nil {
@@ -357,7 +357,7 @@ func TestRegisterDuplicateUsername(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer d.Stop()
+	defer d.StopFatal(t)
 
 	alice := harness.NewClient(addr)
 	if err := alice.RegisterFlow("alice"); err != nil {
@@ -382,7 +382,7 @@ func TestIdentifyNonexistentUser(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer d.Stop()
+	defer d.StopFatal(t)
 
 	c := harness.NewClient(addr)
 	err = c.IdentifyFlow("nonexistent")
@@ -406,7 +406,7 @@ func TestInitializeResponse(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer d.Stop()
+	defer d.StopFatal(t)
 
 	c := harness.NewClient(addr)
 	id := 1
@@ -453,7 +453,7 @@ func TestToolsList(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer d.Stop()
+	defer d.StopFatal(t)
 
 	c := harness.NewClient(addr)
 	if err := c.Initialize(); err != nil {
@@ -510,7 +510,7 @@ func TestToolCallBeforeIdentify(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer d.Stop()
+	defer d.StopFatal(t)
 
 	c := harness.NewClient(addr)
 	if err := c.ConnectPresence(); err != nil {
@@ -543,7 +543,7 @@ func TestUnknownMethod(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer d.Stop()
+	defer d.StopFatal(t)
 
 	c := harness.NewClient(addr)
 	if err := c.Initialize(); err != nil {
@@ -568,7 +568,7 @@ func TestUnknownTool(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer d.Stop()
+	defer d.StopFatal(t)
 
 	c := harness.NewClient(addr)
 	if err := c.Initialize(); err != nil {
@@ -593,7 +593,7 @@ func TestInvalidJSON(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer d.Stop()
+	defer d.StopFatal(t)
 
 	c := harness.NewClient(addr)
 	status, body, err := c.RawPost("/mcp", "this is not json{{{")
@@ -620,7 +620,7 @@ func TestMethodNotAllowed(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer d.Stop()
+	defer d.StopFatal(t)
 
 	c := harness.NewClient(addr)
 	status, err := c.RawGet("/mcp")
@@ -643,7 +643,7 @@ func TestChannelCreateAndList(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer d.Stop()
+	defer d.StopFatal(t)
 
 	alice := harness.NewClient(addr)
 	if err := alice.RegisterFlow("alice"); err != nil {
@@ -701,7 +701,7 @@ func TestPrivateChannelVisibility(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer d.Stop()
+	defer d.StopFatal(t)
 
 	alice := harness.NewClient(addr)
 	if err := alice.RegisterFlow("alice"); err != nil {
@@ -762,7 +762,7 @@ func TestPublicChannelVisibleToAll(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer d.Stop()
+	defer d.StopFatal(t)
 
 	alice := harness.NewClient(addr)
 	if err := alice.RegisterFlow("alice"); err != nil {
@@ -807,7 +807,7 @@ func TestChannelCreationDisabled(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer d.Stop()
+	defer d.StopFatal(t)
 
 	alice := harness.NewClient(addr)
 	if err := alice.RegisterFlow("alice"); err != nil {
@@ -839,7 +839,7 @@ func TestChannelInvite(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer d.Stop()
+	defer d.StopFatal(t)
 
 	alice := harness.NewClient(addr)
 	if err := alice.RegisterFlow("alice"); err != nil {
@@ -915,7 +915,7 @@ func TestChannelInviteByNonMember(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer d.Stop()
+	defer d.StopFatal(t)
 
 	alice := harness.NewClient(addr)
 	if err := alice.RegisterFlow("alice"); err != nil {
@@ -971,7 +971,7 @@ func TestSendAndReceiveMessage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer d.Stop()
+	defer d.StopFatal(t)
 
 	alice := harness.NewClient(addr)
 	if err := alice.RegisterFlow("alice"); err != nil {
@@ -1050,7 +1050,7 @@ func TestUnreadMessagesAreConsumed(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer d.Stop()
+	defer d.StopFatal(t)
 
 	alice := harness.NewClient(addr)
 	if err := alice.RegisterFlow("alice"); err != nil {
@@ -1153,7 +1153,7 @@ func TestUnreadFilterByChannel(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer d.Stop()
+	defer d.StopFatal(t)
 
 	alice := harness.NewClient(addr)
 	if err := alice.RegisterFlow("alice"); err != nil {
@@ -1242,7 +1242,7 @@ func TestSendToNonexistentChannel(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer d.Stop()
+	defer d.StopFatal(t)
 
 	alice := harness.NewClient(addr)
 	if err := alice.RegisterFlow("alice"); err != nil {
@@ -1271,7 +1271,7 @@ func TestNonParticipantCannotSend(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer d.Stop()
+	defer d.StopFatal(t)
 
 	alice := harness.NewClient(addr)
 	if err := alice.RegisterFlow("alice"); err != nil {
@@ -1322,7 +1322,7 @@ func TestMultipleMessagesOrdering(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer d.Stop()
+	defer d.StopFatal(t)
 
 	alice := harness.NewClient(addr)
 	if err := alice.RegisterFlow("alice"); err != nil {
@@ -1394,7 +1394,7 @@ func TestMCPHistory(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer d.Stop()
+	defer d.StopFatal(t)
 
 	alice := harness.NewClient(addr)
 	if err := alice.RegisterFlow("alice"); err != nil {
@@ -1490,7 +1490,7 @@ func TestBridgeEndToEnd(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer d.Stop()
+	defer d.StopFatal(t)
 
 	bridge, err := harness.StartBridge(sharkfinBin, addr, d.XDGDir())
 	if err != nil {
@@ -1650,7 +1650,7 @@ func TestPresenceExitsOnDaemonRestart(t *testing.T) {
 	presenceCmd.Stdout = os.Stderr
 	presenceCmd.Stderr = os.Stderr
 	if err := presenceCmd.Start(); err != nil {
-		d.Stop()
+		d.StopFatal(t)
 		t.Fatalf("start presence: %v", err)
 	}
 
@@ -1658,9 +1658,7 @@ func TestPresenceExitsOnDaemonRestart(t *testing.T) {
 	time.Sleep(500 * time.Millisecond)
 
 	// Stop the daemon
-	if err := d.Stop(); err != nil {
-		t.Logf("daemon stop (expected): %v", err)
-	}
+	d.StopFatal(t)
 
 	// Verify the presence process exits within 10 seconds
 	done := make(chan error, 1)
@@ -1679,7 +1677,7 @@ func TestPresenceExitsOnDaemonRestart(t *testing.T) {
 	if err != nil {
 		t.Fatalf("restart daemon: %v", err)
 	}
-	defer d2.Stop()
+	defer d2.StopFatal(t)
 
 	// Verify a new client can connect
 	c := harness.NewClient(addr)
@@ -1700,7 +1698,7 @@ func TestWSRegisterAndIdentify(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer d.Stop()
+	defer d.StopFatal(t)
 
 	// Register via WS
 	ws1, err := harness.NewWSClient(addr)
@@ -1752,7 +1750,7 @@ func TestWSChannelCreateAndInvite(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer d.Stop()
+	defer d.StopFatal(t)
 
 	alice, err := harness.NewWSClient(addr)
 	if err != nil {
@@ -1815,7 +1813,7 @@ func TestWSSendAndBroadcast(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer d.Stop()
+	defer d.StopFatal(t)
 
 	alice, err := harness.NewWSClient(addr)
 	if err != nil {
@@ -1893,7 +1891,7 @@ func TestWSHistory(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer d.Stop()
+	defer d.StopFatal(t)
 
 	ws, err := harness.NewWSClient(addr)
 	if err != nil {
@@ -1952,7 +1950,7 @@ func TestWSUnreadMessages(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer d.Stop()
+	defer d.StopFatal(t)
 
 	alice, err := harness.NewWSClient(addr)
 	if err != nil {
@@ -2031,7 +2029,7 @@ func TestWSMentions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer d.Stop()
+	defer d.StopFatal(t)
 
 	alice, err := harness.NewWSClient(addr)
 	if err != nil {
@@ -2121,7 +2119,7 @@ func TestWSMentionInvalidUser(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer d.Stop()
+	defer d.StopFatal(t)
 
 	ws, err := harness.NewWSClient(addr)
 	if err != nil {
@@ -2159,7 +2157,7 @@ func TestWSThreadReply(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer d.Stop()
+	defer d.StopFatal(t)
 
 	alice, err := harness.NewWSClient(addr)
 	if err != nil {
@@ -2257,7 +2255,7 @@ func TestWSNestedReplyRejected(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer d.Stop()
+	defer d.StopFatal(t)
 
 	ws, err := harness.NewWSClient(addr)
 	if err != nil {
@@ -2307,7 +2305,7 @@ func TestWSAndMCPInterop(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer d.Stop()
+	defer d.StopFatal(t)
 
 	// Alice on MCP
 	alice := harness.NewClient(addr)
