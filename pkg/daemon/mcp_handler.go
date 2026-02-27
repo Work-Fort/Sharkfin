@@ -157,6 +157,17 @@ func (h *MCPHandler) handleToolsList(w http.ResponseWriter, req *protocol.Reques
 				},
 			},
 			{
+				"name":        "channel_join",
+				"description": "Join a public channel. Private channels require an invite from an existing member.",
+				"inputSchema": map[string]interface{}{
+					"type": "object",
+					"properties": map[string]interface{}{
+						"channel": map[string]string{"type": "string", "description": "Channel name"},
+					},
+					"required": []string{"channel"},
+				},
+			},
+			{
 				"name":        "send_message",
 				"description": "Send a text message to a channel. You must be a participant of the channel.",
 				"inputSchema": map[string]interface{}{
@@ -279,6 +290,8 @@ func (h *MCPHandler) handleToolsCall(w http.ResponseWriter, req *protocol.Reques
 		h.handleChannelCreate(w, req, params.Arguments, session)
 	case "channel_invite":
 		h.handleChannelInvite(w, req, params.Arguments, session)
+	case "channel_join":
+		h.handleChannelJoin(w, req, params.Arguments, session)
 	case "send_message":
 		h.handleSendMessage(w, req, params.Arguments, session)
 	case "unread_messages":
@@ -499,6 +512,50 @@ func (h *MCPHandler) handleChannelInvite(w http.ResponseWriter, req *protocol.Re
 	}
 
 	writeToolResult(w, req.ID, fmt.Sprintf("invited %s to %s", a.Username, a.Channel))
+}
+
+func (h *MCPHandler) handleChannelJoin(w http.ResponseWriter, req *protocol.Request, args json.RawMessage, session *MCPSession) {
+	var a struct {
+		Channel string `json:"channel"`
+	}
+	if err := json.Unmarshal(args, &a); err != nil {
+		writeJSONRPCError(w, req.ID, protocol.InvalidParams, "invalid arguments")
+		return
+	}
+
+	caller, err := h.db.GetUserByUsername(session.Username)
+	if err != nil {
+		writeJSONRPCError(w, req.ID, protocol.InternalError, err.Error())
+		return
+	}
+
+	ch, err := h.getChannelByName(a.Channel)
+	if err != nil {
+		writeJSONRPCError(w, req.ID, -32001, err.Error())
+		return
+	}
+
+	if !ch.Public {
+		writeJSONRPCError(w, req.ID, -32001, "channel is private, requires an invite")
+		return
+	}
+
+	isMember, err := h.db.IsChannelMember(ch.ID, caller.ID)
+	if err != nil {
+		writeJSONRPCError(w, req.ID, protocol.InternalError, err.Error())
+		return
+	}
+	if isMember {
+		writeJSONRPCError(w, req.ID, -32001, "already a member")
+		return
+	}
+
+	if err := h.db.AddChannelMember(ch.ID, caller.ID); err != nil {
+		writeJSONRPCError(w, req.ID, protocol.InternalError, err.Error())
+		return
+	}
+
+	writeToolResult(w, req.ID, fmt.Sprintf("joined %s", a.Channel))
 }
 
 func (h *MCPHandler) handleSendMessage(w http.ResponseWriter, req *protocol.Request, args json.RawMessage, session *MCPSession) {

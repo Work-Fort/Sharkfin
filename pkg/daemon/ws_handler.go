@@ -199,6 +199,8 @@ func (h *WSHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			h.handleWSChannelCreate(sendCh, req.Ref, req.D, username, userID)
 		case "channel_invite":
 			h.handleWSChannelInvite(sendCh, req.Ref, req.D, userID)
+		case "channel_join":
+			h.handleWSChannelJoin(sendCh, req.Ref, req.D, userID)
 		case "send_message":
 			h.handleWSSendMessage(sendCh, req.Ref, req.D, username, userID)
 		case "history":
@@ -340,6 +342,38 @@ func (h *WSHandler) handleWSChannelInvite(sendCh chan<- []byte, ref string, rawD
 	}
 
 	if err := h.db.AddChannelMember(ch.ID, invitee.ID); err != nil {
+		sendError(sendCh, ref, err.Error())
+		return
+	}
+	sendReply(sendCh, ref, true, nil)
+}
+
+func (h *WSHandler) handleWSChannelJoin(sendCh chan<- []byte, ref string, rawD json.RawMessage, userID int64) {
+	var d struct {
+		Channel string `json:"channel"`
+	}
+	if err := json.Unmarshal(rawD, &d); err != nil {
+		sendError(sendCh, ref, "invalid arguments")
+		return
+	}
+
+	ch, err := h.db.GetChannelByName(d.Channel)
+	if err != nil {
+		sendError(sendCh, ref, err.Error())
+		return
+	}
+
+	isMember, err := h.db.IsChannelMember(ch.ID, userID)
+	if err != nil {
+		sendError(sendCh, ref, err.Error())
+		return
+	}
+	if isMember {
+		sendError(sendCh, ref, "already a member")
+		return
+	}
+
+	if err := h.db.AddChannelMember(ch.ID, userID); err != nil {
 		sendError(sendCh, ref, err.Error())
 		return
 	}

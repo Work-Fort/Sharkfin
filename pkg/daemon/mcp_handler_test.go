@@ -154,7 +154,7 @@ func TestToolsList(t *testing.T) {
 	expected := map[string]bool{
 		"get_identity_token": true, "register": true, "identify": true,
 		"user_list": true, "channel_list": true, "channel_create": true,
-		"channel_invite": true, "send_message": true, "unread_messages": true,
+		"channel_invite": true, "channel_join": true, "send_message": true, "unread_messages": true,
 		"unread_counts": true, "mark_read": true, "history": true,
 		"dm_list": true, "dm_open": true,
 	}
