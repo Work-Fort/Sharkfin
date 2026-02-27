@@ -104,6 +104,41 @@ func (h *Hub) BroadcastMessage(channelID int64, channelName string, channelType 
 		}
 	}
 
+	// Fire webhooks for mentions and DM recipients (non-blocking).
+	if webhookURL, err := database.GetSetting("webhook_url"); err == nil && webhookURL != "" {
+		seen := make(map[string]bool)
+		var recipients []string
+
+		// Add mentioned users (excluding sender).
+		for _, m := range mentions {
+			if m != msg.Username && !seen[m] {
+				seen[m] = true
+				recipients = append(recipients, m)
+			}
+		}
+
+		// For DMs, add all channel members except sender.
+		if channelType == "dm" {
+			for _, t := range targets {
+				if !seen[t.username] {
+					seen[t.username] = true
+					recipients = append(recipients, t.username)
+				}
+			}
+		}
+
+		if len(recipients) > 0 {
+			fireWebhooks(webhookURL, WebhookEvent{
+				ChannelName: channelName,
+				ChannelType: channelType,
+				From:        msg.Username,
+				MessageID:   msg.ID,
+				SentAt:      msg.CreatedAt,
+				Recipients:  recipients,
+			})
+		}
+	}
+
 	// Phase 3: send under RLock so we never race with Unregister closing
 	// the send channel.
 	sent := 0
