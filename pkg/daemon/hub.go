@@ -117,12 +117,14 @@ func (h *Hub) BroadcastMessage(channelID int64, channelName string, channelType 
 			}
 		}
 
-		// For DMs, add all channel members except sender.
+		// For DMs, look up channel members and add non-sender participants.
 		if channelType == "dm" {
-			for _, t := range targets {
-				if !seen[t.username] {
-					seen[t.username] = true
-					recipients = append(recipients, t.username)
+			if members, err := database.ChannelMemberUsernames(channelID); err == nil {
+				for _, m := range members {
+					if m != msg.Username && !seen[m] {
+						seen[m] = true
+						recipients = append(recipients, m)
+					}
 				}
 			}
 		}

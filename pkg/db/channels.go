@@ -154,6 +154,30 @@ func (d *DB) AddChannelMember(channelID, userID int64) error {
 	return nil
 }
 
+// ChannelMemberUsernames returns the usernames of all members of a channel.
+func (d *DB) ChannelMemberUsernames(channelID int64) ([]string, error) {
+	rows, err := d.db.Query(`
+		SELECT u.username FROM channel_members cm
+		JOIN users u ON cm.user_id = u.id
+		WHERE cm.channel_id = ?
+		ORDER BY u.username
+	`, channelID)
+	if err != nil {
+		return nil, fmt.Errorf("channel member usernames: %w", err)
+	}
+	defer rows.Close()
+
+	var names []string
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return nil, fmt.Errorf("scan username: %w", err)
+		}
+		names = append(names, name)
+	}
+	return names, rows.Err()
+}
+
 // IsChannelMember returns true if the user is a member of the channel.
 func (d *DB) IsChannelMember(channelID, userID int64) (bool, error) {
 	var count int

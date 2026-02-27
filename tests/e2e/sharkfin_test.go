@@ -5,10 +5,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -2666,5 +2668,225 @@ func TestWSUnreadCountsAndMarkRead(t *testing.T) {
 		if c.Channel == "ws-counts" {
 			t.Error("ws-counts still in unread_counts after mark_read")
 		}
+	}
+}
+
+// --- Webhook notification tests ---
+
+func TestWebhookOnMention(t *testing.T) {
+	var mu sync.Mutex
+	var received []map[string]interface{}
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var p map[string]interface{}
+		json.NewDecoder(r.Body).Decode(&p)
+		mu.Lock()
+		received = append(received, p)
+		mu.Unlock()
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	addr, err := harness.FreePort()
+	if err != nil {
+		t.Fatal(err)
+	}
+	d, err := harness.StartDaemon(sharkfinBin, addr, harness.WithWebhookURL(srv.URL))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.StopFatal(t)
+
+	// Register alice and bob
+	alice := harness.NewClient(addr)
+	if err := alice.RegisterFlow("alice"); err != nil {
+		t.Fatal(err)
+	}
+	defer alice.DisconnectPresence()
+
+	bob := harness.NewClient(addr)
+	if err := bob.RegisterFlow("bob"); err != nil {
+		t.Fatal(err)
+	}
+	defer bob.DisconnectPresence()
+
+	// Create channel with both
+	r, err := alice.ToolCall("channel_create", map[string]any{
+		"name": "webhook-test", "public": true, "members": []string{"bob"},
+	})
+	if err != nil || r.Error != nil {
+		t.Fatalf("create channel: err=%v rpc=%+v", err, r.Error)
+	}
+
+	// Alice sends message mentioning bob
+	r, err = alice.ToolCall("send_message", map[string]any{
+		"channel": "webhook-test", "message": "Hey @bob check this out",
+	})
+	if err != nil || r.Error != nil {
+		t.Fatalf("send message: err=%v rpc=%+v", err, r.Error)
+	}
+
+	// Wait for async webhook
+	time.Sleep(1 * time.Second)
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(received) != 1 {
+		t.Fatalf("expected 1 webhook, got %d", len(received))
+	}
+
+	p := received[0]
+	if p["event"] != "message.new" {
+		t.Errorf("event = %v, want message.new", p["event"])
+	}
+	if p["recipient"] != "bob" {
+		t.Errorf("recipient = %v, want bob", p["recipient"])
+	}
+	if p["from"] != "alice" {
+		t.Errorf("from = %v, want alice", p["from"])
+	}
+	if p["channel"] != "webhook-test" {
+		t.Errorf("channel = %v, want webhook-test", p["channel"])
+	}
+	if p["channel_type"] != "channel" {
+		t.Errorf("channel_type = %v, want channel", p["channel_type"])
+	}
+}
+
+func TestWebhookOnDM(t *testing.T) {
+	var mu sync.Mutex
+	var received []map[string]interface{}
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var p map[string]interface{}
+		json.NewDecoder(r.Body).Decode(&p)
+		mu.Lock()
+		received = append(received, p)
+		mu.Unlock()
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	addr, err := harness.FreePort()
+	if err != nil {
+		t.Fatal(err)
+	}
+	d, err := harness.StartDaemon(sharkfinBin, addr, harness.WithWebhookURL(srv.URL))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.StopFatal(t)
+
+	// Register alice and bob
+	alice := harness.NewClient(addr)
+	if err := alice.RegisterFlow("alice"); err != nil {
+		t.Fatal(err)
+	}
+	defer alice.DisconnectPresence()
+
+	bob := harness.NewClient(addr)
+	if err := bob.RegisterFlow("bob"); err != nil {
+		t.Fatal(err)
+	}
+	defer bob.DisconnectPresence()
+
+	// Open DM
+	r, err := alice.ToolCall("dm_open", map[string]any{"username": "bob"})
+	if err != nil || r.Error != nil {
+		t.Fatalf("dm_open: err=%v rpc=%+v", err, r.Error)
+	}
+
+	// Alice sends DM (no explicit mention)
+	r, err = alice.ToolCall("send_message", map[string]any{
+		"channel": "dm-alice-bob", "message": "hey bob, private msg",
+	})
+	if err != nil || r.Error != nil {
+		t.Fatalf("send dm: err=%v rpc=%+v", err, r.Error)
+	}
+
+	// Wait for async webhook
+	time.Sleep(1 * time.Second)
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(received) != 1 {
+		t.Fatalf("expected 1 DM webhook, got %d", len(received))
+	}
+
+	p := received[0]
+	if p["event"] != "message.new" {
+		t.Errorf("event = %v, want message.new", p["event"])
+	}
+	if p["recipient"] != "bob" {
+		t.Errorf("recipient = %v, want bob", p["recipient"])
+	}
+	if p["from"] != "alice" {
+		t.Errorf("from = %v, want alice", p["from"])
+	}
+	if p["channel_type"] != "dm" {
+		t.Errorf("channel_type = %v, want dm", p["channel_type"])
+	}
+}
+
+func TestWebhookNotFiredWithoutMention(t *testing.T) {
+	var mu sync.Mutex
+	var received []map[string]interface{}
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var p map[string]interface{}
+		json.NewDecoder(r.Body).Decode(&p)
+		mu.Lock()
+		received = append(received, p)
+		mu.Unlock()
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	addr, err := harness.FreePort()
+	if err != nil {
+		t.Fatal(err)
+	}
+	d, err := harness.StartDaemon(sharkfinBin, addr, harness.WithWebhookURL(srv.URL))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.StopFatal(t)
+
+	// Register alice and bob
+	alice := harness.NewClient(addr)
+	if err := alice.RegisterFlow("alice"); err != nil {
+		t.Fatal(err)
+	}
+	defer alice.DisconnectPresence()
+
+	bob := harness.NewClient(addr)
+	if err := bob.RegisterFlow("bob"); err != nil {
+		t.Fatal(err)
+	}
+	defer bob.DisconnectPresence()
+
+	// Create channel with both
+	r, err := alice.ToolCall("channel_create", map[string]any{
+		"name": "no-webhook", "public": true, "members": []string{"bob"},
+	})
+	if err != nil || r.Error != nil {
+		t.Fatalf("create channel: err=%v rpc=%+v", err, r.Error)
+	}
+
+	// Alice sends message WITHOUT mentioning bob
+	r, err = alice.ToolCall("send_message", map[string]any{
+		"channel": "no-webhook", "message": "just a regular message",
+	})
+	if err != nil || r.Error != nil {
+		t.Fatalf("send message: err=%v rpc=%+v", err, r.Error)
+	}
+
+	// Wait to verify no webhook fires
+	time.Sleep(1 * time.Second)
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(received) != 0 {
+		t.Errorf("expected 0 webhooks for non-mention message, got %d", len(received))
 	}
 }
