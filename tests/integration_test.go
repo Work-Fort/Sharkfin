@@ -15,8 +15,20 @@ import (
 	"github.com/gorilla/websocket"
 
 	pkgdaemon "github.com/Work-Fort/sharkfin/pkg/daemon"
-	"github.com/Work-Fort/sharkfin/pkg/protocol"
 )
+
+// jsonrpcResponse is a minimal JSON-RPC 2.0 response for integration tests.
+type jsonrpcResponse struct {
+	JSONRPC string          `json:"jsonrpc"`
+	Result  json.RawMessage `json:"result,omitempty"`
+	Error   *jsonrpcError   `json:"error,omitempty"`
+	ID      json.RawMessage `json:"id,omitempty"`
+}
+
+type jsonrpcError struct {
+	Code    int    `json:"code"`
+	Message string `json:"message"`
+}
 
 // testEnv holds a running server and helpers for integration tests.
 type testEnv struct {
@@ -78,24 +90,16 @@ func startTestServer(t *testing.T, allowChannelCreation bool) *testEnv {
 }
 
 // mcpRequest sends a JSON-RPC request to /mcp and returns the HTTP response and parsed JSON-RPC response.
-func (e *testEnv) mcpRequest(sessionID string, method string, id int, params interface{}) (*http.Response, protocol.Response) {
+func (e *testEnv) mcpRequest(sessionID string, method string, id int, params interface{}) (*http.Response, jsonrpcResponse) {
 	e.t.Helper()
 
-	var paramsJSON json.RawMessage
-	if params != nil {
-		data, err := json.Marshal(params)
-		if err != nil {
-			e.t.Fatalf("marshal params: %v", err)
-		}
-		paramsJSON = data
+	req := map[string]interface{}{
+		"jsonrpc": "2.0",
+		"method":  method,
+		"id":      id,
 	}
-
-	reqID := protocol.RequestID{IntValue: int64(id)}
-	req := protocol.Request{
-		JSONRPC: "2.0",
-		Method:  method,
-		ID:      &reqID,
-		Params:  paramsJSON,
+	if params != nil {
+		req["params"] = params
 	}
 
 	body, _ := json.Marshal(req)
@@ -116,7 +120,7 @@ func (e *testEnv) mcpRequest(sessionID string, method string, id int, params int
 	respBody, _ := io.ReadAll(resp.Body)
 	resp.Body.Close()
 
-	var rpcResp protocol.Response
+	var rpcResp jsonrpcResponse
 	if len(respBody) > 0 {
 		if err := json.Unmarshal(respBody, &rpcResp); err != nil {
 			e.t.Fatalf("unmarshal response: %v (body: %s)", err, string(respBody))
@@ -126,7 +130,7 @@ func (e *testEnv) mcpRequest(sessionID string, method string, id int, params int
 }
 
 // toolCall is a convenience for calling tools/call.
-func (e *testEnv) toolCall(sessionID string, id int, name string, args interface{}) (*http.Response, protocol.Response) {
+func (e *testEnv) toolCall(sessionID string, id int, name string, args interface{}) (*http.Response, jsonrpcResponse) {
 	e.t.Helper()
 	return e.mcpRequest(sessionID, "tools/call", id, map[string]interface{}{
 		"name":      name,
@@ -135,7 +139,7 @@ func (e *testEnv) toolCall(sessionID string, id int, name string, args interface
 }
 
 // toolResultText extracts the text from a successful tool result.
-func toolResultText(t *testing.T, resp protocol.Response) string {
+func toolResultText(t *testing.T, resp jsonrpcResponse) string {
 	t.Helper()
 	if resp.Error != nil {
 		t.Fatalf("expected success, got error: %s", resp.Error.Message)
@@ -145,14 +149,42 @@ func toolResultText(t *testing.T, resp protocol.Response) string {
 		Content []struct {
 			Text string `json:"text"`
 		} `json:"content"`
+		IsError bool `json:"isError"`
 	}
 	if err := json.Unmarshal(resp.Result, &result); err != nil {
 		t.Fatalf("unmarshal tool result: %v", err)
+	}
+	if result.IsError {
+		if len(result.Content) > 0 {
+			t.Fatalf("expected success, got tool error: %s", result.Content[0].Text)
+		}
+		t.Fatal("expected success, got tool error")
 	}
 	if len(result.Content) == 0 {
 		t.Fatal("empty tool result content")
 	}
 	return result.Content[0].Text
+}
+
+// toolResultIsError checks if a tool result is an error and returns the error message.
+func toolResultIsError(t *testing.T, resp jsonrpcResponse) (bool, string) {
+	t.Helper()
+	if resp.Error != nil {
+		return true, resp.Error.Message
+	}
+	var result struct {
+		Content []struct {
+			Text string `json:"text"`
+		} `json:"content"`
+		IsError bool `json:"isError"`
+	}
+	if err := json.Unmarshal(resp.Result, &result); err != nil {
+		t.Fatalf("unmarshal tool result: %v", err)
+	}
+	if result.IsError && len(result.Content) > 0 {
+		return true, result.Content[0].Text
+	}
+	return result.IsError, ""
 }
 
 // connectPresence establishes a WebSocket presence connection and returns the identity token.
@@ -202,21 +234,24 @@ func (e *testEnv) registerUser(username string, id int) (sessionID string, cance
 	// 1. Connect to presence (gets token)
 	token, cancelPresence := e.connectPresence()
 
-	// 2. Initialize
-	_, _ = e.mcpRequest("", "initialize", id, map[string]interface{}{
+	// 2. Initialize — mcp-go returns the session ID here
+	httpResp, _ := e.mcpRequest("", "initialize", id, map[string]interface{}{
 		"protocolVersion": "2025-03-26",
 		"capabilities":    map[string]interface{}{},
 		"clientInfo":      map[string]string{"name": "test", "version": "0.1"},
 	})
+	sessionID = httpResp.Header.Get("Mcp-Session-Id")
+	if sessionID == "" {
+		e.t.Fatal("no Mcp-Session-Id in initialize response")
+	}
 
-	// 3. Register
-	httpResp, regResp := e.toolCall("", id+2, "register", map[string]interface{}{
+	// 3. Register (pass session ID so the server can map it to the user)
+	_, regResp := e.toolCall(sessionID, id+2, "register", map[string]interface{}{
 		"token": token, "username": username, "password": "",
 	})
-	if regResp.Error != nil {
-		e.t.Fatalf("register %s failed: %s", username, regResp.Error.Message)
+	if isErr, msg := toolResultIsError(e.t, regResp); isErr {
+		e.t.Fatalf("register %s failed: %s", username, msg)
 	}
-	sessionID = httpResp.Header.Get("Mcp-Session-Id")
 
 	return sessionID, cancelPresence
 }
@@ -228,21 +263,24 @@ func (e *testEnv) identifyUser(username string, id int) (sessionID string, cance
 	// 1. Connect to presence (gets token)
 	token, cancelPresence := e.connectPresence()
 
-	// 2. Initialize
-	_, _ = e.mcpRequest("", "initialize", id, map[string]interface{}{
+	// 2. Initialize — mcp-go returns the session ID here
+	httpResp, _ := e.mcpRequest("", "initialize", id, map[string]interface{}{
 		"protocolVersion": "2025-03-26",
 		"capabilities":    map[string]interface{}{},
 		"clientInfo":      map[string]string{"name": "test", "version": "0.1"},
 	})
+	sessionID = httpResp.Header.Get("Mcp-Session-Id")
+	if sessionID == "" {
+		e.t.Fatal("no Mcp-Session-Id in initialize response")
+	}
 
-	// 3. Identify
-	httpResp, identResp := e.toolCall("", id+2, "identify", map[string]interface{}{
+	// 3. Identify (pass session ID so the server can map it to the user)
+	_, identResp := e.toolCall(sessionID, id+2, "identify", map[string]interface{}{
 		"token": token, "username": username, "password": "",
 	})
-	if identResp.Error != nil {
-		e.t.Fatalf("identify %s failed: %s", username, identResp.Error.Message)
+	if isErr, msg := toolResultIsError(e.t, identResp); isErr {
+		e.t.Fatalf("identify %s failed: %s", username, msg)
 	}
-	sessionID = httpResp.Header.Get("Mcp-Session-Id")
 
 	return sessionID, cancelPresence
 }
@@ -273,12 +311,13 @@ func TestScenario1_IdentityHandshakeAndPresence(t *testing.T) {
 	cancelPresence()
 	time.Sleep(100 * time.Millisecond)
 
-	// Verify user is offline (need to re-register since session was cleaned up on disconnect)
-	// Actually, the session should still work for a bit — let's check
+	// The mcp-go session survives presence disconnect (it's managed independently).
+	// The SharkfinMCP username mapping also persists. Only the SessionManager's
+	// onlineUsers is cleaned up, so alice should appear offline.
 	_, ulResp2 := env.toolCall(sessionID, 11, "user_list", map[string]interface{}{})
-	if ulResp2.Error != nil {
-		// Session was cleaned up on disconnect — this is expected behavior.
-		// Register a new session to check the user list.
+	isErr, _ := toolResultIsError(t, ulResp2)
+	if isErr {
+		// Auth mapping was cleaned up — re-identify to check user list.
 		sessionID2, cancelPresence2 := env.identifyUser("alice", 20)
 		defer cancelPresence2()
 
@@ -289,12 +328,11 @@ func TestScenario1_IdentityHandshakeAndPresence(t *testing.T) {
 			Online   bool   `json:"online"`
 		}
 		json.Unmarshal([]byte(users2), &ul2)
-		// At this point alice is online again because we just identified
 		if len(ul2) != 1 || ul2[0].Username != "alice" {
 			t.Fatalf("expected alice in user list, got: %v", ul2)
 		}
 	} else {
-		// Session survived disconnect — check that alice is offline
+		// Session survived — check that alice is offline
 		users2 := toolResultText(t, ulResp2)
 		var ul2 []struct {
 			Username string `json:"username"`
@@ -457,11 +495,12 @@ func TestScenario4_ChannelCreationDisabled(t *testing.T) {
 	_, chResp := env.toolCall(sessionA, 10, "channel_create", map[string]interface{}{
 		"name": "test-channel", "public": true,
 	})
-	if chResp.Error == nil {
+	isErr, msg := toolResultIsError(t, chResp)
+	if !isErr {
 		t.Fatal("expected error when channel creation is disabled")
 	}
-	if chResp.Error.Message != "channel creation is disabled" {
-		t.Fatalf("unexpected error: %s", chResp.Error.Message)
+	if msg != "channel creation is disabled" {
+		t.Fatalf("unexpected error: %s", msg)
 	}
 }
 
@@ -475,7 +514,7 @@ func TestScenario5_SessionStateConstraints(t *testing.T) {
 	_, regResp := env.toolCall(sessionA, 10, "register", map[string]interface{}{
 		"token": "fake-token", "username": "alice2", "password": "",
 	})
-	if regResp.Error == nil {
+	if isErr, _ := toolResultIsError(t, regResp); !isErr {
 		t.Fatal("expected error on second register")
 	}
 
@@ -483,7 +522,7 @@ func TestScenario5_SessionStateConstraints(t *testing.T) {
 	_, identResp := env.toolCall(sessionA, 11, "identify", map[string]interface{}{
 		"token": "fake-token", "username": "alice", "password": "",
 	})
-	if identResp.Error == nil {
+	if isErr, _ := toolResultIsError(t, identResp); !isErr {
 		t.Fatal("expected error on identify after register")
 	}
 }
@@ -498,15 +537,24 @@ func TestScenario6_DoubleLoginPrevention(t *testing.T) {
 	token2, cancelPresence2 := env.connectPresence()
 	defer cancelPresence2()
 
+	// Initialize a second session
+	httpResp2, _ := env.mcpRequest("", "initialize", 20, map[string]interface{}{
+		"protocolVersion": "2025-03-26",
+		"capabilities":    map[string]interface{}{},
+		"clientInfo":      map[string]string{"name": "test2", "version": "0.1"},
+	})
+	sessionID2 := httpResp2.Header.Get("Mcp-Session-Id")
+
 	// Try to identify as alice — should fail because alice is already online
-	_, identResp := env.toolCall("", 22, "identify", map[string]interface{}{
+	_, identResp := env.toolCall(sessionID2, 22, "identify", map[string]interface{}{
 		"token": token2, "username": "alice", "password": "",
 	})
-	if identResp.Error == nil {
+	isErr, msg := toolResultIsError(t, identResp)
+	if !isErr {
 		t.Fatal("expected error: alice is already online")
 	}
-	if identResp.Error.Message != "user already online: alice" {
-		t.Fatalf("unexpected error: %s", identResp.Error.Message)
+	if msg != "user already online: alice" {
+		t.Fatalf("unexpected error: %s", msg)
 	}
 }
 
@@ -579,10 +627,11 @@ func TestScenario8_NonParticipantRejection(t *testing.T) {
 	_, sendResp := env.toolCall(sessionB, 40, "send_message", map[string]interface{}{
 		"channel": "private-notes", "message": "sneaky!",
 	})
-	if sendResp.Error == nil {
+	isErr, msg := toolResultIsError(t, sendResp)
+	if !isErr {
 		t.Fatal("expected error: non-participant should not be able to send")
 	}
-	if sendResp.Error.Message != "you are not a participant of this channel" {
-		t.Fatalf("unexpected error: %s", sendResp.Error.Message)
+	if msg != "you are not a participant of this channel" {
+		t.Fatalf("unexpected error: %s", msg)
 	}
 }

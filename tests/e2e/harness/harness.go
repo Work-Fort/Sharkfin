@@ -310,12 +310,18 @@ func (c *Client) ToolCall(name string, args any) (ToolResult, error) {
 		Content []struct {
 			Text string `json:"text"`
 		} `json:"content"`
+		IsError bool `json:"isError"`
 	}
 	if err := json.Unmarshal(result, &parsed); err != nil {
 		return ToolResult{}, fmt.Errorf("unmarshal tool result: %w", err)
 	}
 	if len(parsed.Content) == 0 {
 		return ToolResult{}, nil
+	}
+	// Map mcp-go tool errors (isError: true) to the Error field so callers
+	// can check r.Error != nil uniformly.
+	if parsed.IsError {
+		return ToolResult{Error: &RPCError{Code: -1, Message: parsed.Content[0].Text}}, nil
 	}
 	return ToolResult{Text: parsed.Content[0].Text}, nil
 }

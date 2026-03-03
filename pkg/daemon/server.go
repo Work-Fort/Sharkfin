@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/charmbracelet/log"
+	mcpserver "github.com/mark3labs/mcp-go/server"
 
 	"github.com/Work-Fort/sharkfin/pkg/db"
 )
@@ -45,12 +46,16 @@ func NewServer(addr, dbPath string, allowChannelCreation bool, pongTimeout time.
 
 	sm := NewSessionManager(database)
 	hub := NewHub()
-	mcpHandler := NewMCPHandler(sm, database, hub)
 	presenceHandler := NewPresenceHandler(sm, hub, pongTimeout)
 	wsHandler := NewWSHandler(sm, database, hub, pongTimeout)
 
+	sharkfinMCP := NewSharkfinMCP(sm, database, hub)
+	mcpTransport := mcpserver.NewStreamableHTTPServer(sharkfinMCP.Server(),
+		mcpserver.WithStateful(true),
+	)
+
 	mux := http.NewServeMux()
-	mux.Handle("POST /mcp", mcpHandler)
+	mux.Handle("/mcp", mcpTransport)
 	mux.Handle("GET /presence", presenceHandler)
 	mux.Handle("GET /ws", wsHandler)
 
