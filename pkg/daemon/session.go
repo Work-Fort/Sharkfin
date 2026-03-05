@@ -13,11 +13,11 @@ import (
 
 // SessionManager manages identity tokens, MCP sessions, and presence state.
 type SessionManager struct {
-	mu                   sync.RWMutex
-	tokens               map[string]*IdentityToken // token string → state
-	mcpSessions          map[string]*MCPSession    // MCP session ID → session
-	onlineUsers          map[string]string         // username → token
-	db *db.DB
+	mu          sync.RWMutex
+	tokens      map[string]*IdentityToken // token string → state
+	mcpSessions map[string]*MCPSession    // MCP session ID → session
+	onlineUsers map[string]string         // username → token
+	db          *db.DB
 }
 
 // IdentityToken tracks the lifecycle of an identity token.

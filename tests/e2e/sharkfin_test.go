@@ -2280,14 +2280,18 @@ func TestWSNestedReplyRejected(t *testing.T) {
 	parentEnv, _ := ws.Req("send_message", map[string]any{
 		"channel": "general", "body": "parent",
 	}, "m1")
-	var pr struct{ ID int64 `json:"id"` }
+	var pr struct {
+		ID int64 `json:"id"`
+	}
 	json.Unmarshal(parentEnv.D, &pr)
 
 	// Send reply
 	replyEnv, _ := ws.Req("send_message", map[string]any{
 		"channel": "general", "body": "reply", "thread_id": pr.ID,
 	}, "m2")
-	var rr struct{ ID int64 `json:"id"` }
+	var rr struct {
+		ID int64 `json:"id"`
+	}
 	json.Unmarshal(replyEnv.D, &rr)
 
 	// Nested reply should fail

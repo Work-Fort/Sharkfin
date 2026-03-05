@@ -591,7 +591,9 @@ func TestWSSendMessageWithThread(t *testing.T) {
 	readWSEnvelope(t, bobConn)
 
 	d, _ := json.Marshal(parentResp.D)
-	var pr struct{ ID int64 `json:"id"` }
+	var pr struct {
+		ID int64 `json:"id"`
+	}
 	json.Unmarshal(d, &pr)
 
 	// Reply in thread
@@ -628,14 +630,18 @@ func TestWSSendMessageRejectNestedReply(t *testing.T) {
 		"channel": "general", "body": "parent",
 	}, "m1")
 	d, _ := json.Marshal(parentResp.D)
-	var pr struct{ ID int64 `json:"id"` }
+	var pr struct {
+		ID int64 `json:"id"`
+	}
 	json.Unmarshal(d, &pr)
 
 	replyResp := wsReq(t, conn, "send_message", map[string]interface{}{
 		"channel": "general", "body": "reply", "thread_id": pr.ID,
 	}, "m2")
 	d, _ = json.Marshal(replyResp.D)
-	var rr struct{ ID int64 `json:"id"` }
+	var rr struct {
+		ID int64 `json:"id"`
+	}
 	json.Unmarshal(d, &rr)
 
 	// Try nested reply — should fail
@@ -659,7 +665,9 @@ func TestWSHistoryWithThreadFilter(t *testing.T) {
 		"channel": "general", "body": "parent",
 	}, "m1")
 	d, _ := json.Marshal(parentResp.D)
-	var pr struct{ ID int64 `json:"id"` }
+	var pr struct {
+		ID int64 `json:"id"`
+	}
 	json.Unmarshal(d, &pr)
 
 	wsReq(t, conn, "send_message", map[string]interface{}{
