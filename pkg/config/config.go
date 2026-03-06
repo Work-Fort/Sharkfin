@@ -78,6 +78,8 @@ func InitViper() {
 	viper.SetDefault("log-level", "debug")
 	viper.SetDefault("presence-timeout", "20s")
 	viper.SetDefault("webhook-url", "")
+	viper.SetDefault("agent.username", "")
+	viper.SetDefault("agent.exec", "")
 
 	viper.SetConfigName(ConfigFileName)
 	viper.SetConfigType(ConfigType)
