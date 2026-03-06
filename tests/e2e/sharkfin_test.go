@@ -3386,7 +3386,7 @@ func TestNotificationsOnlyMode(t *testing.T) {
 
 	// (a) send_message should return error "notification-only connection"
 	env, err = ws.Req("send_message", map[string]any{
-		"channel": "general", "body": "should fail",
+		"channel": "general", "message": "should fail",
 	}, "m1")
 	if err != nil {
 		t.Fatal(err)
@@ -3416,7 +3416,16 @@ func TestNotificationsOnlyMode(t *testing.T) {
 		t.Errorf("capabilities should work in notification-only mode: %s", string(env.D))
 	}
 
-	// (d) user still receives message.new broadcasts from other users
+	// (d) unread_counts should work (needed by agent sidecar)
+	env, err = ws.Req("unread_counts", nil, "uc1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if env.OK == nil || !*env.OK {
+		t.Errorf("unread_counts should work in notification-only mode: %s", string(env.D))
+	}
+
+	// (e) user still receives message.new broadcasts from other users
 	// Admin joins general and invites notif-user to receive broadcasts
 	r, err = admin.ToolCall("channel_invite", map[string]any{
 		"channel": "general", "username": "notif-user",
