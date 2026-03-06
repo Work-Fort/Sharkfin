@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-2.0-only
+// SPDX-License-Identifier: AGPL-3.0-or-later
 package harness
 
 import (
@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 	"syscall"
@@ -27,6 +28,7 @@ import (
 type daemonConfig struct {
 	presenceTimeout time.Duration
 	webhookURL      string
+	dbDSN           string // explicit --db flag (overrides SHARKFIN_DB env)
 }
 
 type DaemonOption func(*daemonConfig)
@@ -37,6 +39,10 @@ func WithPresenceTimeout(d time.Duration) DaemonOption {
 
 func WithWebhookURL(url string) DaemonOption {
 	return func(c *daemonConfig) { c.webhookURL = url }
+}
+
+func WithDB(dsn string) DaemonOption {
+	return func(c *daemonConfig) { c.dbDSN = dsn }
 }
 
 type Daemon struct {
@@ -67,9 +73,10 @@ func StartDaemon(binary, addr string, opts ...DaemonOption) (*Daemon, error) {
 	if cfg.webhookURL != "" {
 		args = append(args, "--webhook-url", cfg.webhookURL)
 	}
-	// Forward SHARKFIN_DB if set (e.g., for Postgres e2e).
-	// Clean Postgres between tests so each daemon gets a fresh database.
-	if dbDSN := os.Getenv("SHARKFIN_DB"); dbDSN != "" {
+	// Explicit --db from WithDB takes priority over SHARKFIN_DB env.
+	if cfg.dbDSN != "" {
+		args = append(args, "--db", cfg.dbDSN)
+	} else if dbDSN := os.Getenv("SHARKFIN_DB"); dbDSN != "" {
 		args = append(args, "--db", dbDSN)
 		if strings.HasPrefix(dbDSN, "postgres://") || strings.HasPrefix(dbDSN, "postgresql://") {
 			if err := resetPostgres(dbDSN); err != nil {
@@ -113,6 +120,39 @@ func StartDaemon(binary, addr string, opts ...DaemonOption) (*Daemon, error) {
 
 func (d *Daemon) Addr() string   { return d.addr }
 func (d *Daemon) XDGDir() string { return d.xdgDir }
+
+// DBPath returns the path to the daemon's SQLite database file.
+// Only valid when SHARKFIN_DB is not set (i.e., using default SQLite).
+func (d *Daemon) DBPath() string {
+	return filepath.Join(d.xdgDir, "state", "sharkfin", "sharkfin.db")
+}
+
+// StopNoClean stops the daemon without removing the xdg directory.
+// Use Cleanup() later to remove it.
+func (d *Daemon) StopNoClean(t testing.TB) {
+	t.Helper()
+	if d.cmd.Process == nil {
+		return
+	}
+	d.cmd.Process.Signal(syscall.SIGTERM)
+	done := make(chan error, 1)
+	go func() { done <- d.cmd.Wait() }()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		d.cmd.Process.Kill()
+		<-done
+		t.Log("daemon did not exit after SIGTERM, killed")
+	}
+	if d.stderr != nil && strings.Contains(d.stderr.String(), "DATA RACE") {
+		t.Fatal("data race detected in daemon (see stderr output above)")
+	}
+}
+
+// Cleanup removes the daemon's xdg directory.
+func (d *Daemon) Cleanup() {
+	os.RemoveAll(d.xdgDir)
+}
 
 // GrantAdmin promotes a user to admin role using the admin CLI.
 func (d *Daemon) GrantAdmin(binary, username string) error {

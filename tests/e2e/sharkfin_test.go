@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-2.0-only
+// SPDX-License-Identifier: AGPL-3.0-or-later
 package e2e
 
 import (
@@ -3630,5 +3630,172 @@ func TestWebhookNotFiredWithoutMention(t *testing.T) {
 	defer mu.Unlock()
 	if len(received) != 0 {
 		t.Errorf("expected 0 webhooks for non-mention message, got %d", len(received))
+	}
+}
+
+// --- Backup tests ---
+
+func TestBackupExportImport(t *testing.T) {
+	bucket := os.Getenv("SHARKFIN_BACKUP_TEST_BUCKET")
+	if bucket == "" {
+		t.Skip("SHARKFIN_BACKUP_TEST_BUCKET not set")
+	}
+	if os.Getenv("SHARKFIN_DB") != "" {
+		t.Skip("backup e2e requires SQLite (SHARKFIN_DB must not be set)")
+	}
+	region := os.Getenv("SHARKFIN_BACKUP_TEST_REGION")
+	endpoint := os.Getenv("SHARKFIN_BACKUP_TEST_ENDPOINT")
+	accessKey := os.Getenv("SHARKFIN_BACKUP_TEST_ACCESS_KEY")
+	secretKey := os.Getenv("SHARKFIN_BACKUP_TEST_SECRET_KEY")
+	passphrase := os.Getenv("SHARKFIN_BACKUP_TEST_PASSPHRASE")
+	if passphrase == "" {
+		passphrase = "test-passphrase"
+	}
+
+	// --- Daemon A: populate data ---
+	addrA, err := harness.FreePort()
+	if err != nil {
+		t.Fatal(err)
+	}
+	dA, err := harness.StartDaemon(sharkfinBin, addrA)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer dA.Cleanup()
+
+	alice := harness.NewClient(addrA)
+	if err := alice.RegisterFlow("alice"); err != nil {
+		t.Fatal(err)
+	}
+	bob := harness.NewClient(addrA)
+	if err := bob.RegisterFlow("bob"); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := dA.GrantAdmin(sharkfinBin, "alice"); err != nil {
+		t.Fatal(err)
+	}
+
+	r, err := alice.ToolCall("channel_create", map[string]any{
+		"name": "general", "public": true, "members": []string{"bob"},
+	})
+	if err != nil || r.Error != nil {
+		t.Fatalf("create channel: err=%v rpc=%+v", err, r.Error)
+	}
+
+	r, err = alice.ToolCall("send_message", map[string]any{
+		"channel": "general", "message": "hello from alice", "mentions": []string{"bob"},
+	})
+	if err != nil || r.Error != nil {
+		t.Fatalf("send: err=%v rpc=%+v", err, r.Error)
+	}
+
+	r, err = bob.ToolCall("send_message", map[string]any{
+		"channel": "general", "message": "hello from bob",
+	})
+	if err != nil || r.Error != nil {
+		t.Fatalf("send: err=%v rpc=%+v", err, r.Error)
+	}
+
+	alice.DisconnectPresence()
+	bob.DisconnectPresence()
+	dA.StopNoClean(t)
+
+	// --- Export ---
+	s3Flags := []string{
+		"--s3-bucket", bucket,
+		"--s3-region", region,
+		"--s3-access-key", accessKey,
+		"--s3-secret-key", secretKey,
+	}
+	if endpoint != "" {
+		s3Flags = append(s3Flags, "--s3-endpoint", endpoint)
+	}
+
+	exportArgs := append([]string{
+		"backup", "export",
+		"--db", dA.DBPath(),
+		"--passphrase", passphrase,
+	}, s3Flags...)
+
+	exportOut, err := exec.Command(sharkfinBin, exportArgs...).CombinedOutput()
+	if err != nil {
+		t.Fatalf("export: %v\n%s", err, exportOut)
+	}
+
+	// Parse key from "Uploaded: sharkfin-backup-...tar.xz.age (123 B)"
+	var key string
+	for _, line := range strings.Split(string(exportOut), "\n") {
+		if strings.HasPrefix(line, "Uploaded: ") {
+			fields := strings.Fields(line)
+			if len(fields) >= 2 {
+				key = fields[1]
+			}
+		}
+	}
+	if key == "" {
+		t.Fatalf("could not parse key from export output: %s", exportOut)
+	}
+	t.Logf("exported key: %s", key)
+
+	// --- Import into fresh DB, start daemon B ---
+	tmpDir, err := os.MkdirTemp("", "sharkfin-backup-import-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tmpDir)
+	dbPathB := filepath.Join(tmpDir, "imported.db")
+
+	importArgs := append([]string{
+		"backup", "import", key,
+		"--db", dbPathB,
+		"--passphrase", passphrase,
+	}, s3Flags...)
+
+	importOut, err := exec.Command(sharkfinBin, importArgs...).CombinedOutput()
+	if err != nil {
+		t.Fatalf("import: %v\n%s", err, importOut)
+	}
+	t.Logf("import output: %s", importOut)
+
+	// Start daemon B using the imported DB
+	addrB, err := harness.FreePort()
+	if err != nil {
+		t.Fatal(err)
+	}
+	dB, err := harness.StartDaemon(sharkfinBin, addrB, harness.WithDB(dbPathB))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer dB.StopFatal(t)
+
+	// --- Verify via MCP ---
+	verifier := harness.NewClient(addrB)
+	if err := verifier.IdentifyFlow("alice"); err != nil {
+		t.Fatal(err)
+	}
+	defer verifier.DisconnectPresence()
+
+	// Verify users
+	ur, err := verifier.ToolCall("user_list", map[string]any{})
+	if err != nil || ur.Error != nil {
+		t.Fatalf("user_list: err=%v rpc=%+v", err, ur.Error)
+	}
+	if !strings.Contains(ur.Text, "alice") || !strings.Contains(ur.Text, "bob") {
+		t.Errorf("expected alice and bob in user_list, got: %s", ur.Text)
+	}
+
+	// Verify messages in general channel
+	hr, err := verifier.ToolCall("history", map[string]any{
+		"channel": "general", "limit": 50,
+	})
+	if err != nil || hr.Error != nil {
+		t.Fatalf("history: err=%v rpc=%+v", err, hr.Error)
+	}
+	if !strings.Contains(hr.Text, "hello from alice") {
+		t.Errorf("expected 'hello from alice' in history, got: %s", hr.Text)
+	}
+	if !strings.Contains(hr.Text, "hello from bob") {
+		t.Errorf("expected 'hello from bob' in history, got: %s", hr.Text)
 	}
 }
