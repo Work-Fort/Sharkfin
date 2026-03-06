@@ -96,6 +96,14 @@ func registerWSUser(t *testing.T, env *wsTestEnv, username string) *websocket.Co
 	return conn
 }
 
+// grantAdmin promotes a WS-registered user to admin role for tests that need elevated permissions.
+func grantAdmin(t *testing.T, env *wsTestEnv, username string) {
+	t.Helper()
+	if err := env.db.SetUserRole(username, "admin"); err != nil {
+		t.Fatalf("grant admin to %s: %v", username, err)
+	}
+}
+
 // --- Tests ---
 
 func TestWSHello(t *testing.T) {
@@ -238,6 +246,7 @@ func TestWSUserList(t *testing.T) {
 func TestWSChannelCreate(t *testing.T) {
 	env := newWSTestEnv(t)
 	conn := registerWSUser(t, env, "alice")
+	grantAdmin(t, env, "alice")
 
 	resp := wsReq(t, conn, "channel_create", map[string]interface{}{
 		"name":   "general",
@@ -248,23 +257,32 @@ func TestWSChannelCreate(t *testing.T) {
 	}
 }
 
-func TestWSChannelCreateDisabled(t *testing.T) {
+func TestWSChannelCreatePermissionDenied(t *testing.T) {
 	env := newWSTestEnv(t)
-	env.db.SetSetting("allow_channel_creation", "false")
-	conn := registerWSUser(t, env, "alice")
+	conn := registerWSUser(t, env, "alice") // "user" role lacks create_channel
 
 	resp := wsReq(t, conn, "channel_create", map[string]interface{}{
 		"name":   "secret",
 		"public": false,
 	}, "c1")
 	if resp.OK != nil && *resp.OK {
-		t.Error("expected error: channel creation disabled")
+		t.Error("expected error: permission denied")
+	}
+	// Verify correct error message
+	d, _ := json.Marshal(resp.D)
+	var result struct {
+		Message string `json:"message"`
+	}
+	json.Unmarshal(d, &result)
+	if result.Message != "permission denied: create_channel" {
+		t.Errorf("error = %q, want 'permission denied: create_channel'", result.Message)
 	}
 }
 
 func TestWSChannelList(t *testing.T) {
 	env := newWSTestEnv(t)
 	conn := registerWSUser(t, env, "alice")
+	grantAdmin(t, env, "alice")
 
 	// Create a channel first
 	wsReq(t, conn, "channel_create", map[string]interface{}{
@@ -294,6 +312,7 @@ func TestWSChannelList(t *testing.T) {
 func TestWSChannelInvite(t *testing.T) {
 	env := newWSTestEnv(t)
 	aliceConn := registerWSUser(t, env, "alice")
+	grantAdmin(t, env, "alice")
 	registerWSUser(t, env, "bob")
 
 	wsReq(t, aliceConn, "channel_create", map[string]interface{}{
@@ -311,6 +330,7 @@ func TestWSChannelInvite(t *testing.T) {
 func TestWSChannelInviteNonParticipant(t *testing.T) {
 	env := newWSTestEnv(t)
 	aliceConn := registerWSUser(t, env, "alice")
+	grantAdmin(t, env, "alice")
 	bobConn := registerWSUser(t, env, "bob")
 	registerWSUser(t, env, "charlie")
 
@@ -330,6 +350,7 @@ func TestWSChannelInviteNonParticipant(t *testing.T) {
 func TestWSSendMessage(t *testing.T) {
 	env := newWSTestEnv(t)
 	conn := registerWSUser(t, env, "alice")
+	grantAdmin(t, env, "alice")
 
 	wsReq(t, conn, "channel_create", map[string]interface{}{
 		"name": "general", "public": true,
@@ -356,6 +377,7 @@ func TestWSSendMessage(t *testing.T) {
 func TestWSSendMessageNonParticipant(t *testing.T) {
 	env := newWSTestEnv(t)
 	aliceConn := registerWSUser(t, env, "alice")
+	grantAdmin(t, env, "alice")
 	bobConn := registerWSUser(t, env, "bob")
 
 	wsReq(t, aliceConn, "channel_create", map[string]interface{}{
@@ -373,6 +395,7 @@ func TestWSSendMessageNonParticipant(t *testing.T) {
 func TestWSHistory(t *testing.T) {
 	env := newWSTestEnv(t)
 	conn := registerWSUser(t, env, "alice")
+	grantAdmin(t, env, "alice")
 
 	wsReq(t, conn, "channel_create", map[string]interface{}{
 		"name": "general", "public": true,
@@ -412,6 +435,7 @@ func TestWSHistory(t *testing.T) {
 func TestWSHistoryNonParticipant(t *testing.T) {
 	env := newWSTestEnv(t)
 	aliceConn := registerWSUser(t, env, "alice")
+	grantAdmin(t, env, "alice")
 	bobConn := registerWSUser(t, env, "bob")
 
 	wsReq(t, aliceConn, "channel_create", map[string]interface{}{
@@ -430,6 +454,7 @@ func TestWSHistoryNonParticipant(t *testing.T) {
 func TestWSSetAndGetSettings(t *testing.T) {
 	env := newWSTestEnv(t)
 	conn := registerWSUser(t, env, "alice")
+	grantAdmin(t, env, "alice")
 
 	// Set a setting
 	resp := wsReq(t, conn, "set_setting", map[string]interface{}{
@@ -502,6 +527,7 @@ func TestWSIdentifyAlreadyOnline(t *testing.T) {
 func TestWSSendMessageWithMentions(t *testing.T) {
 	env := newWSTestEnv(t)
 	aliceConn := registerWSUser(t, env, "alice")
+	grantAdmin(t, env, "alice")
 	bobConn := registerWSUser(t, env, "bob")
 
 	wsReq(t, aliceConn, "channel_create", map[string]interface{}{
@@ -538,6 +564,7 @@ func TestWSSendMessageWithMentions(t *testing.T) {
 func TestWSSendMessageAutoMention(t *testing.T) {
 	env := newWSTestEnv(t)
 	aliceConn := registerWSUser(t, env, "alice")
+	grantAdmin(t, env, "alice")
 	bobConn := registerWSUser(t, env, "bob")
 
 	wsReq(t, aliceConn, "channel_create", map[string]interface{}{
@@ -574,6 +601,7 @@ func TestWSSendMessageAutoMention(t *testing.T) {
 func TestWSSendMessageWithThread(t *testing.T) {
 	env := newWSTestEnv(t)
 	aliceConn := registerWSUser(t, env, "alice")
+	grantAdmin(t, env, "alice")
 	bobConn := registerWSUser(t, env, "bob")
 
 	wsReq(t, aliceConn, "channel_create", map[string]interface{}{
@@ -621,6 +649,7 @@ func TestWSSendMessageWithThread(t *testing.T) {
 func TestWSSendMessageRejectNestedReply(t *testing.T) {
 	env := newWSTestEnv(t)
 	conn := registerWSUser(t, env, "alice")
+	grantAdmin(t, env, "alice")
 
 	wsReq(t, conn, "channel_create", map[string]interface{}{
 		"name": "general", "public": true,
@@ -656,6 +685,7 @@ func TestWSSendMessageRejectNestedReply(t *testing.T) {
 func TestWSHistoryWithThreadFilter(t *testing.T) {
 	env := newWSTestEnv(t)
 	conn := registerWSUser(t, env, "alice")
+	grantAdmin(t, env, "alice")
 
 	wsReq(t, conn, "channel_create", map[string]interface{}{
 		"name": "general", "public": true,
@@ -702,6 +732,7 @@ func TestWSHistoryWithThreadFilter(t *testing.T) {
 func TestWSSendMessageMentionInvalidUser(t *testing.T) {
 	env := newWSTestEnv(t)
 	conn := registerWSUser(t, env, "alice")
+	grantAdmin(t, env, "alice")
 
 	wsReq(t, conn, "channel_create", map[string]interface{}{
 		"name": "general", "public": true,
@@ -721,6 +752,7 @@ func TestWSSendMessageMentionInvalidUser(t *testing.T) {
 func TestWSUnreadMessages(t *testing.T) {
 	env := newWSTestEnv(t)
 	aliceConn := registerWSUser(t, env, "alice")
+	grantAdmin(t, env, "alice")
 	bobConn := registerWSUser(t, env, "bob")
 
 	wsReq(t, aliceConn, "channel_create", map[string]interface{}{

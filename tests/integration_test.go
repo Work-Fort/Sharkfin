@@ -285,6 +285,14 @@ func (e *testEnv) identifyUser(username string, id int) (sessionID string, cance
 	return sessionID, cancelPresence
 }
 
+// grantAdmin promotes a user to admin role via the server's DB handle.
+func (e *testEnv) grantAdmin(username string) {
+	e.t.Helper()
+	if err := e.srv.DB().SetUserRole(username, "admin"); err != nil {
+		e.t.Fatalf("grant admin to %s: %v", username, err)
+	}
+}
+
 // --- Test Scenarios ---
 
 func TestScenario1_IdentityHandshakeAndPresence(t *testing.T) {
@@ -350,6 +358,7 @@ func TestScenario2_MessagingBetweenTwoUsers(t *testing.T) {
 
 	sessionA, cancelA := env.registerUser("alice", 1)
 	defer cancelA()
+	env.grantAdmin("alice")
 	sessionB, cancelB := env.registerUser("bob", 10)
 	defer cancelB()
 
@@ -418,6 +427,7 @@ func TestScenario3_ChannelVisibility(t *testing.T) {
 
 	sessionA, cancelA := env.registerUser("alice", 1)
 	defer cancelA()
+	env.grantAdmin("alice")
 	sessionB, cancelB := env.registerUser("bob", 10)
 	defer cancelB()
 	sessionC, cancelC := env.registerUser("charlie", 20)
@@ -486,20 +496,21 @@ func TestScenario3_ChannelVisibility(t *testing.T) {
 	}
 }
 
-func TestScenario4_ChannelCreationDisabled(t *testing.T) {
-	env := startTestServer(t, false)
+func TestScenario4_ChannelCreatePermissionDenied(t *testing.T) {
+	env := startTestServer(t, true)
 
 	sessionA, cancelA := env.registerUser("alice", 1)
 	defer cancelA()
+	// alice has "user" role which lacks create_channel permission
 
 	_, chResp := env.toolCall(sessionA, 10, "channel_create", map[string]interface{}{
 		"name": "test-channel", "public": true,
 	})
 	isErr, msg := toolResultIsError(t, chResp)
 	if !isErr {
-		t.Fatal("expected error when channel creation is disabled")
+		t.Fatal("expected error: user role lacks create_channel permission")
 	}
-	if msg != "channel creation is disabled" {
+	if msg != "permission denied: create_channel" {
 		t.Fatalf("unexpected error: %s", msg)
 	}
 }
@@ -563,6 +574,7 @@ func TestScenario7_ChannelInvite(t *testing.T) {
 
 	sessionA, cancelA := env.registerUser("alice", 1)
 	defer cancelA()
+	env.grantAdmin("alice")
 	sessionB, cancelB := env.registerUser("bob", 10)
 	defer cancelB()
 	sessionC, cancelC := env.registerUser("charlie", 20)
@@ -612,6 +624,7 @@ func TestScenario8_NonParticipantRejection(t *testing.T) {
 
 	sessionA, cancelA := env.registerUser("alice", 1)
 	defer cancelA()
+	env.grantAdmin("alice")
 	_, cancelB := env.registerUser("bob", 10)
 	defer cancelB()
 

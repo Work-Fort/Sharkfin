@@ -70,6 +70,9 @@ func NewServer(addr, dbPath string, allowChannelCreation bool, pongTimeout time.
 	}, nil
 }
 
+// DB returns the server's database handle. Intended for test access.
+func (s *Server) DB() *db.DB { return s.db }
+
 // Start begins listening for connections.
 func (s *Server) Start() error {
 	// TODO: change back to "tcp" when Nexus supports IPv6
