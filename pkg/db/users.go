@@ -12,6 +12,8 @@ type User struct {
 	ID        int64
 	Username  string
 	Password  string
+	Role      string
+	Type      string
 	CreatedAt time.Time
 }
 
@@ -28,9 +30,9 @@ func (d *DB) CreateUser(username, password string) (int64, error) {
 func (d *DB) GetUserByUsername(username string) (*User, error) {
 	var u User
 	err := d.db.QueryRow(
-		"SELECT id, username, password, created_at FROM users WHERE username = ?",
+		"SELECT id, username, password, role, type, created_at FROM users WHERE username = ?",
 		username,
-	).Scan(&u.ID, &u.Username, &u.Password, &u.CreatedAt)
+	).Scan(&u.ID, &u.Username, &u.Password, &u.Role, &u.Type, &u.CreatedAt)
 	if err == sql.ErrNoRows {
 		return nil, fmt.Errorf("user not found: %s", username)
 	}
@@ -42,7 +44,7 @@ func (d *DB) GetUserByUsername(username string) (*User, error) {
 
 // ListUsers returns all registered users.
 func (d *DB) ListUsers() ([]User, error) {
-	rows, err := d.db.Query("SELECT id, username, password, created_at FROM users ORDER BY username")
+	rows, err := d.db.Query("SELECT id, username, password, role, type, created_at FROM users ORDER BY username")
 	if err != nil {
 		return nil, fmt.Errorf("list users: %w", err)
 	}
@@ -51,7 +53,7 @@ func (d *DB) ListUsers() ([]User, error) {
 	var users []User
 	for rows.Next() {
 		var u User
-		if err := rows.Scan(&u.ID, &u.Username, &u.Password, &u.CreatedAt); err != nil {
+		if err := rows.Scan(&u.ID, &u.Username, &u.Password, &u.Role, &u.Type, &u.CreatedAt); err != nil {
 			return nil, fmt.Errorf("scan user: %w", err)
 		}
 		users = append(users, u)
