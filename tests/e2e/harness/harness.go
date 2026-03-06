@@ -65,6 +65,10 @@ func StartDaemon(binary, addr string, opts ...DaemonOption) (*Daemon, error) {
 	if cfg.webhookURL != "" {
 		args = append(args, "--webhook-url", cfg.webhookURL)
 	}
+	// Forward SHARKFIN_DB if set (e.g., for Postgres e2e).
+	if dbDSN := os.Getenv("SHARKFIN_DB"); dbDSN != "" {
+		args = append(args, "--db", dbDSN)
+	}
 
 	var stderrBuf bytes.Buffer
 
@@ -103,7 +107,12 @@ func (d *Daemon) XDGDir() string { return d.xdgDir }
 
 // GrantAdmin promotes a user to admin role using the admin CLI.
 func (d *Daemon) GrantAdmin(binary, username string) error {
-	cmd := exec.Command(binary, "admin", "set-role", username, "admin")
+	args := []string{"admin", "set-role", username, "admin"}
+	// Forward SHARKFIN_DB if set (e.g., for Postgres e2e).
+	if dbDSN := os.Getenv("SHARKFIN_DB"); dbDSN != "" {
+		args = append(args, "--db", dbDSN)
+	}
+	cmd := exec.Command(binary, args...)
 	cmd.Env = append(os.Environ(),
 		"XDG_CONFIG_HOME="+d.xdgDir+"/config",
 		"XDG_STATE_HOME="+d.xdgDir+"/state",
