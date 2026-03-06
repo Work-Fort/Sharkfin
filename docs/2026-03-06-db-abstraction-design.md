@@ -1,0 +1,305 @@
+# Database Abstraction Layer Design
+
+## Goal
+
+Refactor sharkfin's database layer from a monolithic `pkg/db` package to a hexagonal architecture supporting both SQLite and PostgreSQL backends, following the pattern established in Nexus.
+
+## Architecture
+
+```
+pkg/domain/            Domain interfaces (ports) + shared types
+pkg/infra/             Factory function (Open) with DSN auto-detect
+pkg/infra/sqlite/      SQLite backend: sqlc queries, goose migrations, Store
+pkg/infra/postgres/    Postgres backend: sqlc queries, goose migrations, Store
+pkg/daemon/            Consumes domain interfaces via dependency injection
+cmd/                   Wires everything together using infra.Open()
+```
+
+The daemon layer receives store interfaces. A factory function auto-detects the backend from the DSN and returns the correct implementation.
+
+## DSN Auto-Detect
+
+A single environment variable / config value `SHARKFIN_DB` selects the backend:
+
+| Value | Backend |
+|-------|---------|
+| `postgres://user:pass@host/db` | PostgreSQL |
+| `postgresql://user:pass@host/db` | PostgreSQL |
+| `/path/to/sharkfin.db` | SQLite file |
+| `:memory:` | SQLite in-memory |
+| Unset | Default SQLite at `$XDG_STATE_HOME/sharkfin/sharkfin.db` |
+
+Detection logic in `pkg/infra/open.go`:
+
+```go
+func Open(dsn string) (domain.Store, error) {
+    if strings.HasPrefix(dsn, "postgres://") || strings.HasPrefix(dsn, "postgresql://") {
+        return postgres.Open(dsn)
+    }
+    return sqlite.Open(dsn)
+}
+```
+
+The daemon command resolves the DSN: if the `--db` flag or `SHARKFIN_DB` env var is set, use it; otherwise fall back to the default SQLite path.
+
+## Domain Layer
+
+### Interfaces (`pkg/domain/ports.go`)
+
+Five granular store interfaces grouping the current 36 DB methods:
+
+```go
+type UserStore interface {
+    CreateUser(username, password string) (int64, error)
+    GetUserByUsername(username string) (*User, error)
+    ListUsers() ([]User, error)
+}
+
+type ChannelStore interface {
+    CreateChannel(name string, public bool, memberIDs []int64, channelType string) (int64, error)
+    GetChannelByID(id int64) (*Channel, error)
+    GetChannelByName(name string) (*Channel, error)
+    ListChannelsForUser(userID int64) ([]ChannelWithMembership, error)
+    ListAllChannelsWithMembership(userID int64) ([]ChannelWithMembership, error)
+    AddChannelMember(channelID, userID int64) error
+    ChannelMemberUsernames(channelID int64) ([]string, error)
+    IsChannelMember(channelID, userID int64) (bool, error)
+    ListDMsForUser(userID int64) ([]DMInfo, error)
+    ListAllDMs() ([]AllDMInfo, error)
+    OpenDM(userID, otherUserID int64, otherUsername string) (string, bool, error)
+}
+
+type MessageStore interface {
+    SendMessage(channelID, userID int64, body string, threadID *int64, mentionUserIDs []int64) (int64, error)
+    GetMessages(channelID int64, before *int64, after *int64, limit int, threadID *int64) ([]Message, error)
+    GetUnreadMessages(userID int64, channelID *int64, mentionsOnly bool, threadID *int64) ([]Message, error)
+    GetUnreadCounts(userID int64) ([]UnreadCount, error)
+    MarkRead(userID, channelID int64, messageID *int64) error
+}
+
+type RoleStore interface {
+    CreateRole(name string) error
+    DeleteRole(name string) error
+    ListRoles() ([]Role, error)
+    GrantPermission(role, permission string) error
+    RevokePermission(role, permission string) error
+    GetRolePermissions(role string) ([]string, error)
+    GetUserPermissions(username string) ([]string, error)
+    HasPermission(username, permission string) (bool, error)
+    SetUserRole(username, role string) error
+    SetUserType(username, userType string) error
+}
+
+type SettingsStore interface {
+    GetSetting(key string) (string, error)
+    SetSetting(key, value string) error
+    ListSettings() (map[string]string, error)
+}
+```
+
+A composite interface for convenient wiring:
+
+```go
+type Store interface {
+    UserStore
+    ChannelStore
+    MessageStore
+    RoleStore
+    SettingsStore
+    Close() error
+}
+```
+
+### Types (`pkg/domain/types.go`)
+
+Move existing structs from `pkg/db` into `pkg/domain`:
+
+- `User` (ID, Username, Password, Role, Type, CreatedAt)
+- `Channel` (ID, Name, Public, Type, CreatedAt)
+- `ChannelWithMembership` (Channel + IsMember)
+- `Message` (ID, ChannelID, UserID, From, Body, ThreadID, Mentions, CreatedAt)
+- `UnreadCount` (ChannelID, Channel, UnreadCount, MentionCount, Type)
+- `DMInfo` (ChannelID, ChannelName, OtherUserID, OtherUsername)
+- `AllDMInfo` (ChannelID, ChannelName, User1ID, User1Username, User2ID, User2Username)
+- `Role` (Name, BuiltIn)
+
+## Backend Implementations
+
+### SQLite (`pkg/infra/sqlite/`)
+
+```
+pkg/infra/sqlite/
+  store.go          Open(), Close(), pragma config, migration runner
+  queries.sql       sqlc query definitions (? placeholders)
+  sqlc.yaml         sqlc config (engine: sqlite)
+  migrations/       goose SQL files (001_init.sql through 006_rbac.sql)
+  # generated by sqlc:
+  db.go             DBTX interface, Queries struct
+  models.go         Row types
+  queries.sql.go    Generated query functions
+```
+
+**Connection config** (same as current):
+- `SetMaxOpenConns(1)`
+- PRAGMAs: `foreign_keys=ON`, `journal_mode=WAL`, `busy_timeout=5000`, `synchronous=NORMAL`, `wal_autocheckpoint=1000`
+
+### PostgreSQL (`pkg/infra/postgres/`)
+
+```
+pkg/infra/postgres/
+  store.go          Open(), Close(), connection pool config, migration runner
+  queries.sql       sqlc query definitions ($1 placeholders)
+  sqlc.yaml         sqlc config (engine: postgresql)
+  migrations/       goose SQL files (001_init.sql through 006_rbac.sql)
+  # generated by sqlc:
+  db.go             DBTX interface, Queries struct
+  models.go         Row types
+  queries.sql.go    Generated query functions
+```
+
+**Connection config:**
+- `SetMaxOpenConns(25)` (sensible default)
+- `SetMaxIdleConns(5)`
+- `SetConnMaxLifetime(5 * time.Minute)`
+
+**Driver:** `github.com/jackc/pgx/v5/stdlib`
+
+### Key Dialect Differences
+
+| Concern | SQLite | PostgreSQL |
+|---------|--------|------------|
+| Placeholders | `?` | `$1, $2, ...` |
+| Auto-increment PK | `INTEGER PRIMARY KEY AUTOINCREMENT` | `BIGSERIAL PRIMARY KEY` |
+| Upsert (ignore) | `INSERT OR IGNORE` | `INSERT ... ON CONFLICT DO NOTHING` |
+| Upsert (update) | `ON CONFLICT(...) DO UPDATE` | `ON CONFLICT(...) DO UPDATE` (same) |
+| Booleans | `0/1` (INTEGER) | native `BOOLEAN` |
+| Timestamps | `TIMESTAMP DEFAULT CURRENT_TIMESTAMP` | `TIMESTAMPTZ DEFAULT NOW()` |
+| String concat | `\|\|` | `\|\|` (same) |
+| LIKE | case-insensitive by default | case-sensitive (`ILIKE` for insensitive) |
+
+### Migrations
+
+Each backend has its own migration directory with dialect-appropriate SQL. Both produce identical schemas logically. Goose runs at startup with the appropriate dialect:
+
+```go
+// SQLite
+provider, _ := goose.NewProvider(goose.DialectSQLite3, db, fsys)
+
+// PostgreSQL
+provider, _ := goose.NewProvider(goose.DialectPostgres, db, fsys)
+```
+
+Migrations are embedded via `//go:embed migrations/*.sql` in each backend's `store.go`.
+
+## Changes to Daemon Layer
+
+The daemon currently receives `*db.DB`. After refactoring:
+
+- `NewServer` takes `domain.Store` instead of `*db.DB`
+- `NewWSHandler`, `NewSharkfinMCP`, `NewSessionManager` receive the specific store interfaces they need
+- `cmd/daemon/daemon.go` resolves the DSN and calls `infra.Open(dsn)`
+- `cmd/admin/admin.go` also uses `infra.Open(dsn)` for direct DB access
+
+No business logic changes. Only the types passed around change from `*db.DB` to domain interfaces.
+
+## Configuration
+
+### Daemon command
+
+New `--db` flag (bound to Viper key `db`):
+
+```
+sharkfin daemon --db postgres://user:pass@localhost/sharkfin
+sharkfin daemon --db /path/to/sharkfin.db
+sharkfin daemon                                          # default SQLite
+```
+
+Environment variable: `SHARKFIN_DB`
+
+### Admin command
+
+The admin CLI also needs the DSN to find the database:
+
+```
+sharkfin admin set-role alice admin --db postgres://...
+sharkfin admin set-role alice admin                      # default SQLite
+```
+
+## CI: Dual-Backend E2E Tests
+
+### Current CI (`ci.yaml`)
+
+```yaml
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: jdx/mise-action@v3
+      - run: mise run ci
+```
+
+This continues to run all tests against SQLite (unit, integration, e2e).
+
+### New Postgres E2E Job
+
+```yaml
+  e2e-postgres:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_DB: sharkfin_test
+          POSTGRES_USER: sharkfin
+          POSTGRES_PASSWORD: sharkfin
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: jdx/mise-action@v3
+      - run: mise run build
+      - run: mise run e2e
+        env:
+          SHARKFIN_DB: postgres://sharkfin:sharkfin@localhost:5432/sharkfin_test?sslmode=disable
+```
+
+The e2e harness passes `SHARKFIN_DB` through to the daemon it starts. Each test gets a fresh daemon; for Postgres, each daemon creates/migrates the tables on startup. Between tests the daemon is stopped and a new one starts (tables are re-created from migrations since each daemon gets a fresh `sharkfin_test` database — we truncate or use a unique schema per test).
+
+### Test Isolation for Postgres
+
+Each e2e test starts a daemon. For Postgres test isolation:
+
+- **Option A (simple):** Each daemon connects to the same database. Since e2e tests run sequentially and each daemon runs migrations, the first daemon creates the tables and subsequent daemons find them already up-to-date. Between daemons, tables accumulate data — but since each test registers fresh users and creates fresh channels, this works if tests don't assert on global counts.
+- **Option B (clean):** Each e2e test creates a unique Postgres schema (e.g., `test_<random>`) and passes it in the DSN `search_path`. The schema is dropped on daemon stop. This gives full isolation.
+
+Recommend **Option A** initially — it matches how the SQLite tests work (each gets a fresh temp dir, but the pattern is the same: start daemon, test, stop). If flakiness arises, upgrade to Option B.
+
+## Testing Strategy
+
+| Layer | Backend | How |
+|-------|---------|-----|
+| Unit tests (`pkg/infra/sqlite/`) | SQLite `:memory:` | Fast, no deps |
+| Unit tests (`pkg/infra/postgres/`) | Postgres (skipped without `SHARKFIN_DB`) | Needs running Postgres |
+| Integration tests (`tests/`) | SQLite `:memory:` | Same as current |
+| E2e (CI - existing job) | SQLite (temp file) | `mise run e2e` |
+| E2e (CI - new job) | Postgres (service container) | `mise run e2e` with `SHARKFIN_DB` |
+
+## Migration Path
+
+The old `pkg/db/` package is deleted after the refactor. The migration path:
+
+1. Create `pkg/domain/` with interfaces and types
+2. Create `pkg/infra/sqlite/` — port existing queries to sqlc, move migrations
+3. Create `pkg/infra/postgres/` — write Postgres-dialect queries and migrations
+4. Create `pkg/infra/open.go` — factory with DSN auto-detect
+5. Update `pkg/daemon/` — swap `*db.DB` for domain interfaces
+6. Update `cmd/` — use `infra.Open()`, add `--db` flag
+7. Update e2e harness — pass `SHARKFIN_DB` through to daemon
+8. Update CI — add `e2e-postgres` job
+9. Delete `pkg/db/`
