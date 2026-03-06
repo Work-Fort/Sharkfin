@@ -8,7 +8,7 @@
 
 **Tech Stack:** `filippo.io/age`, `github.com/ulikunitz/xz`, `github.com/aws/aws-sdk-go-v2`
 
-**Design doc:** `docs/plans/2026-03-06-backup-design.md`
+**Design doc:** `docs/2026-03-06-backup-design.md`
 
 ---
 
