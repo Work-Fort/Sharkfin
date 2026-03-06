@@ -7,14 +7,22 @@ import (
 
 // ImportData inserts backup data into the store in dependency order.
 // If force is false, it refuses to import into a non-empty database.
+// If force is true and the database is non-empty, it wipes all data first.
 func ImportData(s BackupStore, b *Backup, force bool) error {
-	if !force {
-		empty, err := s.IsEmpty()
-		if err != nil {
-			return fmt.Errorf("check empty: %w", err)
+	if b.Version != 1 {
+		return fmt.Errorf("unsupported backup version: %d", b.Version)
+	}
+
+	empty, err := s.IsEmpty()
+	if err != nil {
+		return fmt.Errorf("check empty: %w", err)
+	}
+	if !empty {
+		if !force {
+			return fmt.Errorf("database is not empty; use --force to overwrite")
 		}
-		if !empty {
-			return fmt.Errorf("database is not empty; use force=true to override")
+		if err := s.WipeAll(); err != nil {
+			return fmt.Errorf("wipe existing data: %w", err)
 		}
 	}
 

@@ -61,3 +61,29 @@ func (s *Store) IsEmpty() (bool, error) {
 	}
 	return count == 0, nil
 }
+
+// WipeAll deletes all user data, preserving schema and built-in RBAC seeds.
+func (s *Store) WipeAll() error {
+	tables := []string{
+		"message_mentions",
+		"read_cursors",
+		"messages",
+		"channel_members",
+		"channels",
+		"settings",
+		"users",
+	}
+	for _, t := range tables {
+		if _, err := s.db.Exec("DELETE FROM " + t); err != nil {
+			return fmt.Errorf("wipe %s: %w", t, err)
+		}
+	}
+	// Remove custom roles and their permissions; keep built-in RBAC seeds.
+	if _, err := s.db.Exec("DELETE FROM role_permissions WHERE role NOT IN (SELECT name FROM roles WHERE built_in = 1)"); err != nil {
+		return fmt.Errorf("wipe custom role_permissions: %w", err)
+	}
+	if _, err := s.db.Exec("DELETE FROM roles WHERE built_in = 0"); err != nil {
+		return fmt.Errorf("wipe custom roles: %w", err)
+	}
+	return nil
+}

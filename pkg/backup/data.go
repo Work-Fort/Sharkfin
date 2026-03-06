@@ -12,6 +12,7 @@ type BackupStore interface {
 	domain.Store
 	ImportMessage(channelID, userID int64, body string, threadID *int64, mentionUserIDs []int64, createdAt time.Time) (int64, error)
 	IsEmpty() (bool, error)
+	WipeAll() error
 }
 
 // Backup is the top-level JSON-serializable backup format.

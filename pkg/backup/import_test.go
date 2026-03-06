@@ -191,27 +191,41 @@ func TestImportDataNonEmptyStoreRefused(t *testing.T) {
 
 func TestImportDataForceOverride(t *testing.T) {
 	s := newTestStore(t)
-	s.CreateUser("existing", "")
+	// Pre-populate with a user that will CONFLICT with the backup data.
+	s.CreateUser("alice", "old-password")
 
 	b := &backup.Backup{
 		Version: 1,
 		Users: []backup.BackupUser{
-			{Username: "new", Password: "", Role: "user", Type: "user"},
+			{Username: "alice", Password: "new-password", Role: "admin", Type: "user"},
+			{Username: "bob", Password: "", Role: "user", Type: "user"},
 		},
 	}
 
-	// With force=true, import should succeed despite non-empty store.
+	// With force=true, import should wipe existing data and succeed.
 	err := backup.ImportData(s, b, true)
 	if err != nil {
 		t.Fatalf("import with force: %v", err)
 	}
 
-	// Verify the new user was created
-	u, err := s.GetUserByUsername("new")
+	// Verify alice was recreated with backup data (not old data).
+	alice, err := s.GetUserByUsername("alice")
 	if err != nil {
-		t.Fatalf("get user: %v", err)
+		t.Fatalf("get alice: %v", err)
 	}
-	if u.Username != "new" {
-		t.Errorf("username = %q, want new", u.Username)
+	if alice.Password != "new-password" {
+		t.Errorf("alice password = %q, want new-password", alice.Password)
+	}
+	if alice.Role != "admin" {
+		t.Errorf("alice role = %q, want admin", alice.Role)
+	}
+
+	// Verify bob was also created.
+	bob, err := s.GetUserByUsername("bob")
+	if err != nil {
+		t.Fatalf("get bob: %v", err)
+	}
+	if bob.Username != "bob" {
+		t.Errorf("username = %q, want bob", bob.Username)
 	}
 }
