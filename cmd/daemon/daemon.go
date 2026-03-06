@@ -16,6 +16,7 @@ import (
 
 	"github.com/Work-Fort/sharkfin/pkg/config"
 	pkgdaemon "github.com/Work-Fort/sharkfin/pkg/daemon"
+	"github.com/Work-Fort/sharkfin/pkg/infra"
 )
 
 // NewDaemonCmd creates the daemon subcommand.
@@ -26,7 +27,16 @@ func NewDaemonCmd() *cobra.Command {
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			addr := viper.GetString("daemon")
-			dbPath := filepath.Join(config.GlobalPaths.StateDir, "sharkfin.db")
+
+			dsn := viper.GetString("db")
+			if dsn == "" {
+				dsn = filepath.Join(config.GlobalPaths.StateDir, "sharkfin.db")
+			}
+			store, err := infra.Open(dsn)
+			if err != nil {
+				return fmt.Errorf("open database: %w", err)
+			}
+			defer store.Close()
 
 			timeoutStr := viper.GetString("presence-timeout")
 			pongTimeout, err := time.ParseDuration(timeoutStr)
@@ -35,7 +45,7 @@ func NewDaemonCmd() *cobra.Command {
 			}
 
 			webhookURL := viper.GetString("webhook-url")
-			srv, err := pkgdaemon.NewServer(addr, dbPath, pongTimeout, webhookURL)
+			srv, err := pkgdaemon.NewServer(addr, store, pongTimeout, webhookURL)
 			if err != nil {
 				return fmt.Errorf("create server: %w", err)
 			}
@@ -64,8 +74,11 @@ func NewDaemonCmd() *cobra.Command {
 		},
 	}
 
+	cmd.Flags().String("db", "", "Database DSN (postgres://... or path to SQLite file)")
+	_ = viper.BindPFlag("db", cmd.Flags().Lookup("db"))
+
 	cmd.Flags().String("webhook-url", "", "URL to POST webhook notifications to on mentions and DMs")
-	viper.BindPFlag("webhook-url", cmd.Flags().Lookup("webhook-url"))
+	_ = viper.BindPFlag("webhook-url", cmd.Flags().Lookup("webhook-url"))
 
 	return cmd
 }

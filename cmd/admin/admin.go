@@ -7,13 +7,19 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+	"github.com/spf13/viper"
 
 	"github.com/Work-Fort/sharkfin/pkg/config"
-	"github.com/Work-Fort/sharkfin/pkg/db"
+	"github.com/Work-Fort/sharkfin/pkg/domain"
+	"github.com/Work-Fort/sharkfin/pkg/infra"
 )
 
-func openDB() (*db.DB, error) {
-	return db.Open(filepath.Join(config.GlobalPaths.StateDir, "sharkfin.db"))
+func openStore() (domain.Store, error) {
+	dsn := viper.GetString("db")
+	if dsn == "" {
+		dsn = filepath.Join(config.GlobalPaths.StateDir, "sharkfin.db")
+	}
+	return infra.Open(dsn)
 }
 
 // NewAdminCmd creates the admin subcommand for direct DB role management.
@@ -22,6 +28,9 @@ func NewAdminCmd() *cobra.Command {
 		Use:   "admin",
 		Short: "Manage roles and permissions directly via the database",
 	}
+
+	cmd.PersistentFlags().String("db", "", "Database DSN (postgres://... or path to SQLite file)")
+	_ = viper.BindPFlag("db", cmd.PersistentFlags().Lookup("db"))
 
 	cmd.AddCommand(
 		newSetRoleCmd(),
@@ -41,13 +50,13 @@ func newSetRoleCmd() *cobra.Command {
 		Short: "Set a user's role",
 		Args:  cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			d, err := openDB()
+			s, err := openStore()
 			if err != nil {
 				return err
 			}
-			defer d.Close()
+			defer s.Close()
 
-			if err := d.SetUserRole(args[0], args[1]); err != nil {
+			if err := s.SetUserRole(args[0], args[1]); err != nil {
 				return err
 			}
 			fmt.Fprintf(cmd.OutOrStdout(), "Set role %q on user %q\n", args[1], args[0])
@@ -62,13 +71,13 @@ func newCreateRoleCmd() *cobra.Command {
 		Short: "Create a custom role",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			d, err := openDB()
+			s, err := openStore()
 			if err != nil {
 				return err
 			}
-			defer d.Close()
+			defer s.Close()
 
-			if err := d.CreateRole(args[0]); err != nil {
+			if err := s.CreateRole(args[0]); err != nil {
 				return err
 			}
 			fmt.Fprintf(cmd.OutOrStdout(), "Created role %q\n", args[0])
@@ -83,13 +92,13 @@ func newDeleteRoleCmd() *cobra.Command {
 		Short: "Delete a custom role",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			d, err := openDB()
+			s, err := openStore()
 			if err != nil {
 				return err
 			}
-			defer d.Close()
+			defer s.Close()
 
-			if err := d.DeleteRole(args[0]); err != nil {
+			if err := s.DeleteRole(args[0]); err != nil {
 				return err
 			}
 			fmt.Fprintf(cmd.OutOrStdout(), "Deleted role %q\n", args[0])
@@ -104,13 +113,13 @@ func newGrantCmd() *cobra.Command {
 		Short: "Grant a permission to a role",
 		Args:  cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			d, err := openDB()
+			s, err := openStore()
 			if err != nil {
 				return err
 			}
-			defer d.Close()
+			defer s.Close()
 
-			if err := d.GrantPermission(args[0], args[1]); err != nil {
+			if err := s.GrantPermission(args[0], args[1]); err != nil {
 				return err
 			}
 			fmt.Fprintf(cmd.OutOrStdout(), "Granted %q to role %q\n", args[1], args[0])
@@ -125,13 +134,13 @@ func newRevokeCmd() *cobra.Command {
 		Short: "Revoke a permission from a role",
 		Args:  cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			d, err := openDB()
+			s, err := openStore()
 			if err != nil {
 				return err
 			}
-			defer d.Close()
+			defer s.Close()
 
-			if err := d.RevokePermission(args[0], args[1]); err != nil {
+			if err := s.RevokePermission(args[0], args[1]); err != nil {
 				return err
 			}
 			fmt.Fprintf(cmd.OutOrStdout(), "Revoked %q from role %q\n", args[1], args[0])
@@ -146,13 +155,13 @@ func newListRolesCmd() *cobra.Command {
 		Short: "List all roles and their permissions",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			d, err := openDB()
+			s, err := openStore()
 			if err != nil {
 				return err
 			}
-			defer d.Close()
+			defer s.Close()
 
-			roles, err := d.ListRoles()
+			roles, err := s.ListRoles()
 			if err != nil {
 				return err
 			}
@@ -164,7 +173,7 @@ func newListRolesCmd() *cobra.Command {
 					label += " (built-in)"
 				}
 
-				perms, err := d.GetRolePermissions(r.Name)
+				perms, err := s.GetRolePermissions(r.Name)
 				if err != nil {
 					return err
 				}
