@@ -1,9 +1,10 @@
-// SPDX-License-Identifier: GPL-2.0-only
+// SPDX-License-Identifier: AGPL-3.0-or-later
 package sqlite
 
 import (
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/Work-Fort/sharkfin/pkg/domain"
 )
@@ -1070,6 +1071,67 @@ func TestSetUserType(t *testing.T) {
 	// Non-existent user
 	if err := s.SetUserType("nobody", "agent"); err == nil {
 		t.Error("expected error for non-existent user")
+	}
+}
+
+// --- Import/Backup helpers ---
+
+func TestImportMessage(t *testing.T) {
+	s := newTestStore(t)
+	uid, _ := s.CreateUser("alice", "")
+	chID, _ := s.CreateChannel("general", true, []int64{uid}, "channel")
+	ts := time.Date(2025, 1, 15, 12, 0, 0, 0, time.UTC)
+	msgID, err := s.ImportMessage(chID, uid, "old message", nil, nil, ts)
+	if err != nil {
+		t.Fatalf("import message: %v", err)
+	}
+	if msgID == 0 {
+		t.Fatal("expected non-zero message ID")
+	}
+	msgs, _ := s.GetMessages(chID, nil, nil, 50, nil)
+	if len(msgs) != 1 {
+		t.Fatalf("expected 1 message, got %d", len(msgs))
+	}
+	if !msgs[0].CreatedAt.Equal(ts) {
+		t.Errorf("created_at = %v, want %v", msgs[0].CreatedAt, ts)
+	}
+}
+
+func TestImportMessageWithMentions(t *testing.T) {
+	s := newTestStore(t)
+	aliceID, _ := s.CreateUser("alice", "")
+	bobID, _ := s.CreateUser("bob", "")
+	chID, _ := s.CreateChannel("general", true, []int64{aliceID, bobID}, "channel")
+	ts := time.Date(2025, 1, 15, 12, 0, 0, 0, time.UTC)
+	msgID, err := s.ImportMessage(chID, aliceID, "hey @bob", nil, []int64{bobID}, ts)
+	if err != nil {
+		t.Fatalf("import message: %v", err)
+	}
+	if msgID == 0 {
+		t.Fatal("expected non-zero message ID")
+	}
+	msgs, _ := s.GetMessages(chID, nil, nil, 50, nil)
+	if len(msgs) != 1 {
+		t.Fatalf("expected 1 message, got %d", len(msgs))
+	}
+	if len(msgs[0].Mentions) != 1 || msgs[0].Mentions[0] != "bob" {
+		t.Errorf("mentions = %v, want [bob]", msgs[0].Mentions)
+	}
+}
+
+func TestIsEmpty(t *testing.T) {
+	s := newTestStore(t)
+	empty, err := s.IsEmpty()
+	if err != nil {
+		t.Fatalf("is empty: %v", err)
+	}
+	if !empty {
+		t.Error("expected empty store")
+	}
+	s.CreateUser("alice", "")
+	empty, _ = s.IsEmpty()
+	if empty {
+		t.Error("expected non-empty store")
 	}
 }
 

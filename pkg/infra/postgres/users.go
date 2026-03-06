@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-2.0-only
+// SPDX-License-Identifier: AGPL-3.0-or-later
 package postgres
 
 import (
@@ -54,4 +54,14 @@ func (s *Store) ListUsers() ([]domain.User, error) {
 		users = append(users, u)
 	}
 	return users, rows.Err()
+}
+
+// IsEmpty reports whether the users table has no rows.
+// Used by backup import to prevent importing into a non-empty database.
+func (s *Store) IsEmpty() (bool, error) {
+	var count int
+	if err := s.db.QueryRow("SELECT COUNT(*) FROM users").Scan(&count); err != nil {
+		return false, fmt.Errorf("is empty: %w", err)
+	}
+	return count == 0, nil
 }

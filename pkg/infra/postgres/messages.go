@@ -1,10 +1,11 @@
-// SPDX-License-Identifier: GPL-2.0-only
+// SPDX-License-Identifier: AGPL-3.0-or-later
 package postgres
 
 import (
 	"database/sql"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/Work-Fort/sharkfin/pkg/domain"
 )
@@ -52,6 +53,35 @@ func (s *Store) SendMessage(channelID, userID int64, body string, threadID *int6
 		}
 	}
 
+	if err := tx.Commit(); err != nil {
+		return 0, fmt.Errorf("commit: %w", err)
+	}
+	return msgID, nil
+}
+
+// ImportMessage inserts a message with an explicit created_at timestamp.
+// Used by the backup import to preserve original message timestamps.
+func (s *Store) ImportMessage(channelID, userID int64, body string, threadID *int64, mentionUserIDs []int64, createdAt time.Time) (int64, error) {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return 0, fmt.Errorf("begin tx: %w", err)
+	}
+	defer tx.Rollback()
+
+	var msgID int64
+	err = tx.QueryRow(
+		"INSERT INTO messages (channel_id, user_id, body, thread_id, created_at) VALUES ($1, $2, $3, $4, $5) RETURNING id",
+		channelID, userID, body, threadID, createdAt,
+	).Scan(&msgID)
+	if err != nil {
+		return 0, fmt.Errorf("import message: %w", err)
+	}
+
+	for _, uid := range mentionUserIDs {
+		if _, err := tx.Exec("INSERT INTO message_mentions (message_id, user_id) VALUES ($1, $2) ON CONFLICT DO NOTHING", msgID, uid); err != nil {
+			return 0, fmt.Errorf("insert mention: %w", err)
+		}
+	}
 	if err := tx.Commit(); err != nil {
 		return 0, fmt.Errorf("commit: %w", err)
 	}
