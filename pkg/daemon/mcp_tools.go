@@ -119,3 +119,53 @@ func newDMOpenTool() mcp.Tool {
 		mcp.WithString("username", mcp.Required(), mcp.Description("Username of the person to DM")),
 	)
 }
+
+func newCapabilitiesTool() mcp.Tool {
+	return mcp.NewTool("capabilities",
+		mcp.WithDescription("Get your current permissions."),
+	)
+}
+
+func newSetRoleTool() mcp.Tool {
+	return mcp.NewTool("set_role",
+		mcp.WithDescription("Set a user's role."),
+		mcp.WithString("username", mcp.Required(), mcp.Description("Username to update")),
+		mcp.WithString("role", mcp.Required(), mcp.Description("Role to assign")),
+	)
+}
+
+func newCreateRoleTool() mcp.Tool {
+	return mcp.NewTool("create_role",
+		mcp.WithDescription("Create a new custom role."),
+		mcp.WithString("name", mcp.Required(), mcp.Description("Role name")),
+	)
+}
+
+func newDeleteRoleTool() mcp.Tool {
+	return mcp.NewTool("delete_role",
+		mcp.WithDescription("Delete a custom role. Built-in roles cannot be deleted."),
+		mcp.WithString("name", mcp.Required(), mcp.Description("Role name")),
+	)
+}
+
+func newGrantPermissionTool() mcp.Tool {
+	return mcp.NewTool("grant_permission",
+		mcp.WithDescription("Grant a permission to a role."),
+		mcp.WithString("role", mcp.Required(), mcp.Description("Role name")),
+		mcp.WithString("permission", mcp.Required(), mcp.Description("Permission to grant")),
+	)
+}
+
+func newRevokePermissionTool() mcp.Tool {
+	return mcp.NewTool("revoke_permission",
+		mcp.WithDescription("Revoke a permission from a role."),
+		mcp.WithString("role", mcp.Required(), mcp.Description("Role name")),
+		mcp.WithString("permission", mcp.Required(), mcp.Description("Permission to revoke")),
+	)
+}
+
+func newListRolesTool() mcp.Tool {
+	return mcp.NewTool("list_roles",
+		mcp.WithDescription("List all roles and their permissions."),
+	)
+}

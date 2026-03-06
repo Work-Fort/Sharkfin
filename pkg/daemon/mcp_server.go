@@ -19,6 +19,30 @@ type contextKey int
 
 const usernameKey contextKey = iota
 
+// toolPermissions maps tool names to the permission required to invoke them.
+// Tools not in this map (e.g. get_identity_token, register, identify,
+// capabilities, set_state) pass through without permission checks.
+var toolPermissions = map[string]string{
+	"user_list":         "user_list",
+	"channel_list":      "channel_list",
+	"channel_create":    "create_channel",
+	"channel_invite":    "invite_channel",
+	"channel_join":      "join_channel",
+	"send_message":      "send_message",
+	"unread_messages":   "unread_messages",
+	"unread_counts":     "unread_counts",
+	"mark_read":         "mark_read",
+	"history":           "history",
+	"dm_list":           "dm_list",
+	"dm_open":           "dm_open",
+	"set_role":          "manage_roles",
+	"create_role":       "manage_roles",
+	"delete_role":       "manage_roles",
+	"grant_permission":  "manage_roles",
+	"revoke_permission": "manage_roles",
+	"list_roles":        "manage_roles",
+}
+
 // SharkfinMCP wraps an mcp-go MCPServer with Sharkfin's business logic.
 type SharkfinMCP struct {
 	mcpServer *server.MCPServer
@@ -67,6 +91,13 @@ func NewSharkfinMCP(sm *SessionManager, database *db.DB, hub *Hub) *SharkfinMCP 
 		server.ServerTool{Tool: newHistoryTool(), Handler: s.handleHistory},
 		server.ServerTool{Tool: newDMListTool(), Handler: s.handleDMList},
 		server.ServerTool{Tool: newDMOpenTool(), Handler: s.handleDMOpen},
+		server.ServerTool{Tool: newCapabilitiesTool(), Handler: s.handleCapabilities},
+		server.ServerTool{Tool: newSetRoleTool(), Handler: s.handleSetRole},
+		server.ServerTool{Tool: newCreateRoleTool(), Handler: s.handleCreateRole},
+		server.ServerTool{Tool: newDeleteRoleTool(), Handler: s.handleDeleteRole},
+		server.ServerTool{Tool: newGrantPermissionTool(), Handler: s.handleGrantPermission},
+		server.ServerTool{Tool: newRevokePermissionTool(), Handler: s.handleRevokePermission},
+		server.ServerTool{Tool: newListRolesTool(), Handler: s.handleListRoles},
 	)
 
 	return s
@@ -107,6 +138,13 @@ func (s *SharkfinMCP) authMiddleware(next server.ToolHandlerFunc) server.ToolHan
 		username, ok := s.getUsername(sess.SessionID())
 		if !ok {
 			return mcp.NewToolResultError("not identified: call register or identify first"), nil
+		}
+
+		if perm, ok := toolPermissions[req.Params.Name]; ok {
+			hasPerm, err := s.db.HasPermission(username, perm)
+			if err != nil || !hasPerm {
+				return mcp.NewToolResultError(fmt.Sprintf("permission denied: %s", perm)), nil
+			}
 		}
 
 		t0 := time.Now()
@@ -151,6 +189,7 @@ func (s *SharkfinMCP) handleRegister(ctx context.Context, req mcp.CallToolReques
 	}
 
 	s.setUsername(sess.SessionID(), username)
+	s.db.SetUserType(username, "agent")
 	return mcp.NewToolResultText(fmt.Sprintf("registered as %s", username)), nil
 }
 
@@ -224,11 +263,6 @@ func (s *SharkfinMCP) handleChannelList(ctx context.Context, _ mcp.CallToolReque
 }
 
 func (s *SharkfinMCP) handleChannelCreate(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	val, err := s.db.GetSetting("allow_channel_creation")
-	if err == nil && val == "false" {
-		return mcp.NewToolResultError("channel creation is disabled"), nil
-	}
-
 	name := req.GetString("name", "")
 	public := req.GetBool("public", false)
 	members := req.GetStringSlice("members", nil)
@@ -598,6 +632,109 @@ func (s *SharkfinMCP) handleDMOpen(ctx context.Context, req mcp.CallToolRequest)
 	}
 	data, _ := json.Marshal(result)
 	return mcp.NewToolResultText(string(data)), nil
+}
+
+func (s *SharkfinMCP) handleCapabilities(ctx context.Context, _ mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	username := usernameFromCtx(ctx)
+	perms, err := s.db.GetUserPermissions(username)
+	if err != nil {
+		return nil, fmt.Errorf("get permissions: %w", err)
+	}
+	data, _ := json.Marshal(perms)
+	return mcp.NewToolResultText(string(data)), nil
+}
+
+func (s *SharkfinMCP) handleSetRole(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	username := req.GetString("username", "")
+	role := req.GetString("role", "")
+
+	if err := s.db.SetUserRole(username, role); err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+
+	s.broadcastCapabilities(role)
+	return mcp.NewToolResultText(fmt.Sprintf("set %s role to %s", username, role)), nil
+}
+
+func (s *SharkfinMCP) handleCreateRole(_ context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	name := req.GetString("name", "")
+	if err := s.db.CreateRole(name); err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+	return mcp.NewToolResultText(fmt.Sprintf("created role %s", name)), nil
+}
+
+func (s *SharkfinMCP) handleDeleteRole(_ context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	name := req.GetString("name", "")
+	if err := s.db.DeleteRole(name); err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+	return mcp.NewToolResultText(fmt.Sprintf("deleted role %s", name)), nil
+}
+
+func (s *SharkfinMCP) handleGrantPermission(_ context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	role := req.GetString("role", "")
+	permission := req.GetString("permission", "")
+
+	if err := s.db.GrantPermission(role, permission); err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+
+	s.broadcastCapabilities(role)
+	return mcp.NewToolResultText(fmt.Sprintf("granted %s to %s", permission, role)), nil
+}
+
+func (s *SharkfinMCP) handleRevokePermission(_ context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	role := req.GetString("role", "")
+	permission := req.GetString("permission", "")
+
+	if err := s.db.RevokePermission(role, permission); err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+
+	s.broadcastCapabilities(role)
+	return mcp.NewToolResultText(fmt.Sprintf("revoked %s from %s", permission, role)), nil
+}
+
+func (s *SharkfinMCP) handleListRoles(_ context.Context, _ mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	roles, err := s.db.ListRoles()
+	if err != nil {
+		return nil, fmt.Errorf("list roles: %w", err)
+	}
+
+	type roleInfo struct {
+		Name        string   `json:"name"`
+		BuiltIn     bool     `json:"built_in"`
+		Permissions []string `json:"permissions"`
+	}
+	var list []roleInfo
+	for _, r := range roles {
+		perms, err := s.db.GetRolePermissions(r.Name)
+		if err != nil {
+			return nil, fmt.Errorf("get role permissions: %w", err)
+		}
+		list = append(list, roleInfo{
+			Name:        r.Name,
+			BuiltIn:     r.BuiltIn,
+			Permissions: perms,
+		})
+	}
+
+	data, _ := json.Marshal(list)
+	return mcp.NewToolResultText(string(data)), nil
+}
+
+// broadcastCapabilities sends a capabilities event to all WS clients with the given role.
+func (s *SharkfinMCP) broadcastCapabilities(role string) {
+	perms, err := s.db.GetRolePermissions(role)
+	if err != nil {
+		return
+	}
+	data, _ := json.Marshal(map[string]interface{}{"permissions": perms})
+	event := wsEnvelope{Type: "capabilities", D: json.RawMessage(data)}
+	eventData, _ := json.Marshal(event)
+
+	s.hub.BroadcastToRole(role, eventData, s.db)
 }
 
 // optionalInt64 extracts an optional integer argument, returning nil if absent.

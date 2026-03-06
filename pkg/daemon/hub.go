@@ -166,6 +166,22 @@ func (h *Hub) BroadcastMessage(channelID int64, channelName string, channelType 
 	}
 }
 
+// BroadcastToRole sends a pre-encoded event to all connected clients whose user has the given role.
+func (h *Hub) BroadcastToRole(role string, data []byte, database *db.DB) {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	for _, client := range h.clients {
+		user, err := database.GetUserByUsername(client.username)
+		if err != nil || user.Role != role {
+			continue
+		}
+		select {
+		case client.send <- data:
+		default:
+		}
+	}
+}
+
 // BroadcastPresence sends a presence event to all connected clients.
 func (h *Hub) BroadcastPresence(username string, online bool) {
 	event := wsEnvelope{
