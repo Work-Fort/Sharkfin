@@ -279,10 +279,10 @@ func TestUnreadMessagesFilterByChannel(t *testing.T) {
 
 func TestSetAndGetSetting(t *testing.T) {
 	d := newTestDB(t)
-	if err := d.SetSetting("allow_channel_creation", "true"); err != nil {
+	if err := d.SetSetting("test_key", "true"); err != nil {
 		t.Fatalf("set setting: %v", err)
 	}
-	val, err := d.GetSetting("allow_channel_creation")
+	val, err := d.GetSetting("test_key")
 	if err != nil {
 		t.Fatalf("get setting: %v", err)
 	}

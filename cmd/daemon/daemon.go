@@ -20,8 +20,6 @@ import (
 
 // NewDaemonCmd creates the daemon subcommand.
 func NewDaemonCmd() *cobra.Command {
-	var allowChannelCreation bool
-
 	cmd := &cobra.Command{
 		Use:   "daemon",
 		Short: "Start the sharkfind daemon",
@@ -37,7 +35,7 @@ func NewDaemonCmd() *cobra.Command {
 			}
 
 			webhookURL := viper.GetString("webhook-url")
-			srv, err := pkgdaemon.NewServer(addr, dbPath, allowChannelCreation, pongTimeout, webhookURL)
+			srv, err := pkgdaemon.NewServer(addr, dbPath, pongTimeout, webhookURL)
 			if err != nil {
 				return fmt.Errorf("create server: %w", err)
 			}
@@ -66,7 +64,6 @@ func NewDaemonCmd() *cobra.Command {
 		},
 	}
 
-	cmd.Flags().BoolVar(&allowChannelCreation, "allow-channel-creation", true, "Allow users to create channels")
 	cmd.Flags().String("webhook-url", "", "URL to POST webhook notifications to on mentions and DMs")
 	viper.BindPFlag("webhook-url", cmd.Flags().Lookup("webhook-url"))
 

@@ -23,16 +23,11 @@ import (
 // --- Daemon ---
 
 type daemonConfig struct {
-	allowChannelCreation bool
-	presenceTimeout      time.Duration
-	webhookURL           string
+	presenceTimeout time.Duration
+	webhookURL      string
 }
 
 type DaemonOption func(*daemonConfig)
-
-func WithAllowChannelCreation(allow bool) DaemonOption {
-	return func(c *daemonConfig) { c.allowChannelCreation = allow }
-}
 
 func WithPresenceTimeout(d time.Duration) DaemonOption {
 	return func(c *daemonConfig) { c.presenceTimeout = d }
@@ -51,8 +46,7 @@ type Daemon struct {
 
 func StartDaemon(binary, addr string, opts ...DaemonOption) (*Daemon, error) {
 	cfg := &daemonConfig{
-		allowChannelCreation: true,
-		presenceTimeout:      20 * time.Second,
+		presenceTimeout: 20 * time.Second,
 	}
 	for _, o := range opts {
 		o(cfg)
@@ -67,7 +61,6 @@ func StartDaemon(binary, addr string, opts ...DaemonOption) (*Daemon, error) {
 		"daemon",
 		"--daemon", addr,
 		"--log-level", "disabled",
-		fmt.Sprintf("--allow-channel-creation=%t", cfg.allowChannelCreation),
 	}
 	if cfg.webhookURL != "" {
 		args = append(args, "--webhook-url", cfg.webhookURL)

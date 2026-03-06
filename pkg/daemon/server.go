@@ -24,19 +24,10 @@ type Server struct {
 }
 
 // NewServer creates a new sharkfind server.
-func NewServer(addr, dbPath string, allowChannelCreation bool, pongTimeout time.Duration, webhookURL string) (*Server, error) {
+func NewServer(addr, dbPath string, pongTimeout time.Duration, webhookURL string) (*Server, error) {
 	database, err := db.Open(dbPath)
 	if err != nil {
 		return nil, fmt.Errorf("open database: %w", err)
-	}
-
-	// Seed allow_channel_creation setting if not already set
-	if _, err := database.GetSetting("allow_channel_creation"); err != nil {
-		val := "true"
-		if !allowChannelCreation {
-			val = "false"
-		}
-		database.SetSetting("allow_channel_creation", val)
 	}
 
 	// Set webhook_url if provided via flag (always overwrite).

@@ -38,7 +38,7 @@ type testEnv struct {
 	cancel context.CancelFunc
 }
 
-func startTestServer(t *testing.T, allowChannelCreation bool) *testEnv {
+func startTestServer(t *testing.T) *testEnv {
 	t.Helper()
 
 	// Find a free port
@@ -49,7 +49,7 @@ func startTestServer(t *testing.T, allowChannelCreation bool) *testEnv {
 	addr := ln.Addr().String()
 	ln.Close()
 
-	srv, err := pkgdaemon.NewServer(addr, ":memory:", allowChannelCreation, 20*time.Second, "")
+	srv, err := pkgdaemon.NewServer(addr, ":memory:", 20*time.Second, "")
 	if err != nil {
 		t.Fatalf("create server: %v", err)
 	}
@@ -296,7 +296,7 @@ func (e *testEnv) grantAdmin(username string) {
 // --- Test Scenarios ---
 
 func TestScenario1_IdentityHandshakeAndPresence(t *testing.T) {
-	env := startTestServer(t, true)
+	env := startTestServer(t)
 
 	sessionID, cancelPresence := env.registerUser("alice", 1)
 
@@ -354,7 +354,7 @@ func TestScenario1_IdentityHandshakeAndPresence(t *testing.T) {
 }
 
 func TestScenario2_MessagingBetweenTwoUsers(t *testing.T) {
-	env := startTestServer(t, true)
+	env := startTestServer(t)
 
 	sessionA, cancelA := env.registerUser("alice", 1)
 	defer cancelA()
@@ -423,7 +423,7 @@ func TestScenario2_MessagingBetweenTwoUsers(t *testing.T) {
 }
 
 func TestScenario3_ChannelVisibility(t *testing.T) {
-	env := startTestServer(t, true)
+	env := startTestServer(t)
 
 	sessionA, cancelA := env.registerUser("alice", 1)
 	defer cancelA()
@@ -497,7 +497,7 @@ func TestScenario3_ChannelVisibility(t *testing.T) {
 }
 
 func TestScenario4_ChannelCreatePermissionDenied(t *testing.T) {
-	env := startTestServer(t, true)
+	env := startTestServer(t)
 
 	sessionA, cancelA := env.registerUser("alice", 1)
 	defer cancelA()
@@ -516,7 +516,7 @@ func TestScenario4_ChannelCreatePermissionDenied(t *testing.T) {
 }
 
 func TestScenario5_SessionStateConstraints(t *testing.T) {
-	env := startTestServer(t, true)
+	env := startTestServer(t)
 
 	sessionA, cancelA := env.registerUser("alice", 1)
 	defer cancelA()
@@ -539,7 +539,7 @@ func TestScenario5_SessionStateConstraints(t *testing.T) {
 }
 
 func TestScenario6_DoubleLoginPrevention(t *testing.T) {
-	env := startTestServer(t, true)
+	env := startTestServer(t)
 
 	_, cancelA := env.registerUser("alice", 1)
 	defer cancelA()
@@ -570,7 +570,7 @@ func TestScenario6_DoubleLoginPrevention(t *testing.T) {
 }
 
 func TestScenario7_ChannelInvite(t *testing.T) {
-	env := startTestServer(t, true)
+	env := startTestServer(t)
 
 	sessionA, cancelA := env.registerUser("alice", 1)
 	defer cancelA()
@@ -620,7 +620,7 @@ func TestScenario7_ChannelInvite(t *testing.T) {
 }
 
 func TestScenario8_NonParticipantRejection(t *testing.T) {
-	env := startTestServer(t, true)
+	env := startTestServer(t)
 
 	sessionA, cancelA := env.registerUser("alice", 1)
 	defer cancelA()
