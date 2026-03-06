@@ -1,0 +1,14 @@
+# Placeholder for future sqlc adoption.
+# Many queries are too dynamic for sqlc (transactions with N inserts,
+# conditional WHERE clauses, dynamic IN clauses). The current
+# implementation uses hand-written database/sql directly.
+#
+# version: "2"
+# sql:
+#   - engine: "sqlite"
+#     queries: "queries/"
+#     schema: "migrations/"
+#     gen:
+#       go:
+#         package: "sqlite"
+#         out: "."
