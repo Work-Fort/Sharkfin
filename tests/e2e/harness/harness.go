@@ -548,6 +548,57 @@ func (w *WSClient) WSRegister(username string) error {
 	return nil
 }
 
+// WSIdentify identifies as an existing user on the WS connection.
+func (w *WSClient) WSIdentify(username string) error {
+	env, err := w.Req("identify", map[string]string{"username": username}, "id")
+	if err != nil {
+		return err
+	}
+	if env.OK == nil || !*env.OK {
+		return fmt.Errorf("ws identify failed: %s", string(env.D))
+	}
+	return nil
+}
+
+// SetState sends a set_state message via WS and returns the response.
+func (w *WSClient) SetState(state string) (WSEnvelope, error) {
+	return w.Req("set_state", map[string]string{"state": state}, "ss")
+}
+
+// Capabilities sends a capabilities request via WS and returns the response.
+func (w *WSClient) Capabilities() (WSEnvelope, error) {
+	return w.Req("capabilities", nil, "cap")
+}
+
+// ReadWithTimeout reads a single envelope with a custom deadline.
+func (w *WSClient) ReadWithTimeout(d time.Duration) (WSEnvelope, error) {
+	w.conn.SetReadDeadline(time.Now().Add(d))
+	_, msg, err := w.conn.ReadMessage()
+	if err != nil {
+		return WSEnvelope{}, err
+	}
+	var env WSEnvelope
+	if err := json.Unmarshal(msg, &env); err != nil {
+		return WSEnvelope{}, fmt.Errorf("unmarshal: %w (body: %s)", err, string(msg))
+	}
+	return env, nil
+}
+
+// Capabilities calls the capabilities MCP tool and returns the result.
+func (c *Client) Capabilities() (ToolResult, error) {
+	return c.ToolCall("capabilities", map[string]any{})
+}
+
+// SetState calls the set_state MCP tool and returns the result.
+func (c *Client) SetState(state string) (ToolResult, error) {
+	return c.ToolCall("set_state", map[string]any{"state": state})
+}
+
+// SetRole calls the set_role MCP tool and returns the result.
+func (c *Client) SetRole(username, role string) (ToolResult, error) {
+	return c.ToolCall("set_role", map[string]any{"username": username, "role": role})
+}
+
 // --- Helpers ---
 
 func FreePort() (string, error) {

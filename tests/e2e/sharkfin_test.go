@@ -2937,6 +2937,626 @@ func TestWebhookOnDM(t *testing.T) {
 	}
 }
 
+// --- RBAC, Presence, and Agent tests ---
+
+func TestRBACDefaultPermissions(t *testing.T) {
+	addr, err := harness.FreePort()
+	if err != nil {
+		t.Fatal(err)
+	}
+	d, err := harness.StartDaemon(sharkfinBin, addr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.StopFatal(t)
+
+	// Register an admin to create a channel
+	admin := harness.NewClient(addr)
+	if err := admin.RegisterFlow("admin-user"); err != nil {
+		t.Fatal(err)
+	}
+	defer admin.DisconnectPresence()
+
+	if err := d.GrantAdmin(sharkfinBin, "admin-user"); err != nil {
+		t.Fatal(err)
+	}
+
+	r, err := admin.ToolCall("channel_create", map[string]any{
+		"name": "general", "public": true,
+	})
+	if err != nil || r.Error != nil {
+		t.Fatalf("channel_create: err=%v rpc=%+v", err, r.Error)
+	}
+
+	// Register a normal user via MCP (gets "agent" role, same perms as "user")
+	alice := harness.NewClient(addr)
+	if err := alice.RegisterFlow("alice"); err != nil {
+		t.Fatal(err)
+	}
+	defer alice.DisconnectPresence()
+
+	// Alice should be able to join the channel and send a message
+	r, err = alice.ToolCall("channel_join", map[string]any{"channel": "general"})
+	if err != nil || r.Error != nil {
+		t.Fatalf("channel_join: err=%v rpc=%+v", err, r.Error)
+	}
+
+	r, err = alice.ToolCall("send_message", map[string]any{
+		"channel": "general", "message": "hello from alice",
+	})
+	if err != nil || r.Error != nil {
+		t.Fatalf("send_message should succeed: err=%v rpc=%+v", err, r.Error)
+	}
+
+	// Alice should NOT be able to create a channel (lacks create_channel)
+	r, err = alice.ToolCall("channel_create", map[string]any{
+		"name": "forbidden", "public": true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.Error == nil {
+		t.Fatal("expected error: default user should not have create_channel permission")
+	}
+	if !strings.Contains(r.Error.Message, "permission denied") {
+		t.Errorf("error message = %q, want it to contain 'permission denied'", r.Error.Message)
+	}
+}
+
+func TestRBACAdminCanManageRoles(t *testing.T) {
+	addr, err := harness.FreePort()
+	if err != nil {
+		t.Fatal(err)
+	}
+	d, err := harness.StartDaemon(sharkfinBin, addr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.StopFatal(t)
+
+	// Register a user
+	alice := harness.NewClient(addr)
+	if err := alice.RegisterFlow("alice"); err != nil {
+		t.Fatal(err)
+	}
+	defer alice.DisconnectPresence()
+
+	// Verify alice cannot create channels initially
+	r, err := alice.ToolCall("channel_create", map[string]any{
+		"name": "test-ch", "public": true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.Error == nil {
+		t.Fatal("expected error: alice should not have create_channel permission before promotion")
+	}
+
+	// Promote alice to admin via CLI
+	if err := d.GrantAdmin(sharkfinBin, "alice"); err != nil {
+		t.Fatal(err)
+	}
+
+	// Now alice should be able to create channels
+	r, err = alice.ToolCall("channel_create", map[string]any{
+		"name": "admin-created", "public": true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.Error != nil {
+		t.Fatalf("admin alice should be able to create channels: %s", r.Error.Message)
+	}
+}
+
+func TestCapabilitiesQueryMCP(t *testing.T) {
+	addr, err := harness.FreePort()
+	if err != nil {
+		t.Fatal(err)
+	}
+	d, err := harness.StartDaemon(sharkfinBin, addr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.StopFatal(t)
+
+	alice := harness.NewClient(addr)
+	if err := alice.RegisterFlow("alice"); err != nil {
+		t.Fatal(err)
+	}
+	defer alice.DisconnectPresence()
+
+	r, err := alice.Capabilities()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.Error != nil {
+		t.Fatalf("capabilities error: %s", r.Error.Message)
+	}
+
+	var perms []string
+	if err := json.Unmarshal([]byte(r.Text), &perms); err != nil {
+		t.Fatalf("unmarshal capabilities: %v (raw: %s)", err, r.Text)
+	}
+
+	// Agent role should have everything except create_channel and manage_roles
+	permSet := make(map[string]bool)
+	for _, p := range perms {
+		permSet[p] = true
+	}
+
+	// Should have these
+	for _, expected := range []string{
+		"send_message", "join_channel", "invite_channel", "history",
+		"unread_messages", "unread_counts", "mark_read", "user_list",
+		"channel_list", "dm_open", "dm_list",
+	} {
+		if !permSet[expected] {
+			t.Errorf("missing expected permission: %s", expected)
+		}
+	}
+
+	// Should NOT have these
+	for _, forbidden := range []string{"create_channel", "manage_roles"} {
+		if permSet[forbidden] {
+			t.Errorf("should not have permission: %s", forbidden)
+		}
+	}
+}
+
+func TestCapabilitiesQueryWS(t *testing.T) {
+	addr, err := harness.FreePort()
+	if err != nil {
+		t.Fatal(err)
+	}
+	d, err := harness.StartDaemon(sharkfinBin, addr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.StopFatal(t)
+
+	ws, err := harness.NewWSClient(addr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ws.Close()
+	if err := ws.WSRegister("alice"); err != nil {
+		t.Fatal(err)
+	}
+
+	env, err := ws.Capabilities()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if env.OK == nil || !*env.OK {
+		t.Fatalf("capabilities failed: %s", string(env.D))
+	}
+
+	var result struct {
+		Permissions []string `json:"permissions"`
+	}
+	if err := json.Unmarshal(env.D, &result); err != nil {
+		t.Fatalf("unmarshal capabilities: %v (raw: %s)", err, string(env.D))
+	}
+
+	permSet := make(map[string]bool)
+	for _, p := range result.Permissions {
+		permSet[p] = true
+	}
+
+	// User role should have these
+	if !permSet["send_message"] {
+		t.Error("missing expected permission: send_message")
+	}
+	if !permSet["user_list"] {
+		t.Error("missing expected permission: user_list")
+	}
+
+	// Should NOT have these
+	if permSet["create_channel"] {
+		t.Error("should not have permission: create_channel")
+	}
+	if permSet["manage_roles"] {
+		t.Error("should not have permission: manage_roles")
+	}
+}
+
+func TestPresenceBroadcastOnWS(t *testing.T) {
+	addr, err := harness.FreePort()
+	if err != nil {
+		t.Fatal(err)
+	}
+	d, err := harness.StartDaemon(sharkfinBin, addr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.StopFatal(t)
+
+	// Register first user
+	ws1, err := harness.NewWSClient(addr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ws1.Close()
+	if err := ws1.WSRegister("alice"); err != nil {
+		t.Fatal(err)
+	}
+
+	// Register second user — first should receive presence broadcast
+	ws2, err := harness.NewWSClient(addr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ws2.WSRegister("bob"); err != nil {
+		t.Fatal(err)
+	}
+
+	// Read broadcasts on ws1 until we get bob's online presence
+	var foundOnline bool
+	for i := 0; i < 10; i++ {
+		env, err := ws1.ReadWithTimeout(2 * time.Second)
+		if err != nil {
+			break
+		}
+		if env.Type == "presence" {
+			var p struct {
+				Username string `json:"username"`
+				Status   string `json:"status"`
+			}
+			json.Unmarshal(env.D, &p)
+			if p.Username == "bob" && p.Status == "online" {
+				foundOnline = true
+				break
+			}
+		}
+	}
+	if !foundOnline {
+		t.Error("expected presence broadcast with bob online")
+	}
+
+	// Disconnect second user — first should receive offline presence
+	ws2.Close()
+	time.Sleep(200 * time.Millisecond)
+
+	var foundOffline bool
+	for i := 0; i < 10; i++ {
+		env, err := ws1.ReadWithTimeout(2 * time.Second)
+		if err != nil {
+			break
+		}
+		if env.Type == "presence" {
+			var p struct {
+				Username string `json:"username"`
+				Status   string `json:"status"`
+			}
+			json.Unmarshal(env.D, &p)
+			if p.Username == "bob" && p.Status == "offline" {
+				foundOffline = true
+				break
+			}
+		}
+	}
+	if !foundOffline {
+		t.Error("expected presence broadcast with bob offline after disconnect")
+	}
+}
+
+func TestActiveIdleState(t *testing.T) {
+	addr, err := harness.FreePort()
+	if err != nil {
+		t.Fatal(err)
+	}
+	d, err := harness.StartDaemon(sharkfinBin, addr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.StopFatal(t)
+
+	// Register first WS user and set to active
+	ws1, err := harness.NewWSClient(addr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ws1.Close()
+	if err := ws1.WSRegister("alice"); err != nil {
+		t.Fatal(err)
+	}
+
+	env, err := ws1.SetState("active")
+	if err != nil {
+		t.Fatalf("set_state active: %v", err)
+	}
+	if env.OK == nil || !*env.OK {
+		t.Fatalf("set_state failed: %s", string(env.D))
+	}
+
+	// Register second WS user
+	ws2, err := harness.NewWSClient(addr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ws2.Close()
+	if err := ws2.WSRegister("bob"); err != nil {
+		t.Fatal(err)
+	}
+
+	// Drain alice's presence broadcast on ws2 (from register)
+	// We should see alice's presence broadcast when bob connects;
+	// alice set state to active so the initial presence for alice came before bob existed.
+	// bob only sees own connect, not alice's state change.
+	// Instead, let's have alice change state to idle and check bob receives the broadcast.
+
+	// Alice changes state to idle
+	env, err = ws1.SetState("idle")
+	if err != nil {
+		t.Fatalf("set_state idle: %v", err)
+	}
+	if env.OK == nil || !*env.OK {
+		t.Fatalf("set_state idle failed: %s", string(env.D))
+	}
+
+	// Bob should receive a presence broadcast with alice's state change
+	var foundIdleBroadcast bool
+	for i := 0; i < 10; i++ {
+		bcast, err := ws2.ReadWithTimeout(2 * time.Second)
+		if err != nil {
+			break
+		}
+		if bcast.Type == "presence" {
+			var p struct {
+				Username string `json:"username"`
+				Status   string `json:"status"`
+				State    string `json:"state"`
+			}
+			json.Unmarshal(bcast.D, &p)
+			if p.Username == "alice" && p.State == "idle" {
+				foundIdleBroadcast = true
+				break
+			}
+		}
+	}
+	if !foundIdleBroadcast {
+		t.Error("expected presence broadcast with alice idle state")
+	}
+
+	// Also test via MCP set_state tool
+	mcpUser := harness.NewClient(addr)
+	if err := mcpUser.RegisterFlow("charlie"); err != nil {
+		t.Fatal(err)
+	}
+	defer mcpUser.DisconnectPresence()
+
+	r, err := mcpUser.SetState("active")
+	if err != nil {
+		t.Fatalf("MCP set_state: %v", err)
+	}
+	if r.Error != nil {
+		t.Fatalf("MCP set_state error: %s", r.Error.Message)
+	}
+	if !strings.Contains(r.Text, "active") {
+		t.Errorf("MCP set_state response = %q, want it to contain 'active'", r.Text)
+	}
+}
+
+func TestNotificationsOnlyMode(t *testing.T) {
+	addr, err := harness.FreePort()
+	if err != nil {
+		t.Fatal(err)
+	}
+	d, err := harness.StartDaemon(sharkfinBin, addr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.StopFatal(t)
+
+	// Register a normal user first (to create channels and send messages)
+	admin := harness.NewClient(addr)
+	if err := admin.RegisterFlow("admin-user"); err != nil {
+		t.Fatal(err)
+	}
+	defer admin.DisconnectPresence()
+	if err := d.GrantAdmin(sharkfinBin, "admin-user"); err != nil {
+		t.Fatal(err)
+	}
+	r, err := admin.ToolCall("channel_create", map[string]any{
+		"name": "general", "public": true,
+	})
+	if err != nil || r.Error != nil {
+		t.Fatalf("channel_create: err=%v rpc=%+v", err, r.Error)
+	}
+
+	// Connect a WS user with notifications_only
+	ws, err := harness.NewWSClient(addr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ws.Close()
+
+	// Register with notifications_only: true
+	env, err := ws.Req("register", map[string]any{
+		"username":           "notif-user",
+		"notifications_only": true,
+	}, "reg")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if env.OK == nil || !*env.OK {
+		t.Fatalf("register notifications_only failed: %s", string(env.D))
+	}
+
+	// (a) send_message should return error "notification-only connection"
+	env, err = ws.Req("send_message", map[string]any{
+		"channel": "general", "body": "should fail",
+	}, "m1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if env.OK != nil && *env.OK {
+		t.Error("expected send_message to fail in notification-only mode")
+	}
+	if !strings.Contains(string(env.D), "notification-only connection") {
+		t.Errorf("expected 'notification-only connection' error, got: %s", string(env.D))
+	}
+
+	// (b) set_state should work
+	env, err = ws.SetState("active")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if env.OK == nil || !*env.OK {
+		t.Errorf("set_state should work in notification-only mode: %s", string(env.D))
+	}
+
+	// (c) capabilities should work
+	env, err = ws.Capabilities()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if env.OK == nil || !*env.OK {
+		t.Errorf("capabilities should work in notification-only mode: %s", string(env.D))
+	}
+
+	// (d) user still receives message.new broadcasts from other users
+	// Admin joins general and invites notif-user to receive broadcasts
+	r, err = admin.ToolCall("channel_invite", map[string]any{
+		"channel": "general", "username": "notif-user",
+	})
+	if err != nil || r.Error != nil {
+		t.Fatalf("invite notif-user: err=%v rpc=%+v", err, r.Error)
+	}
+
+	// Admin sends a message
+	r, err = admin.ToolCall("send_message", map[string]any{
+		"channel": "general", "message": "hello from admin",
+	})
+	if err != nil || r.Error != nil {
+		t.Fatalf("admin send: err=%v rpc=%+v", err, r.Error)
+	}
+
+	// notif-user should receive the broadcast
+	var foundBroadcast bool
+	for i := 0; i < 10; i++ {
+		bcast, err := ws.ReadWithTimeout(2 * time.Second)
+		if err != nil {
+			break
+		}
+		if bcast.Type == "message.new" {
+			var msg struct {
+				Channel string `json:"channel"`
+				Body    string `json:"body"`
+			}
+			json.Unmarshal(bcast.D, &msg)
+			if msg.Channel == "general" && msg.Body == "hello from admin" {
+				foundBroadcast = true
+				break
+			}
+		}
+	}
+	if !foundBroadcast {
+		t.Error("notification-only user should still receive message.new broadcasts")
+	}
+}
+
+func TestAgentTypeOnMCPRegister(t *testing.T) {
+	addr, err := harness.FreePort()
+	if err != nil {
+		t.Fatal(err)
+	}
+	d, err := harness.StartDaemon(sharkfinBin, addr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.StopFatal(t)
+
+	alice := harness.NewClient(addr)
+	if err := alice.RegisterFlow("alice"); err != nil {
+		t.Fatal(err)
+	}
+	defer alice.DisconnectPresence()
+
+	r, err := alice.ToolCall("user_list", map[string]any{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.Error != nil {
+		t.Fatalf("user_list error: %s", r.Error.Message)
+	}
+
+	var users []struct {
+		Username string `json:"username"`
+		Type     string `json:"type"`
+	}
+	if err := json.Unmarshal([]byte(r.Text), &users); err != nil {
+		t.Fatalf("unmarshal user_list: %v (raw: %s)", err, r.Text)
+	}
+
+	found := false
+	for _, u := range users {
+		if u.Username == "alice" {
+			found = true
+			if u.Type != "agent" {
+				t.Errorf("alice type = %q, want %q", u.Type, "agent")
+			}
+		}
+	}
+	if !found {
+		t.Error("alice not found in user_list")
+	}
+}
+
+func TestUserTypeOnWSRegister(t *testing.T) {
+	addr, err := harness.FreePort()
+	if err != nil {
+		t.Fatal(err)
+	}
+	d, err := harness.StartDaemon(sharkfinBin, addr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.StopFatal(t)
+
+	ws, err := harness.NewWSClient(addr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ws.Close()
+	if err := ws.WSRegister("alice"); err != nil {
+		t.Fatal(err)
+	}
+
+	// Query user_list via WS
+	env, err := ws.Req("user_list", map[string]any{}, "u1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if env.OK == nil || !*env.OK {
+		t.Fatalf("user_list failed: %s", string(env.D))
+	}
+
+	var result struct {
+		Users []struct {
+			Username string `json:"username"`
+			Type     string `json:"type"`
+		} `json:"users"`
+	}
+	if err := json.Unmarshal(env.D, &result); err != nil {
+		t.Fatalf("unmarshal user_list: %v (raw: %s)", err, string(env.D))
+	}
+
+	found := false
+	for _, u := range result.Users {
+		if u.Username == "alice" {
+			found = true
+			if u.Type != "user" {
+				t.Errorf("alice type = %q, want %q", u.Type, "user")
+			}
+		}
+	}
+	if !found {
+		t.Errorf("alice not found in WS user_list: %s", string(env.D))
+	}
+}
+
 func TestWebhookNotFiredWithoutMention(t *testing.T) {
 	var mu sync.Mutex
 	var received []map[string]interface{}
