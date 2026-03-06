@@ -11,6 +11,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 
+	"github.com/Work-Fort/sharkfin/cmd/admin"
 	"github.com/Work-Fort/sharkfin/cmd/daemon"
 	"github.com/Work-Fort/sharkfin/cmd/mcpbridge"
 	"github.com/Work-Fort/sharkfin/cmd/presence"
@@ -88,6 +89,7 @@ func init() {
 		os.Exit(1)
 	}
 
+	rootCmd.AddCommand(admin.NewAdminCmd())
 	rootCmd.AddCommand(daemon.NewDaemonCmd())
 	rootCmd.AddCommand(mcpbridge.NewMCPBridgeCmd())
 	rootCmd.AddCommand(presence.NewPresenceCmd())
