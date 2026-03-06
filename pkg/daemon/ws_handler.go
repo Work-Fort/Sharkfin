@@ -271,9 +271,7 @@ func (h *WSHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				h.handleWSUnreadMessages(sendCh, req.Ref, req.D, userID)
 			}
 		case "unread_counts":
-			if notificationsOnly {
-				sendError(sendCh, req.Ref, "notification-only connection")
-			} else if h.checkPermission(sendCh, req.Ref, username, "unread_counts") {
+			if h.checkPermission(sendCh, req.Ref, username, "unread_counts") {
 				h.handleWSUnreadCounts(sendCh, req.Ref, userID)
 			}
 		case "dm_list":

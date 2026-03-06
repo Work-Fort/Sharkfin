@@ -187,9 +187,7 @@ func executeLoop(conn *websocket.Conn, command string, msgCh <-chan wsEnvelope) 
 
 		reply := drainReply(msgCh, "check-unreads")
 		if reply == nil || reply.OK == nil || !*reply.OK {
-			// unread_counts may be blocked in notifications_only mode.
-			// Treat as no unreads remaining.
-			log.Debug("agent: unread_counts unavailable, returning to idle")
+			log.Debug("agent: unread_counts failed, returning to idle")
 			break
 		}
 
