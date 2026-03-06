@@ -484,6 +484,8 @@ func TestToolsList(t *testing.T) {
 		"get_identity_token", "register", "identify", "user_list", "channel_list",
 		"channel_create", "channel_invite", "channel_join", "send_message", "unread_messages",
 		"unread_counts", "mark_read", "history", "dm_list", "dm_open",
+		"capabilities", "set_state", "set_role", "create_role", "delete_role",
+		"grant_permission", "revoke_permission", "list_roles",
 	}
 	if len(listResult.Tools) != len(expected) {
 		names := make([]string, len(listResult.Tools))
@@ -657,6 +659,10 @@ func TestChannelCreateAndList(t *testing.T) {
 	}
 	defer alice.DisconnectPresence()
 
+	if err := d.GrantAdmin(sharkfinBin, "alice"); err != nil {
+		t.Fatal(err)
+	}
+
 	r, err := alice.ToolCall("channel_create", map[string]any{
 		"name":   "general",
 		"public": true,
@@ -727,6 +733,10 @@ func TestPrivateChannelVisibility(t *testing.T) {
 	}
 	defer charlie.DisconnectPresence()
 
+	if err := d.GrantAdmin(sharkfinBin, "alice"); err != nil {
+		t.Fatal(err)
+	}
+
 	// Alice creates a private channel with bob
 	r, err := alice.ToolCall("channel_create", map[string]any{
 		"name":    "secret",
@@ -782,6 +792,10 @@ func TestPublicChannelVisibleToAll(t *testing.T) {
 	}
 	defer bob.DisconnectPresence()
 
+	if err := d.GrantAdmin(sharkfinBin, "alice"); err != nil {
+		t.Fatal(err)
+	}
+
 	r, err := alice.ToolCall("channel_create", map[string]any{
 		"name":   "lobby",
 		"public": true,
@@ -803,13 +817,12 @@ func TestPublicChannelVisibleToAll(t *testing.T) {
 	}
 }
 
-func TestChannelCreationDisabled(t *testing.T) {
+func TestChannelCreatePermissionDenied(t *testing.T) {
 	addr, err := harness.FreePort()
 	if err != nil {
 		t.Fatal(err)
 	}
-	d, err := harness.StartDaemon(sharkfinBin, addr,
-		harness.WithAllowChannelCreation(false))
+	d, err := harness.StartDaemon(sharkfinBin, addr)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -821,6 +834,7 @@ func TestChannelCreationDisabled(t *testing.T) {
 	}
 	defer alice.DisconnectPresence()
 
+	// alice has "user" role which lacks create_channel permission
 	r, err := alice.ToolCall("channel_create", map[string]any{
 		"name":   "forbidden",
 		"public": true,
@@ -829,10 +843,10 @@ func TestChannelCreationDisabled(t *testing.T) {
 		t.Fatal(err)
 	}
 	if r.Error == nil {
-		t.Fatal("expected error when channel creation is disabled")
+		t.Fatal("expected error when user lacks create_channel permission")
 	}
-	if !strings.Contains(strings.ToLower(r.Error.Message), "channel creation is disabled") {
-		t.Errorf("error message = %q, want it to contain 'channel creation is disabled'", r.Error.Message)
+	if r.Error.Message != "permission denied: create_channel" {
+		t.Errorf("error message = %q, want %q", r.Error.Message, "permission denied: create_channel")
 	}
 }
 
@@ -864,6 +878,10 @@ func TestChannelInvite(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer charlie.DisconnectPresence()
+
+	if err := d.GrantAdmin(sharkfinBin, "alice"); err != nil {
+		t.Fatal(err)
+	}
 
 	// Alice creates a private channel with bob
 	r, err := alice.ToolCall("channel_create", map[string]any{
@@ -941,6 +959,10 @@ func TestChannelInviteByNonMember(t *testing.T) {
 	}
 	defer charlie.DisconnectPresence()
 
+	if err := d.GrantAdmin(sharkfinBin, "alice"); err != nil {
+		t.Fatal(err)
+	}
+
 	// Alice creates a private channel (only alice is a member)
 	r, err := alice.ToolCall("channel_create", map[string]any{
 		"name":   "private-only-alice",
@@ -990,6 +1012,10 @@ func TestSendAndReceiveMessage(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer bob.DisconnectPresence()
+
+	if err := d.GrantAdmin(sharkfinBin, "alice"); err != nil {
+		t.Fatal(err)
+	}
 
 	// Create a private channel with both users
 	r, err := alice.ToolCall("channel_create", map[string]any{
@@ -1069,6 +1095,10 @@ func TestUnreadMessagesAreConsumed(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer bob.DisconnectPresence()
+
+	if err := d.GrantAdmin(sharkfinBin, "alice"); err != nil {
+		t.Fatal(err)
+	}
 
 	r, err := alice.ToolCall("channel_create", map[string]any{
 		"name":    "consumed-test",
@@ -1172,6 +1202,10 @@ func TestUnreadFilterByChannel(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer bob.DisconnectPresence()
+
+	if err := d.GrantAdmin(sharkfinBin, "alice"); err != nil {
+		t.Fatal(err)
+	}
 
 	// Create two channels
 	for _, chName := range []string{"ch1", "ch2"} {
@@ -1291,6 +1325,10 @@ func TestNonParticipantCannotSend(t *testing.T) {
 	}
 	defer bob.DisconnectPresence()
 
+	if err := d.GrantAdmin(sharkfinBin, "alice"); err != nil {
+		t.Fatal(err)
+	}
+
 	// Alice creates a private channel (bob is not a member)
 	r, err := alice.ToolCall("channel_create", map[string]any{
 		"name":   "alice-only",
@@ -1341,6 +1379,10 @@ func TestMultipleMessagesOrdering(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer bob.DisconnectPresence()
+
+	if err := d.GrantAdmin(sharkfinBin, "alice"); err != nil {
+		t.Fatal(err)
+	}
 
 	r, err := alice.ToolCall("channel_create", map[string]any{
 		"name":    "ordering",
@@ -1407,6 +1449,10 @@ func TestMCPHistory(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer alice.DisconnectPresence()
+
+	if err := d.GrantAdmin(sharkfinBin, "alice"); err != nil {
+		t.Fatal(err)
+	}
 
 	// Create channel
 	r, err := alice.ToolCall("channel_create", map[string]any{
@@ -1582,6 +1628,10 @@ func TestBridgeEndToEnd(t *testing.T) {
 	}
 	if regResult.Error != nil {
 		t.Fatalf("register error: %s", regResult.Error.Message)
+	}
+
+	if err := d.GrantAdmin(sharkfinBin, "bridge-alice"); err != nil {
+		t.Fatal(err)
 	}
 
 	// 4. Create channel
@@ -1776,6 +1826,10 @@ func TestWSChannelCreateAndInvite(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	if err := d.GrantAdmin(sharkfinBin, "alice"); err != nil {
+		t.Fatal(err)
+	}
+
 	// Create private channel
 	env, err := alice.Req("channel_create", map[string]any{
 		"name": "project", "public": false,
@@ -1836,6 +1890,10 @@ func TestWSSendAndBroadcast(t *testing.T) {
 	}
 	defer bob.Close()
 	if err := bob.WSRegister("bob"); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := d.GrantAdmin(sharkfinBin, "alice"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1908,6 +1966,10 @@ func TestWSHistory(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	if err := d.GrantAdmin(sharkfinBin, "alice"); err != nil {
+		t.Fatal(err)
+	}
+
 	ws.Req("channel_create", map[string]any{
 		"name": "general", "public": true,
 	}, "c1")
@@ -1973,6 +2035,10 @@ func TestWSUnreadMessages(t *testing.T) {
 	}
 	defer bob.Close()
 	if err := bob.WSRegister("bob"); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := d.GrantAdmin(sharkfinBin, "alice"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -2052,6 +2118,10 @@ func TestWSMentions(t *testing.T) {
 	}
 	defer bob.Close()
 	if err := bob.WSRegister("bob"); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := d.GrantAdmin(sharkfinBin, "alice"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -2136,6 +2206,10 @@ func TestWSMentionInvalidUser(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	if err := d.GrantAdmin(sharkfinBin, "alice"); err != nil {
+		t.Fatal(err)
+	}
+
 	ws.Req("channel_create", map[string]any{
 		"name": "general", "public": true,
 	}, "c1")
@@ -2180,6 +2254,10 @@ func TestWSThreadReply(t *testing.T) {
 	}
 	defer bob.Close()
 	if err := bob.WSRegister("bob"); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := d.GrantAdmin(sharkfinBin, "alice"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -2272,6 +2350,10 @@ func TestWSNestedReplyRejected(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	if err := d.GrantAdmin(sharkfinBin, "alice"); err != nil {
+		t.Fatal(err)
+	}
+
 	ws.Req("channel_create", map[string]any{
 		"name": "general", "public": true,
 	}, "c1")
@@ -2331,6 +2413,10 @@ func TestWSAndMCPInterop(t *testing.T) {
 	}
 	defer bob.Close()
 	if err := bob.WSRegister("bob"); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := d.GrantAdmin(sharkfinBin, "alice"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -2402,6 +2488,10 @@ func TestUnreadCounts(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer bob.DisconnectPresence()
+
+	if err := d.GrantAdmin(sharkfinBin, "alice"); err != nil {
+		t.Fatal(err)
+	}
 
 	// Create channel with both users
 	r, err := alice.ToolCall("channel_create", map[string]any{
@@ -2502,6 +2592,10 @@ func TestMarkReadForwardOnly(t *testing.T) {
 	}
 	defer bob.DisconnectPresence()
 
+	if err := d.GrantAdmin(sharkfinBin, "alice"); err != nil {
+		t.Fatal(err)
+	}
+
 	// Create channel
 	r, err := alice.ToolCall("channel_create", map[string]any{
 		"name": "fwd-test", "public": false, "members": []string{"bob"},
@@ -2601,6 +2695,10 @@ func TestWSUnreadCountsAndMarkRead(t *testing.T) {
 	}
 	defer ws.Close()
 	if err := ws.WSRegister("bob"); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := d.GrantAdmin(sharkfinBin, "alice"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -2716,6 +2814,10 @@ func TestWebhookOnMention(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer bob.DisconnectPresence()
+
+	if err := d.GrantAdmin(sharkfinBin, "alice"); err != nil {
+		t.Fatal(err)
+	}
 
 	// Create channel with both
 	r, err := alice.ToolCall("channel_create", map[string]any{
@@ -2871,6 +2973,10 @@ func TestWebhookNotFiredWithoutMention(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer bob.DisconnectPresence()
+
+	if err := d.GrantAdmin(sharkfinBin, "alice"); err != nil {
+		t.Fatal(err)
+	}
 
 	// Create channel with both
 	r, err := alice.ToolCall("channel_create", map[string]any{

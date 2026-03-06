@@ -108,6 +108,20 @@ func StartDaemon(binary, addr string, opts ...DaemonOption) (*Daemon, error) {
 func (d *Daemon) Addr() string   { return d.addr }
 func (d *Daemon) XDGDir() string { return d.xdgDir }
 
+// GrantAdmin promotes a user to admin role using the admin CLI.
+func (d *Daemon) GrantAdmin(binary, username string) error {
+	cmd := exec.Command(binary, "admin", "set-role", username, "admin")
+	cmd.Env = append(os.Environ(),
+		"XDG_CONFIG_HOME="+d.xdgDir+"/config",
+		"XDG_STATE_HOME="+d.xdgDir+"/state",
+	)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("grant admin to %s: %w (output: %s)", username, err, out)
+	}
+	return nil
+}
+
 // StopFatal stops the daemon and fails the test if a data race was detected.
 func (d *Daemon) StopFatal(t testing.TB) {
 	t.Helper()
