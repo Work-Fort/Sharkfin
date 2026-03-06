@@ -167,7 +167,7 @@ cd /home/kazw/Work/WorkFort/sharkfin/tests/e2e && go mod tidy
 Write `tests/e2e/harness/harness.go` with the three exported types and their constructors/methods. Start with stubs that compile but panic("not implemented"):
 
 ```go
-// SPDX-License-Identifier: GPL-2.0-only
+// SPDX-License-Identifier: AGPL-3.0-or-later
 package harness
 
 import (
@@ -623,7 +623,7 @@ func FreePort() (string, error) {
 Write `tests/e2e/sharkfin_test.go`:
 
 ```go
-// SPDX-License-Identifier: GPL-2.0-only
+// SPDX-License-Identifier: AGPL-3.0-or-later
 package e2e
 
 import (

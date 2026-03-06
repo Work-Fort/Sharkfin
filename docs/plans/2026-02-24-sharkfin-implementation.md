@@ -48,7 +48,7 @@ go = "latest"
 **Step 4: Create main.go**
 
 ```go
-// SPDX-License-Identifier: GPL-2.0-only
+// SPDX-License-Identifier: AGPL-3.0-or-later
 package main
 
 import (
@@ -73,7 +73,7 @@ Key differences from anvil:
 - SPDX header: `GPL-2.0-only` not `Apache-2.0`
 
 ```go
-// SPDX-License-Identifier: GPL-2.0-only
+// SPDX-License-Identifier: AGPL-3.0-or-later
 package cmd
 
 import (
@@ -112,7 +112,7 @@ func init() {
 **Step 6: Create Taskfile.dist.yaml**
 
 ```yaml
-# SPDX-License-Identifier: GPL-2.0-only
+# SPDX-License-Identifier: AGPL-3.0-or-later
 # yaml-language-server: $schema=https://taskfile.dev/schema.json
 version: '3'
 
@@ -267,7 +267,7 @@ Expected: FAIL — types don't exist yet
 **Step 3: Implement protocol types**
 
 ```go
-// SPDX-License-Identifier: GPL-2.0-only
+// SPDX-License-Identifier: AGPL-3.0-or-later
 package protocol
 ```
 
@@ -345,7 +345,7 @@ Expected: FAIL
 **Step 3: Implement db.go**
 
 ```go
-// SPDX-License-Identifier: GPL-2.0-only
+// SPDX-License-Identifier: AGPL-3.0-or-later
 package db
 ```
 
@@ -422,7 +422,7 @@ Expected: FAIL
 **Step 3: Implement session.go**
 
 ```go
-// SPDX-License-Identifier: GPL-2.0-only
+// SPDX-License-Identifier: AGPL-3.0-or-later
 package daemon
 ```
 
@@ -514,7 +514,7 @@ Expected: FAIL
 **Step 3: Implement mcp_handler.go**
 
 ```go
-// SPDX-License-Identifier: GPL-2.0-only
+// SPDX-License-Identifier: AGPL-3.0-or-later
 package daemon
 ```
 
@@ -581,7 +581,7 @@ Expected: FAIL
 **Step 3: Implement presence_handler.go**
 
 ```go
-// SPDX-License-Identifier: GPL-2.0-only
+// SPDX-License-Identifier: AGPL-3.0-or-later
 package daemon
 ```
 
@@ -619,7 +619,7 @@ git commit -m "feat: add presence handler with long-poll connection"
 **Step 1: Implement server.go**
 
 ```go
-// SPDX-License-Identifier: GPL-2.0-only
+// SPDX-License-Identifier: AGPL-3.0-or-later
 package daemon
 ```
 
@@ -635,7 +635,7 @@ Routes:
 **Step 2: Implement cmd/daemon/daemon.go**
 
 ```go
-// SPDX-License-Identifier: GPL-2.0-only
+// SPDX-License-Identifier: AGPL-3.0-or-later
 package daemon
 ```
 
@@ -673,7 +673,7 @@ git commit -m "feat: add daemon command with HTTP server"
 **Step 1: Implement mcp_bridge.go**
 
 ```go
-// SPDX-License-Identifier: GPL-2.0-only
+// SPDX-License-Identifier: AGPL-3.0-or-later
 package mcpbridge
 ```
 
@@ -717,7 +717,7 @@ git commit -m "feat: add MCP bridge command (stdio to HTTP proxy)"
 **Step 1: Implement presence.go**
 
 ```go
-// SPDX-License-Identifier: GPL-2.0-only
+// SPDX-License-Identifier: AGPL-3.0-or-later
 package presence
 ```
 

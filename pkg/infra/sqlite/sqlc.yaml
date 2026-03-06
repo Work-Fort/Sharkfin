@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
 # Placeholder for future sqlc adoption.
 # Many queries are too dynamic for sqlc (transactions with N inserts,
 # conditional WHERE clauses, dynamic IN clauses). The current

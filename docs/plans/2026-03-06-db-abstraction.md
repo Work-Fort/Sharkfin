@@ -21,7 +21,7 @@
 **Step 1: Create `pkg/domain/types.go`**
 
 ```go
-// SPDX-License-Identifier: GPL-2.0-only
+// SPDX-License-Identifier: AGPL-3.0-or-later
 package domain
 
 import "time"
@@ -92,7 +92,7 @@ type Role struct {
 **Step 2: Create `pkg/domain/ports.go`**
 
 ```go
-// SPDX-License-Identifier: GPL-2.0-only
+// SPDX-License-Identifier: AGPL-3.0-or-later
 package domain
 
 type UserStore interface {
@@ -254,7 +254,7 @@ This is the main file that:
 - Embeds migrations via `//go:embed`
 
 ```go
-// SPDX-License-Identifier: GPL-2.0-only
+// SPDX-License-Identifier: AGPL-3.0-or-later
 package sqlite
 
 import (
@@ -513,7 +513,7 @@ git commit -m "feat: add PostgreSQL backend with sqlc queries and domain.Store i
 **Step 1: Create factory**
 
 ```go
-// SPDX-License-Identifier: GPL-2.0-only
+// SPDX-License-Identifier: AGPL-3.0-or-later
 package infra
 
 import (
@@ -801,7 +801,7 @@ git commit -m "feat: update e2e harness to forward SHARKFIN_DB for dual-backend 
 **Step 1: Add Postgres e2e job**
 
 ```yaml
-# SPDX-License-Identifier: GPL-2.0-only
+# SPDX-License-Identifier: AGPL-3.0-or-later
 name: CI
 
 on:

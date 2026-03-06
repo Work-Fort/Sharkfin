@@ -100,7 +100,7 @@ git commit -m "feat: add RBAC database migration with roles and permissions"
 Create `pkg/db/roles.go`:
 
 ```go
-// SPDX-License-Identifier: GPL-2.0-only
+// SPDX-License-Identifier: AGPL-3.0-or-later
 package db
 
 import "fmt"
@@ -622,7 +622,7 @@ git commit -m "feat: add presence broadcasts and active/idle state on /ws"
 Create `cmd/admin/admin.go` with subcommands:
 
 ```go
-// SPDX-License-Identifier: GPL-2.0-only
+// SPDX-License-Identifier: AGPL-3.0-or-later
 package admin
 
 import (
@@ -820,7 +820,7 @@ viper.SetDefault("agent.exec", "")
 Create `cmd/agent/agent.go`:
 
 ```go
-// SPDX-License-Identifier: GPL-2.0-only
+// SPDX-License-Identifier: AGPL-3.0-or-later
 package agent
 
 import (
