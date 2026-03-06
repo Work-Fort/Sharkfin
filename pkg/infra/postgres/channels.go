@@ -272,8 +272,8 @@ func (s *Store) ListAllDMs() ([]domain.AllDMInfo, error) {
 // OpenDM finds or creates a DM channel between two users.
 // Returns the channel name and whether it was newly created.
 //
-// Concurrency fix: the entire check-then-insert is wrapped in a
-// serializable transaction to prevent duplicate DMs under concurrent access.
+// Concurrency: wrapped in a transaction. The unique index on channels(name)
+// with deterministic dm-<lower>-<higher> naming prevents duplicates.
 func (s *Store) OpenDM(userID, otherUserID int64, otherUsername string) (string, bool, error) {
 	tx, err := s.db.Begin()
 	if err != nil {

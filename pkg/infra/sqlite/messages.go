@@ -273,7 +273,7 @@ func advanceCursor(tx *sql.Tx, channelID, userID, messageID int64) error {
 	_, err := tx.Exec(`
 		INSERT INTO read_cursors (channel_id, user_id, last_read_message_id)
 		VALUES (?, ?, ?)
-		ON CONFLICT(channel_id, user_id) DO UPDATE SET last_read_message_id = excluded.last_read_message_id
+		ON CONFLICT(channel_id, user_id) DO UPDATE SET last_read_message_id = MAX(excluded.last_read_message_id, last_read_message_id)
 	`, channelID, userID, messageID)
 	if err != nil {
 		return fmt.Errorf("advance cursor: %w", err)
