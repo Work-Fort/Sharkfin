@@ -12,35 +12,30 @@ import (
 	"github.com/charmbracelet/log"
 	mcpserver "github.com/mark3labs/mcp-go/server"
 
-	"github.com/Work-Fort/sharkfin/pkg/db"
+	"github.com/Work-Fort/sharkfin/pkg/domain"
 )
 
 // Server is the sharkfind HTTP server.
 type Server struct {
 	addr       string
-	db         *db.DB
+	store      domain.Store
 	sessions   *SessionManager
 	httpServer *http.Server
 }
 
 // NewServer creates a new sharkfind server.
-func NewServer(addr, dbPath string, pongTimeout time.Duration, webhookURL string) (*Server, error) {
-	database, err := db.Open(dbPath)
-	if err != nil {
-		return nil, fmt.Errorf("open database: %w", err)
-	}
-
+func NewServer(addr string, store domain.Store, pongTimeout time.Duration, webhookURL string) (*Server, error) {
 	// Set webhook_url if provided via flag (always overwrite).
 	if webhookURL != "" {
-		database.SetSetting("webhook_url", webhookURL)
+		store.SetSetting("webhook_url", webhookURL)
 	}
 
-	sm := NewSessionManager(database)
+	sm := NewSessionManager(store)
 	hub := NewHub()
 	presenceHandler := NewPresenceHandler(sm, hub, pongTimeout)
-	wsHandler := NewWSHandler(sm, database, hub, pongTimeout)
+	wsHandler := NewWSHandler(sm, store, hub, pongTimeout)
 
-	sharkfinMCP := NewSharkfinMCP(sm, database, hub)
+	sharkfinMCP := NewSharkfinMCP(sm, store, hub)
 	mcpTransport := mcpserver.NewStreamableHTTPServer(sharkfinMCP.Server(),
 		mcpserver.WithStateful(true),
 	)
@@ -52,7 +47,7 @@ func NewServer(addr, dbPath string, pongTimeout time.Duration, webhookURL string
 
 	return &Server{
 		addr:     addr,
-		db:       database,
+		store:    store,
 		sessions: sm,
 		httpServer: &http.Server{
 			Addr:    addr,
@@ -61,8 +56,8 @@ func NewServer(addr, dbPath string, pongTimeout time.Duration, webhookURL string
 	}, nil
 }
 
-// DB returns the server's database handle. Intended for test access.
-func (s *Server) DB() *db.DB { return s.db }
+// DB returns the server's store. Intended for test access.
+func (s *Server) DB() domain.Store { return s.store }
 
 // Start begins listening for connections.
 func (s *Server) Start() error {
@@ -81,5 +76,5 @@ func (s *Server) Shutdown(ctx context.Context) error {
 	if err := s.httpServer.Shutdown(ctx); err != nil {
 		return err
 	}
-	return s.db.Close()
+	return s.store.Close()
 }

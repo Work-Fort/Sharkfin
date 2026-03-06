@@ -8,7 +8,7 @@ import (
 
 	"github.com/charmbracelet/log"
 
-	"github.com/Work-Fort/sharkfin/pkg/db"
+	"github.com/Work-Fort/sharkfin/pkg/domain"
 )
 
 // Hub manages connected WebSocket clients and broadcasts events.
@@ -80,12 +80,12 @@ func (h *Hub) ClearState(username string) {
 }
 
 // BroadcastMessage sends a message.new event to all connected members of a channel.
-func (h *Hub) BroadcastMessage(channelID int64, channelName string, channelType string, msg db.Message, mentions []string, threadID *int64, database *db.DB) {
+func (h *Hub) BroadcastMessage(channelID int64, channelName string, channelType string, msg domain.Message, mentions []string, threadID *int64, store domain.Store) {
 	d := map[string]interface{}{
 		"id":           msg.ID,
 		"channel":      channelName,
 		"channel_type": channelType,
-		"from":         msg.Username,
+		"from":         msg.From,
 		"body":         msg.Body,
 		"sent_at":      msg.CreatedAt.UTC().Format(time.RFC3339),
 	}
@@ -109,7 +109,7 @@ func (h *Hub) BroadcastMessage(channelID int64, channelName string, channelType 
 	h.mu.RLock()
 	targets := make([]target, 0, len(h.clients))
 	for _, client := range h.clients {
-		if client.username == msg.Username {
+		if client.username == msg.From {
 			continue // don't echo to sender
 		}
 		targets = append(targets, target{username: client.username, userID: client.userID})
@@ -121,20 +121,20 @@ func (h *Hub) BroadcastMessage(channelID int64, channelName string, channelType 
 	t0 := time.Now()
 	eligible := make(map[string]bool, len(targets))
 	for _, t := range targets {
-		isMember, err := database.IsChannelMember(channelID, t.userID)
+		isMember, err := store.IsChannelMember(channelID, t.userID)
 		if err == nil && isMember {
 			eligible[t.username] = true
 		}
 	}
 
 	// Fire webhooks for mentions and DM recipients (non-blocking).
-	if webhookURL, err := database.GetSetting("webhook_url"); err == nil && webhookURL != "" {
+	if webhookURL, err := store.GetSetting("webhook_url"); err == nil && webhookURL != "" {
 		seen := make(map[string]bool)
 		var recipients []string
 
 		// Add mentioned users (excluding sender).
 		for _, m := range mentions {
-			if m != msg.Username && !seen[m] {
+			if m != msg.From && !seen[m] {
 				seen[m] = true
 				recipients = append(recipients, m)
 			}
@@ -142,9 +142,9 @@ func (h *Hub) BroadcastMessage(channelID int64, channelName string, channelType 
 
 		// For DMs, look up channel members and add non-sender participants.
 		if channelType == "dm" {
-			if members, err := database.ChannelMemberUsernames(channelID); err == nil {
+			if members, err := store.ChannelMemberUsernames(channelID); err == nil {
 				for _, m := range members {
-					if m != msg.Username && !seen[m] {
+					if m != msg.From && !seen[m] {
 						seen[m] = true
 						recipients = append(recipients, m)
 					}
@@ -156,7 +156,7 @@ func (h *Hub) BroadcastMessage(channelID int64, channelName string, channelType 
 			fireWebhooks(webhookURL, WebhookEvent{
 				ChannelName: channelName,
 				ChannelType: channelType,
-				From:        msg.Username,
+				From:        msg.From,
 				MessageID:   msg.ID,
 				SentAt:      msg.CreatedAt,
 				Recipients:  recipients,
@@ -190,11 +190,11 @@ func (h *Hub) BroadcastMessage(channelID int64, channelName string, channelType 
 }
 
 // BroadcastToRole sends a pre-encoded event to all connected clients whose user has the given role.
-func (h *Hub) BroadcastToRole(role string, data []byte, database *db.DB) {
+func (h *Hub) BroadcastToRole(role string, data []byte, store domain.Store) {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 	for _, client := range h.clients {
-		user, err := database.GetUserByUsername(client.username)
+		user, err := store.GetUserByUsername(client.username)
 		if err != nil || user.Role != role {
 			continue
 		}

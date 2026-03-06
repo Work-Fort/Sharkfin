@@ -4,7 +4,7 @@ package daemon
 import (
 	"regexp"
 
-	"github.com/Work-Fort/sharkfin/pkg/db"
+	"github.com/Work-Fort/sharkfin/pkg/domain"
 )
 
 var mentionRe = regexp.MustCompile(`@([a-zA-Z0-9_-]+)`)
@@ -12,7 +12,7 @@ var mentionRe = regexp.MustCompile(`@([a-zA-Z0-9_-]+)`)
 // resolveMentions extracts @username patterns from the message body,
 // merges with any explicitly provided usernames, deduplicates, and
 // resolves each against the database. Invalid usernames are silently ignored.
-func resolveMentions(database *db.DB, body string, explicit []string) ([]int64, []string) {
+func resolveMentions(store domain.UserStore, body string, explicit []string) ([]int64, []string) {
 	seen := make(map[string]bool)
 	var userIDs []int64
 	var usernames []string
@@ -35,7 +35,7 @@ func resolveMentions(database *db.DB, body string, explicit []string) ([]int64, 
 
 	// Resolve each candidate, silently skip invalid ones
 	for _, uname := range candidates {
-		u, err := database.GetUserByUsername(uname)
+		u, err := store.GetUserByUsername(uname)
 		if err != nil {
 			continue
 		}

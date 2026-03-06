@@ -10,22 +10,22 @@ import (
 	"github.com/charmbracelet/log"
 	"github.com/gorilla/websocket"
 
-	"github.com/Work-Fort/sharkfin/pkg/db"
+	"github.com/Work-Fort/sharkfin/pkg/domain"
 )
 
 // WSHandler handles WebSocket connections for non-MCP clients.
 type WSHandler struct {
 	sessions    *SessionManager
-	db          *db.DB
+	store       domain.Store
 	hub         *Hub
 	pongTimeout time.Duration
 }
 
 // NewWSHandler creates a new WebSocket handler.
-func NewWSHandler(sessions *SessionManager, database *db.DB, hub *Hub, pongTimeout time.Duration) *WSHandler {
+func NewWSHandler(sessions *SessionManager, store domain.Store, hub *Hub, pongTimeout time.Duration) *WSHandler {
 	return &WSHandler{
 		sessions:    sessions,
-		db:          database,
+		store:       store,
 		hub:         hub,
 		pongTimeout: pongTimeout,
 	}
@@ -136,7 +136,7 @@ func (h *WSHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 					sendReply(sendCh, req.Ref, false, map[string]string{"message": err.Error()})
 					continue
 				}
-				u, err := h.db.GetUserByUsername(d.Username)
+				u, err := h.store.GetUserByUsername(d.Username)
 				if err != nil {
 					sendReply(sendCh, req.Ref, false, map[string]string{"message": err.Error()})
 					continue
@@ -167,7 +167,7 @@ func (h *WSHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 					sendReply(sendCh, req.Ref, false, map[string]string{"message": err.Error()})
 					continue
 				}
-				u, err := h.db.GetUserByUsername(d.Username)
+				u, err := h.store.GetUserByUsername(d.Username)
 				if err != nil {
 					sendReply(sendCh, req.Ref, false, map[string]string{"message": err.Error()})
 					continue
@@ -202,7 +202,7 @@ func (h *WSHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 		// Allowed in notifications_only mode (no permission check needed)
 		case "capabilities":
-			perms, err := h.db.GetUserPermissions(username)
+			perms, err := h.store.GetUserPermissions(username)
 			if err != nil {
 				sendError(sendCh, req.Ref, err.Error())
 				break
@@ -315,7 +315,7 @@ func (h *WSHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 // checkPermission verifies the user has the given permission, sending an error if not.
 func (h *WSHandler) checkPermission(sendCh chan<- []byte, ref, username, permission string) bool {
-	ok, err := h.db.HasPermission(username, permission)
+	ok, err := h.store.HasPermission(username, permission)
 	if err != nil || !ok {
 		sendError(sendCh, ref, fmt.Sprintf("permission denied: %s", permission))
 		return false
@@ -326,7 +326,7 @@ func (h *WSHandler) checkPermission(sendCh chan<- []byte, ref, username, permiss
 // --- Request handlers ---
 
 func (h *WSHandler) handleWSUserList(sendCh chan<- []byte, ref string) {
-	users, err := h.db.ListUsers()
+	users, err := h.store.ListUsers()
 	if err != nil {
 		sendError(sendCh, ref, err.Error())
 		return
@@ -355,7 +355,7 @@ func (h *WSHandler) handleWSUserList(sendCh chan<- []byte, ref string) {
 
 func (h *WSHandler) handleWSChannelList(sendCh chan<- []byte, ref string, userID int64) {
 	t0 := time.Now()
-	channels, err := h.db.ListAllChannelsWithMembership(userID)
+	channels, err := h.store.ListAllChannelsWithMembership(userID)
 	if err != nil {
 		sendError(sendCh, ref, err.Error())
 		return
@@ -387,7 +387,7 @@ func (h *WSHandler) handleWSChannelCreate(sendCh chan<- []byte, ref string, rawD
 
 	memberIDs := []int64{userID}
 	for _, m := range d.Members {
-		u, err := h.db.GetUserByUsername(m)
+		u, err := h.store.GetUserByUsername(m)
 		if err != nil {
 			sendError(sendCh, ref, fmt.Sprintf("user not found: %s", m))
 			return
@@ -397,7 +397,7 @@ func (h *WSHandler) handleWSChannelCreate(sendCh chan<- []byte, ref string, rawD
 		}
 	}
 
-	_, err := h.db.CreateChannel(d.Name, d.Public, memberIDs, "channel")
+	_, err := h.store.CreateChannel(d.Name, d.Public, memberIDs, "channel")
 	if err != nil {
 		sendError(sendCh, ref, err.Error())
 		return
@@ -415,13 +415,13 @@ func (h *WSHandler) handleWSChannelInvite(sendCh chan<- []byte, ref string, rawD
 		return
 	}
 
-	ch, err := h.db.GetChannelByName(d.Channel)
+	ch, err := h.store.GetChannelByName(d.Channel)
 	if err != nil {
 		sendError(sendCh, ref, err.Error())
 		return
 	}
 
-	isMember, err := h.db.IsChannelMember(ch.ID, callerID)
+	isMember, err := h.store.IsChannelMember(ch.ID, callerID)
 	if err != nil {
 		sendError(sendCh, ref, err.Error())
 		return
@@ -431,13 +431,13 @@ func (h *WSHandler) handleWSChannelInvite(sendCh chan<- []byte, ref string, rawD
 		return
 	}
 
-	invitee, err := h.db.GetUserByUsername(d.Username)
+	invitee, err := h.store.GetUserByUsername(d.Username)
 	if err != nil {
 		sendError(sendCh, ref, fmt.Sprintf("user not found: %s", d.Username))
 		return
 	}
 
-	if err := h.db.AddChannelMember(ch.ID, invitee.ID); err != nil {
+	if err := h.store.AddChannelMember(ch.ID, invitee.ID); err != nil {
 		sendError(sendCh, ref, err.Error())
 		return
 	}
@@ -453,13 +453,13 @@ func (h *WSHandler) handleWSChannelJoin(sendCh chan<- []byte, ref string, rawD j
 		return
 	}
 
-	ch, err := h.db.GetChannelByName(d.Channel)
+	ch, err := h.store.GetChannelByName(d.Channel)
 	if err != nil {
 		sendError(sendCh, ref, err.Error())
 		return
 	}
 
-	isMember, err := h.db.IsChannelMember(ch.ID, userID)
+	isMember, err := h.store.IsChannelMember(ch.ID, userID)
 	if err != nil {
 		sendError(sendCh, ref, err.Error())
 		return
@@ -469,7 +469,7 @@ func (h *WSHandler) handleWSChannelJoin(sendCh chan<- []byte, ref string, rawD j
 		return
 	}
 
-	if err := h.db.AddChannelMember(ch.ID, userID); err != nil {
+	if err := h.store.AddChannelMember(ch.ID, userID); err != nil {
 		sendError(sendCh, ref, err.Error())
 		return
 	}
@@ -488,13 +488,13 @@ func (h *WSHandler) handleWSSendMessage(sendCh chan<- []byte, ref string, rawD j
 		return
 	}
 
-	ch, err := h.db.GetChannelByName(d.Channel)
+	ch, err := h.store.GetChannelByName(d.Channel)
 	if err != nil {
 		sendError(sendCh, ref, err.Error())
 		return
 	}
 
-	isMember, err := h.db.IsChannelMember(ch.ID, userID)
+	isMember, err := h.store.IsChannelMember(ch.ID, userID)
 	if err != nil {
 		sendError(sendCh, ref, err.Error())
 		return
@@ -504,9 +504,9 @@ func (h *WSHandler) handleWSSendMessage(sendCh chan<- []byte, ref string, rawD j
 		return
 	}
 
-	mentionUserIDs, mentionUsernames := resolveMentions(h.db, d.Body, d.Mentions)
+	mentionUserIDs, mentionUsernames := resolveMentions(h.store, d.Body, d.Mentions)
 
-	msgID, err := h.db.SendMessage(ch.ID, userID, d.Body, d.ThreadID, mentionUserIDs)
+	msgID, err := h.store.SendMessage(ch.ID, userID, d.Body, d.ThreadID, mentionUserIDs)
 	if err != nil {
 		sendError(sendCh, ref, err.Error())
 		return
@@ -515,15 +515,15 @@ func (h *WSHandler) handleWSSendMessage(sendCh chan<- []byte, ref string, rawD j
 	sendReply(sendCh, ref, true, map[string]interface{}{"id": msgID})
 
 	// Broadcast to other WS clients
-	msg := db.Message{
+	msg := domain.Message{
 		ID:        msgID,
 		ChannelID: ch.ID,
 		UserID:    userID,
 		Body:      d.Body,
 		CreatedAt: time.Now(),
-		Username:  username,
+		From:      username,
 	}
-	h.hub.BroadcastMessage(ch.ID, ch.Name, ch.Type, msg, mentionUsernames, d.ThreadID, h.db)
+	h.hub.BroadcastMessage(ch.ID, ch.Name, ch.Type, msg, mentionUsernames, d.ThreadID, h.store)
 }
 
 func (h *WSHandler) handleWSHistory(sendCh chan<- []byte, ref string, rawD json.RawMessage, userID int64) {
@@ -539,7 +539,7 @@ func (h *WSHandler) handleWSHistory(sendCh chan<- []byte, ref string, rawD json.
 		return
 	}
 
-	ch, err := h.db.GetChannelByName(d.Channel)
+	ch, err := h.store.GetChannelByName(d.Channel)
 	if err != nil {
 		sendError(sendCh, ref, err.Error())
 		return
@@ -549,7 +549,7 @@ func (h *WSHandler) handleWSHistory(sendCh chan<- []byte, ref string, rawD json.
 		d.Limit = 50
 	}
 
-	messages, err := h.db.GetMessages(ch.ID, d.Before, d.After, d.Limit, d.ThreadID)
+	messages, err := h.store.GetMessages(ch.ID, d.Before, d.After, d.Limit, d.ThreadID)
 	if err != nil {
 		sendError(sendCh, ref, err.Error())
 		return
@@ -567,7 +567,7 @@ func (h *WSHandler) handleWSHistory(sendCh chan<- []byte, ref string, rawD json.
 	for _, m := range messages {
 		list = append(list, msgInfo{
 			ID:       m.ID,
-			From:     m.Username,
+			From:     m.From,
 			Body:     m.Body,
 			SentAt:   m.CreatedAt.UTC().Format(time.RFC3339),
 			ThreadID: m.ThreadID,
@@ -589,7 +589,7 @@ func (h *WSHandler) handleWSUnreadMessages(sendCh chan<- []byte, ref string, raw
 
 	var channelID *int64
 	if d.Channel != "" {
-		ch, err := h.db.GetChannelByName(d.Channel)
+		ch, err := h.store.GetChannelByName(d.Channel)
 		if err != nil {
 			sendError(sendCh, ref, err.Error())
 			return
@@ -597,7 +597,7 @@ func (h *WSHandler) handleWSUnreadMessages(sendCh chan<- []byte, ref string, raw
 		channelID = &ch.ID
 	}
 
-	messages, err := h.db.GetUnreadMessages(userID, channelID, d.MentionsOnly, d.ThreadID)
+	messages, err := h.store.GetUnreadMessages(userID, channelID, d.MentionsOnly, d.ThreadID)
 	if err != nil {
 		sendError(sendCh, ref, err.Error())
 		return
@@ -616,14 +616,14 @@ func (h *WSHandler) handleWSUnreadMessages(sendCh chan<- []byte, ref string, raw
 	for _, m := range messages {
 		chName, ok := channelNames[m.ChannelID]
 		if !ok {
-			if ch, err := h.db.GetChannelByID(m.ChannelID); err == nil {
+			if ch, err := h.store.GetChannelByID(m.ChannelID); err == nil {
 				chName = ch.Name
 			}
 			channelNames[m.ChannelID] = chName
 		}
 		list = append(list, msgInfo{
 			Channel:  chName,
-			From:     m.Username,
+			From:     m.From,
 			Body:     m.Body,
 			SentAt:   m.CreatedAt.UTC().Format(time.RFC3339),
 			ThreadID: m.ThreadID,
@@ -634,7 +634,7 @@ func (h *WSHandler) handleWSUnreadMessages(sendCh chan<- []byte, ref string, raw
 }
 
 func (h *WSHandler) handleWSUnreadCounts(sendCh chan<- []byte, ref string, userID int64) {
-	counts, err := h.db.GetUnreadCounts(userID)
+	counts, err := h.store.GetUnreadCounts(userID)
 	if err != nil {
 		sendError(sendCh, ref, err.Error())
 		return
@@ -648,8 +648,8 @@ func (h *WSHandler) handleWSUnreadCounts(sendCh chan<- []byte, ref string, userI
 	var list []countInfo
 	for _, c := range counts {
 		list = append(list, countInfo{
-			Channel:      c.ChannelName,
-			Type:         c.ChannelType,
+			Channel:      c.Channel,
+			Type:         c.Type,
 			UnreadCount:  c.UnreadCount,
 			MentionCount: c.MentionCount,
 		})
@@ -658,7 +658,7 @@ func (h *WSHandler) handleWSUnreadCounts(sendCh chan<- []byte, ref string, userI
 }
 
 func (h *WSHandler) handleWSDMList(sendCh chan<- []byte, ref string, userID int64) {
-	dms, err := h.db.ListAllDMs()
+	dms, err := h.store.ListAllDMs()
 	if err != nil {
 		sendError(sendCh, ref, err.Error())
 		return
@@ -669,7 +669,7 @@ func (h *WSHandler) handleWSDMList(sendCh chan<- []byte, ref string, userID int6
 	}
 	var list []dmInfo
 	for _, dm := range dms {
-		list = append(list, dmInfo{Channel: dm.Channel, Participants: dm.Participants})
+		list = append(list, dmInfo{Channel: dm.ChannelName, Participants: []string{dm.User1Username, dm.User2Username}})
 	}
 	sendReply(sendCh, ref, true, map[string]interface{}{"dms": list})
 }
@@ -691,13 +691,13 @@ func (h *WSHandler) handleWSDMOpen(sendCh chan<- []byte, ref string, rawD json.R
 		return
 	}
 
-	other, err := h.db.GetUserByUsername(d.Username)
+	other, err := h.store.GetUserByUsername(d.Username)
 	if err != nil {
 		sendError(sendCh, ref, fmt.Sprintf("user not found: %s", d.Username))
 		return
 	}
 
-	dmName, created, err := h.db.OpenDM(userID, other.ID, d.Username)
+	dmName, created, err := h.store.OpenDM(userID, other.ID, d.Username)
 	if err != nil {
 		sendError(sendCh, ref, err.Error())
 		return
@@ -723,13 +723,13 @@ func (h *WSHandler) handleWSMarkRead(sendCh chan<- []byte, ref string, rawD json
 		return
 	}
 
-	ch, err := h.db.GetChannelByName(d.Channel)
+	ch, err := h.store.GetChannelByName(d.Channel)
 	if err != nil {
 		sendError(sendCh, ref, err.Error())
 		return
 	}
 
-	isMember, err := h.db.IsChannelMember(ch.ID, userID)
+	isMember, err := h.store.IsChannelMember(ch.ID, userID)
 	if err != nil {
 		sendError(sendCh, ref, err.Error())
 		return
@@ -739,7 +739,7 @@ func (h *WSHandler) handleWSMarkRead(sendCh chan<- []byte, ref string, rawD json
 		return
 	}
 
-	if err := h.db.MarkRead(userID, ch.ID, d.MessageID); err != nil {
+	if err := h.store.MarkRead(userID, ch.ID, d.MessageID); err != nil {
 		sendError(sendCh, ref, err.Error())
 		return
 	}
@@ -755,7 +755,7 @@ func (h *WSHandler) handleWSSetSetting(sendCh chan<- []byte, ref string, rawD js
 		sendError(sendCh, ref, "invalid arguments")
 		return
 	}
-	if err := h.db.SetSetting(d.Key, d.Value); err != nil {
+	if err := h.store.SetSetting(d.Key, d.Value); err != nil {
 		sendError(sendCh, ref, err.Error())
 		return
 	}
@@ -763,7 +763,7 @@ func (h *WSHandler) handleWSSetSetting(sendCh chan<- []byte, ref string, rawD js
 }
 
 func (h *WSHandler) handleWSGetSettings(sendCh chan<- []byte, ref string) {
-	settings, err := h.db.ListSettings()
+	settings, err := h.store.ListSettings()
 	if err != nil {
 		sendError(sendCh, ref, err.Error())
 		return

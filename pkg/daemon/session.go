@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Work-Fort/sharkfin/pkg/db"
+	"github.com/Work-Fort/sharkfin/pkg/domain"
 )
 
 // SessionManager manages identity tokens, MCP sessions, and presence state.
@@ -17,7 +17,7 @@ type SessionManager struct {
 	tokens      map[string]*IdentityToken // token string → state
 	mcpSessions map[string]*MCPSession    // MCP session ID → session
 	onlineUsers map[string]string         // username → token
-	db          *db.DB
+	store       domain.UserStore
 }
 
 // IdentityToken tracks the lifecycle of an identity token.
@@ -39,12 +39,12 @@ type MCPSession struct {
 }
 
 // NewSessionManager creates a new session manager.
-func NewSessionManager(database *db.DB) *SessionManager {
+func NewSessionManager(store domain.UserStore) *SessionManager {
 	return &SessionManager{
 		tokens:      make(map[string]*IdentityToken),
 		mcpSessions: make(map[string]*MCPSession),
 		onlineUsers: make(map[string]string),
-		db:          database,
+		store:       store,
 	}
 }
 
@@ -101,7 +101,7 @@ func (sm *SessionManager) Register(token, username, password string) (string, er
 	}
 
 	// Create user in database
-	if _, err := sm.db.CreateUser(username, password); err != nil {
+	if _, err := sm.store.CreateUser(username, password); err != nil {
 		return "", fmt.Errorf("create user: %w", err)
 	}
 
@@ -128,7 +128,7 @@ func (sm *SessionManager) Identify(token, username, password string) (string, er
 	}
 
 	// Verify user exists
-	if _, err := sm.db.GetUserByUsername(username); err != nil {
+	if _, err := sm.store.GetUserByUsername(username); err != nil {
 		return "", fmt.Errorf("user not found: %s", username)
 	}
 
