@@ -56,6 +56,7 @@ func (h *WSHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	var identified bool
 	var username string
 	var userID int64
+	var notificationsOnly bool
 	token := h.sessions.CreateIdentityToken()
 	done, _ := h.sessions.AttachPresence(token)
 	defer func() {
@@ -120,7 +121,8 @@ func (h *WSHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			switch req.Type {
 			case "identify":
 				var d struct {
-					Username string `json:"username"`
+					Username          string `json:"username"`
+					NotificationsOnly bool   `json:"notifications_only"`
 				}
 				json.Unmarshal(req.D, &d)
 				if d.Username == "" {
@@ -141,15 +143,17 @@ func (h *WSHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				identified = true
 				username = d.Username
 				userID = u.ID
+				notificationsOnly = d.NotificationsOnly
 				client = &WSClient{username: username, userID: userID, send: sendCh, hub: h.hub}
 				h.hub.Register(client)
 				h.hub.BroadcastPresence(username, true)
 				sendReply(sendCh, req.Ref, true, nil)
-				log.Info("ws: connect", "user", username, "clients", h.hub.ClientCount(), "elapsed", time.Since(t0))
+				log.Info("ws: connect", "user", username, "notifications_only", notificationsOnly, "clients", h.hub.ClientCount(), "elapsed", time.Since(t0))
 
 			case "register":
 				var d struct {
-					Username string `json:"username"`
+					Username          string `json:"username"`
+					NotificationsOnly bool   `json:"notifications_only"`
 				}
 				json.Unmarshal(req.D, &d)
 				if d.Username == "" {
@@ -169,11 +173,12 @@ func (h *WSHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				identified = true
 				username = d.Username
 				userID = u.ID
+				notificationsOnly = d.NotificationsOnly
 				client = &WSClient{username: username, userID: userID, send: sendCh, hub: h.hub}
 				h.hub.Register(client)
 				h.hub.BroadcastPresence(username, true)
 				sendReply(sendCh, req.Ref, true, nil)
-				log.Info("ws: connect", "user", username, "clients", h.hub.ClientCount())
+				log.Info("ws: connect", "user", username, "notifications_only", notificationsOnly, "clients", h.hub.ClientCount())
 
 			case "ping":
 				sendPong(sendCh, req.Ref)
@@ -191,34 +196,101 @@ func (h *WSHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			sendError(sendCh, req.Ref, "already identified")
 		case "ping":
 			sendPong(sendCh, req.Ref)
+
+		// Allowed in notifications_only mode (no permission check needed)
+		case "capabilities":
+			perms, err := h.db.GetUserPermissions(username)
+			if err != nil {
+				sendError(sendCh, req.Ref, err.Error())
+				break
+			}
+			sendReply(sendCh, req.Ref, true, map[string]interface{}{"permissions": perms})
+
+		// All remaining actions are blocked in notifications_only mode
 		case "user_list":
-			h.handleWSUserList(sendCh, req.Ref)
+			if notificationsOnly {
+				sendError(sendCh, req.Ref, "notification-only connection")
+			} else if h.checkPermission(sendCh, req.Ref, username, "user_list") {
+				h.handleWSUserList(sendCh, req.Ref)
+			}
 		case "channel_list":
-			h.handleWSChannelList(sendCh, req.Ref, userID)
+			if notificationsOnly {
+				sendError(sendCh, req.Ref, "notification-only connection")
+			} else if h.checkPermission(sendCh, req.Ref, username, "channel_list") {
+				h.handleWSChannelList(sendCh, req.Ref, userID)
+			}
 		case "channel_create":
-			h.handleWSChannelCreate(sendCh, req.Ref, req.D, username, userID)
+			if notificationsOnly {
+				sendError(sendCh, req.Ref, "notification-only connection")
+			} else if h.checkPermission(sendCh, req.Ref, username, "create_channel") {
+				h.handleWSChannelCreate(sendCh, req.Ref, req.D, username, userID)
+			}
 		case "channel_invite":
-			h.handleWSChannelInvite(sendCh, req.Ref, req.D, userID)
+			if notificationsOnly {
+				sendError(sendCh, req.Ref, "notification-only connection")
+			} else if h.checkPermission(sendCh, req.Ref, username, "invite_channel") {
+				h.handleWSChannelInvite(sendCh, req.Ref, req.D, userID)
+			}
 		case "channel_join":
-			h.handleWSChannelJoin(sendCh, req.Ref, req.D, userID)
+			if notificationsOnly {
+				sendError(sendCh, req.Ref, "notification-only connection")
+			} else if h.checkPermission(sendCh, req.Ref, username, "join_channel") {
+				h.handleWSChannelJoin(sendCh, req.Ref, req.D, userID)
+			}
 		case "send_message":
-			h.handleWSSendMessage(sendCh, req.Ref, req.D, username, userID)
+			if notificationsOnly {
+				sendError(sendCh, req.Ref, "notification-only connection")
+			} else if h.checkPermission(sendCh, req.Ref, username, "send_message") {
+				h.handleWSSendMessage(sendCh, req.Ref, req.D, username, userID)
+			}
 		case "history":
-			h.handleWSHistory(sendCh, req.Ref, req.D, userID)
+			if notificationsOnly {
+				sendError(sendCh, req.Ref, "notification-only connection")
+			} else if h.checkPermission(sendCh, req.Ref, username, "history") {
+				h.handleWSHistory(sendCh, req.Ref, req.D, userID)
+			}
 		case "unread_messages":
-			h.handleWSUnreadMessages(sendCh, req.Ref, req.D, userID)
+			if notificationsOnly {
+				sendError(sendCh, req.Ref, "notification-only connection")
+			} else if h.checkPermission(sendCh, req.Ref, username, "unread_messages") {
+				h.handleWSUnreadMessages(sendCh, req.Ref, req.D, userID)
+			}
 		case "unread_counts":
-			h.handleWSUnreadCounts(sendCh, req.Ref, userID)
+			if notificationsOnly {
+				sendError(sendCh, req.Ref, "notification-only connection")
+			} else if h.checkPermission(sendCh, req.Ref, username, "unread_counts") {
+				h.handleWSUnreadCounts(sendCh, req.Ref, userID)
+			}
 		case "dm_list":
-			h.handleWSDMList(sendCh, req.Ref, userID)
+			if notificationsOnly {
+				sendError(sendCh, req.Ref, "notification-only connection")
+			} else if h.checkPermission(sendCh, req.Ref, username, "dm_list") {
+				h.handleWSDMList(sendCh, req.Ref, userID)
+			}
 		case "dm_open":
-			h.handleWSDMOpen(sendCh, req.Ref, req.D, username, userID)
+			if notificationsOnly {
+				sendError(sendCh, req.Ref, "notification-only connection")
+			} else if h.checkPermission(sendCh, req.Ref, username, "dm_open") {
+				h.handleWSDMOpen(sendCh, req.Ref, req.D, username, userID)
+			}
 		case "mark_read":
-			h.handleWSMarkRead(sendCh, req.Ref, req.D, userID)
+			if notificationsOnly {
+				sendError(sendCh, req.Ref, "notification-only connection")
+			} else if h.checkPermission(sendCh, req.Ref, username, "mark_read") {
+				h.handleWSMarkRead(sendCh, req.Ref, req.D, userID)
+			}
 		case "set_setting":
-			h.handleWSSetSetting(sendCh, req.Ref, req.D)
+			if notificationsOnly {
+				sendError(sendCh, req.Ref, "notification-only connection")
+			} else if h.checkPermission(sendCh, req.Ref, username, "manage_roles") {
+				h.handleWSSetSetting(sendCh, req.Ref, req.D)
+			}
 		case "get_settings":
-			h.handleWSGetSettings(sendCh, req.Ref)
+			if notificationsOnly {
+				sendError(sendCh, req.Ref, "notification-only connection")
+			} else if h.checkPermission(sendCh, req.Ref, username, "manage_roles") {
+				h.handleWSGetSettings(sendCh, req.Ref)
+			}
 		default:
 			sendError(sendCh, req.Ref, fmt.Sprintf("unknown type: %s", req.Type))
 		}
@@ -226,6 +298,16 @@ func (h *WSHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			log.Warn("ws: slow handler", "type", req.Type, "user", username, "elapsed", elapsed)
 		}
 	}
+}
+
+// checkPermission verifies the user has the given permission, sending an error if not.
+func (h *WSHandler) checkPermission(sendCh chan<- []byte, ref, username, permission string) bool {
+	ok, err := h.db.HasPermission(username, permission)
+	if err != nil || !ok {
+		sendError(sendCh, ref, fmt.Sprintf("permission denied: %s", permission))
+		return false
+	}
+	return true
 }
 
 // --- Request handlers ---
@@ -272,13 +354,6 @@ func (h *WSHandler) handleWSChannelList(sendCh chan<- []byte, ref string, userID
 }
 
 func (h *WSHandler) handleWSChannelCreate(sendCh chan<- []byte, ref string, rawD json.RawMessage, username string, userID int64) {
-	// Check setting
-	val, err := h.db.GetSetting("allow_channel_creation")
-	if err == nil && val == "false" {
-		sendError(sendCh, ref, "channel creation is disabled")
-		return
-	}
-
 	var d struct {
 		Name    string   `json:"name"`
 		Public  bool     `json:"public"`
@@ -301,7 +376,7 @@ func (h *WSHandler) handleWSChannelCreate(sendCh chan<- []byte, ref string, rawD
 		}
 	}
 
-	_, err = h.db.CreateChannel(d.Name, d.Public, memberIDs, "channel")
+	_, err := h.db.CreateChannel(d.Name, d.Public, memberIDs, "channel")
 	if err != nil {
 		sendError(sendCh, ref, err.Error())
 		return
