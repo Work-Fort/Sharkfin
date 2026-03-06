@@ -56,8 +56,8 @@ func NewServer(addr string, store domain.Store, pongTimeout time.Duration, webho
 	}, nil
 }
 
-// DB returns the server's store. Intended for test access.
-func (s *Server) DB() domain.Store { return s.store }
+// Store returns the server's store. Intended for test access.
+func (s *Server) Store() domain.Store { return s.store }
 
 // Start begins listening for connections.
 func (s *Server) Start() error {
