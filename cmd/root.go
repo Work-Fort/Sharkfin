@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-2.0-only
+// SPDX-License-Identifier: AGPL-3.0-or-later
 package cmd
 
 import (
@@ -13,6 +13,7 @@ import (
 
 	"github.com/Work-Fort/sharkfin/cmd/admin"
 	"github.com/Work-Fort/sharkfin/cmd/agent"
+	"github.com/Work-Fort/sharkfin/cmd/backup"
 	"github.com/Work-Fort/sharkfin/cmd/daemon"
 	"github.com/Work-Fort/sharkfin/cmd/mcpbridge"
 	"github.com/Work-Fort/sharkfin/cmd/presence"
@@ -92,6 +93,7 @@ func init() {
 
 	rootCmd.AddCommand(admin.NewAdminCmd())
 	rootCmd.AddCommand(agent.NewAgentCmd())
+	rootCmd.AddCommand(backup.NewBackupCmd())
 	rootCmd.AddCommand(daemon.NewDaemonCmd())
 	rootCmd.AddCommand(mcpbridge.NewMCPBridgeCmd())
 	rootCmd.AddCommand(presence.NewPresenceCmd())

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-2.0-only
+// SPDX-License-Identifier: AGPL-3.0-or-later
 package config
 
 import (
@@ -80,6 +80,11 @@ func InitViper() {
 	viper.SetDefault("webhook-url", "")
 	viper.SetDefault("agent.username", "")
 	viper.SetDefault("agent.exec", "")
+	viper.SetDefault("backup.s3-bucket", "")
+	viper.SetDefault("backup.s3-region", "")
+	viper.SetDefault("backup.s3-endpoint", "")
+	viper.SetDefault("backup.s3-access-key", "")
+	viper.SetDefault("backup.s3-secret-key", "")
 
 	viper.SetConfigName(ConfigFileName)
 	viper.SetConfigType(ConfigType)
