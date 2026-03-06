@@ -4,6 +4,7 @@ package harness
 import (
 	"bufio"
 	"bytes"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -18,6 +19,7 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+	_ "github.com/jackc/pgx/v5/stdlib"
 )
 
 // --- Daemon ---
@@ -66,8 +68,15 @@ func StartDaemon(binary, addr string, opts ...DaemonOption) (*Daemon, error) {
 		args = append(args, "--webhook-url", cfg.webhookURL)
 	}
 	// Forward SHARKFIN_DB if set (e.g., for Postgres e2e).
+	// Clean Postgres between tests so each daemon gets a fresh database.
 	if dbDSN := os.Getenv("SHARKFIN_DB"); dbDSN != "" {
 		args = append(args, "--db", dbDSN)
+		if strings.HasPrefix(dbDSN, "postgres://") || strings.HasPrefix(dbDSN, "postgresql://") {
+			if err := resetPostgres(dbDSN); err != nil {
+				os.RemoveAll(xdgDir)
+				return nil, fmt.Errorf("reset postgres: %w", err)
+			}
+		}
 	}
 
 	var stderrBuf bytes.Buffer
@@ -599,6 +608,25 @@ func (c *Client) SetState(state string) (ToolResult, error) {
 // SetRole calls the set_role MCP tool and returns the result.
 func (c *Client) SetRole(username, role string) (ToolResult, error) {
 	return c.ToolCall("set_role", map[string]any{"username": username, "role": role})
+}
+
+// --- Postgres ---
+
+// resetPostgres drops and recreates the public schema so each test
+// gets a fresh database. Goose migrations re-run on daemon startup.
+func resetPostgres(dsn string) error {
+	db, err := sql.Open("pgx", dsn)
+	if err != nil {
+		return fmt.Errorf("open: %w", err)
+	}
+	defer db.Close()
+	if _, err := db.Exec("DROP SCHEMA public CASCADE"); err != nil {
+		return fmt.Errorf("drop schema: %w", err)
+	}
+	if _, err := db.Exec("CREATE SCHEMA public"); err != nil {
+		return fmt.Errorf("create schema: %w", err)
+	}
+	return nil
 }
 
 // --- Helpers ---
