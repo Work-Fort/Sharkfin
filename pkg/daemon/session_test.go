@@ -4,17 +4,17 @@ package daemon
 import (
 	"testing"
 
-	"github.com/Work-Fort/sharkfin/pkg/db"
+	"github.com/Work-Fort/sharkfin/pkg/infra/sqlite"
 )
 
 func newTestSessionManager(t *testing.T) *SessionManager {
 	t.Helper()
-	d, err := db.Open(":memory:")
+	store, err := sqlite.Open(":memory:")
 	if err != nil {
 		t.Fatalf("open db: %v", err)
 	}
-	t.Cleanup(func() { d.Close() })
-	return NewSessionManager(d)
+	t.Cleanup(func() { store.Close() })
+	return NewSessionManager(store)
 }
 
 func TestCreateIdentityToken(t *testing.T) {

@@ -15,6 +15,7 @@ import (
 	"github.com/gorilla/websocket"
 
 	pkgdaemon "github.com/Work-Fort/sharkfin/pkg/daemon"
+	"github.com/Work-Fort/sharkfin/pkg/infra/sqlite"
 )
 
 // jsonrpcResponse is a minimal JSON-RPC 2.0 response for integration tests.
@@ -49,7 +50,12 @@ func startTestServer(t *testing.T) *testEnv {
 	addr := ln.Addr().String()
 	ln.Close()
 
-	srv, err := pkgdaemon.NewServer(addr, ":memory:", 20*time.Second, "")
+	store, err := sqlite.Open(":memory:")
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+
+	srv, err := pkgdaemon.NewServer(addr, store, 20*time.Second, "")
 	if err != nil {
 		t.Fatalf("create server: %v", err)
 	}
@@ -285,10 +291,10 @@ func (e *testEnv) identifyUser(username string, id int) (sessionID string, cance
 	return sessionID, cancelPresence
 }
 
-// grantAdmin promotes a user to admin role via the server's DB handle.
+// grantAdmin promotes a user to admin role via the server's Store handle.
 func (e *testEnv) grantAdmin(username string) {
 	e.t.Helper()
-	if err := e.srv.DB().SetUserRole(username, "admin"); err != nil {
+	if err := e.srv.Store().SetUserRole(username, "admin"); err != nil {
 		e.t.Fatalf("grant admin to %s: %v", username, err)
 	}
 }

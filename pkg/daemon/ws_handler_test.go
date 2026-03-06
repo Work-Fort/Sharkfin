@@ -9,32 +9,33 @@ import (
 
 	"github.com/gorilla/websocket"
 
-	"github.com/Work-Fort/sharkfin/pkg/db"
+	"github.com/Work-Fort/sharkfin/pkg/domain"
+	"github.com/Work-Fort/sharkfin/pkg/infra/sqlite"
 )
 
-// wsTestEnv bundles a test server, session manager, db, and hub.
+// wsTestEnv bundles a test server, session manager, store, and hub.
 type wsTestEnv struct {
 	server *httptest.Server
 	sm     *SessionManager
-	db     *db.DB
+	store  domain.Store
 	hub    *Hub
 }
 
 func newWSTestEnv(t *testing.T) *wsTestEnv {
 	t.Helper()
-	d, err := db.Open(":memory:")
+	store, err := sqlite.Open(":memory:")
 	if err != nil {
 		t.Fatalf("open db: %v", err)
 	}
-	t.Cleanup(func() { d.Close() })
+	t.Cleanup(func() { store.Close() })
 
-	sm := NewSessionManager(d)
+	sm := NewSessionManager(store)
 	hub := NewHub()
-	wh := NewWSHandler(sm, d, hub, 20*time.Second)
+	wh := NewWSHandler(sm, store, hub, 20*time.Second)
 	server := httptest.NewServer(wh)
 	t.Cleanup(func() { server.Close() })
 
-	return &wsTestEnv{server: server, sm: sm, db: d, hub: hub}
+	return &wsTestEnv{server: server, sm: sm, store: store, hub: hub}
 }
 
 // dialWS opens a WebSocket connection to the test server and reads the hello message.
@@ -99,7 +100,7 @@ func registerWSUser(t *testing.T, env *wsTestEnv, username string) *websocket.Co
 // grantAdmin promotes a WS-registered user to admin role for tests that need elevated permissions.
 func grantAdmin(t *testing.T, env *wsTestEnv, username string) {
 	t.Helper()
-	if err := env.db.SetUserRole(username, "admin"); err != nil {
+	if err := env.store.SetUserRole(username, "admin"); err != nil {
 		t.Fatalf("grant admin to %s: %v", username, err)
 	}
 }

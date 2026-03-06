@@ -10,7 +10,7 @@ import (
 
 	"github.com/gorilla/websocket"
 
-	"github.com/Work-Fort/sharkfin/pkg/db"
+	"github.com/Work-Fort/sharkfin/pkg/infra/sqlite"
 )
 
 // wsURL converts an httptest.Server URL to a WebSocket URL with path.
@@ -19,7 +19,7 @@ func wsURL(server *httptest.Server) string {
 }
 
 func TestPresenceTokenDelivery(t *testing.T) {
-	d, _ := db.Open(":memory:")
+	d, _ := sqlite.Open(":memory:")
 	defer d.Close()
 	sm := NewSessionManager(d)
 	ph := NewPresenceHandler(sm, NewHub(), 20*time.Second)
@@ -48,7 +48,7 @@ func TestPresenceTokenDelivery(t *testing.T) {
 }
 
 func TestPresenceHoldsConnection(t *testing.T) {
-	d, _ := db.Open(":memory:")
+	d, _ := sqlite.Open(":memory:")
 	defer d.Close()
 	sm := NewSessionManager(d)
 	ph := NewPresenceHandler(sm, NewHub(), 20*time.Second)
@@ -79,7 +79,7 @@ func TestPresenceHoldsConnection(t *testing.T) {
 }
 
 func TestPresenceDisconnectNotifiesSession(t *testing.T) {
-	d, _ := db.Open(":memory:")
+	d, _ := sqlite.Open(":memory:")
 	defer d.Close()
 	sm := NewSessionManager(d)
 	ph := NewPresenceHandler(sm, NewHub(), 20*time.Second)
@@ -122,7 +122,7 @@ func TestPresenceDisconnectNotifiesSession(t *testing.T) {
 }
 
 func TestPresenceRejectsNonWebSocket(t *testing.T) {
-	d, _ := db.Open(":memory:")
+	d, _ := sqlite.Open(":memory:")
 	defer d.Close()
 	sm := NewSessionManager(d)
 	ph := NewPresenceHandler(sm, NewHub(), 20*time.Second)
