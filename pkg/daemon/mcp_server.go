@@ -98,6 +98,7 @@ func NewSharkfinMCP(sm *SessionManager, database *db.DB, hub *Hub) *SharkfinMCP 
 		server.ServerTool{Tool: newGrantPermissionTool(), Handler: s.handleGrantPermission},
 		server.ServerTool{Tool: newRevokePermissionTool(), Handler: s.handleRevokePermission},
 		server.ServerTool{Tool: newListRolesTool(), Handler: s.handleListRoles},
+		server.ServerTool{Tool: newSetStateTool(), Handler: s.handleSetState},
 	)
 
 	return s
@@ -225,13 +226,21 @@ func (s *SharkfinMCP) handleUserList(_ context.Context, _ mcp.CallToolRequest) (
 	type userInfo struct {
 		Username string `json:"username"`
 		Online   bool   `json:"online"`
+		Type     string `json:"type"`
+		State    string `json:"state,omitempty"`
 	}
 	var list []userInfo
 	for _, u := range users {
-		list = append(list, userInfo{
+		online := s.sessions.IsUserOnline(u.Username)
+		info := userInfo{
 			Username: u.Username,
-			Online:   s.sessions.IsUserOnline(u.Username),
-		})
+			Online:   online,
+			Type:     u.Type,
+		}
+		if online {
+			info.State = s.hub.GetState(u.Username)
+		}
+		list = append(list, info)
 	}
 
 	data, _ := json.Marshal(list)
@@ -722,6 +731,17 @@ func (s *SharkfinMCP) handleListRoles(_ context.Context, _ mcp.CallToolRequest) 
 
 	data, _ := json.Marshal(list)
 	return mcp.NewToolResultText(string(data)), nil
+}
+
+func (s *SharkfinMCP) handleSetState(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	state := req.GetString("state", "")
+	if state != "active" && state != "idle" {
+		return mcp.NewToolResultError("state must be 'active' or 'idle'"), nil
+	}
+	username := usernameFromCtx(ctx)
+	s.hub.SetState(username, state)
+	s.hub.BroadcastPresence(username, true, state)
+	return mcp.NewToolResultText(fmt.Sprintf("state set to %s", state)), nil
 }
 
 // broadcastCapabilities sends a capabilities event to all WS clients with the given role.

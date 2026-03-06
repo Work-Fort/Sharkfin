@@ -169,3 +169,10 @@ func newListRolesTool() mcp.Tool {
 		mcp.WithDescription("List all roles and their permissions."),
 	)
 }
+
+func newSetStateTool() mcp.Tool {
+	return mcp.NewTool("set_state",
+		mcp.WithDescription("Set your active/idle state."),
+		mcp.WithString("state", mcp.Required(), mcp.Description("State: active or idle")),
+	)
+}

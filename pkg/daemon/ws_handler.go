@@ -62,7 +62,8 @@ func (h *WSHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	defer func() {
 		if identified {
 			h.hub.Unregister(client)
-			h.hub.BroadcastPresence(username, false)
+			h.hub.ClearState(username)
+			h.hub.BroadcastPresence(username, false, "")
 			log.Info("ws: disconnect", "user", username, "clients", h.hub.ClientCount())
 		}
 		h.sessions.DisconnectPresence(token)
@@ -146,7 +147,8 @@ func (h *WSHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				notificationsOnly = d.NotificationsOnly
 				client = &WSClient{username: username, userID: userID, send: sendCh, hub: h.hub}
 				h.hub.Register(client)
-				h.hub.BroadcastPresence(username, true)
+				h.hub.SetState(username, "idle")
+				h.hub.BroadcastPresence(username, true, "idle")
 				sendReply(sendCh, req.Ref, true, nil)
 				log.Info("ws: connect", "user", username, "notifications_only", notificationsOnly, "clients", h.hub.ClientCount(), "elapsed", time.Since(t0))
 
@@ -176,7 +178,8 @@ func (h *WSHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				notificationsOnly = d.NotificationsOnly
 				client = &WSClient{username: username, userID: userID, send: sendCh, hub: h.hub}
 				h.hub.Register(client)
-				h.hub.BroadcastPresence(username, true)
+				h.hub.SetState(username, "idle")
+				h.hub.BroadcastPresence(username, true, "idle")
 				sendReply(sendCh, req.Ref, true, nil)
 				log.Info("ws: connect", "user", username, "notifications_only", notificationsOnly, "clients", h.hub.ClientCount())
 
@@ -205,6 +208,18 @@ func (h *WSHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				break
 			}
 			sendReply(sendCh, req.Ref, true, map[string]interface{}{"permissions": perms})
+		case "set_state":
+			var d struct {
+				State string `json:"state"`
+			}
+			json.Unmarshal(req.D, &d)
+			if d.State != "active" && d.State != "idle" {
+				sendError(sendCh, req.Ref, "state must be 'active' or 'idle'")
+				break
+			}
+			h.hub.SetState(username, d.State)
+			h.hub.BroadcastPresence(username, true, d.State)
+			sendReply(sendCh, req.Ref, true, nil)
 
 		// All remaining actions are blocked in notifications_only mode
 		case "user_list":
@@ -321,13 +336,21 @@ func (h *WSHandler) handleWSUserList(sendCh chan<- []byte, ref string) {
 	type userInfo struct {
 		Username string `json:"username"`
 		Online   bool   `json:"online"`
+		Type     string `json:"type"`
+		State    string `json:"state,omitempty"`
 	}
 	var list []userInfo
 	for _, u := range users {
-		list = append(list, userInfo{
+		online := h.sessions.IsUserOnline(u.Username)
+		info := userInfo{
 			Username: u.Username,
-			Online:   h.sessions.IsUserOnline(u.Username),
-		})
+			Online:   online,
+			Type:     u.Type,
+		}
+		if online {
+			info.State = h.hub.GetState(u.Username)
+		}
+		list = append(list, info)
 	}
 	sendReply(sendCh, ref, true, map[string]interface{}{"users": list})
 }

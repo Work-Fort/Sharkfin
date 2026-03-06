@@ -15,6 +15,7 @@ import (
 type Hub struct {
 	mu      sync.RWMutex
 	clients map[string]*WSClient // username → client
+	states  map[string]string    // username → "active" or "idle"
 }
 
 // WSClient represents a connected WebSocket client.
@@ -29,6 +30,7 @@ type WSClient struct {
 func NewHub() *Hub {
 	return &Hub{
 		clients: make(map[string]*WSClient),
+		states:  make(map[string]string),
 	}
 }
 
@@ -54,6 +56,27 @@ func (h *Hub) Unregister(client *WSClient) {
 		delete(h.clients, client.username)
 		close(client.send)
 	}
+}
+
+// SetState sets the active/idle state for a user.
+func (h *Hub) SetState(username, state string) {
+	h.mu.Lock()
+	h.states[username] = state
+	h.mu.Unlock()
+}
+
+// GetState returns the active/idle state for a user.
+func (h *Hub) GetState(username string) string {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	return h.states[username]
+}
+
+// ClearState removes the state entry for a user.
+func (h *Hub) ClearState(username string) {
+	h.mu.Lock()
+	delete(h.states, username)
+	h.mu.Unlock()
 }
 
 // BroadcastMessage sends a message.new event to all connected members of a channel.
@@ -183,14 +206,17 @@ func (h *Hub) BroadcastToRole(role string, data []byte, database *db.DB) {
 }
 
 // BroadcastPresence sends a presence event to all connected clients.
-func (h *Hub) BroadcastPresence(username string, online bool) {
-	event := wsEnvelope{
-		Type: "presence",
-		D: map[string]interface{}{
-			"username": username,
-			"online":   online,
-		},
+func (h *Hub) BroadcastPresence(username string, online bool, state string) {
+	d := map[string]interface{}{
+		"username": username,
 	}
+	if online {
+		d["status"] = "online"
+		d["state"] = state
+	} else {
+		d["status"] = "offline"
+	}
+	event := wsEnvelope{Type: "presence", D: d}
 	data, _ := json.Marshal(event)
 
 	h.mu.RLock()
