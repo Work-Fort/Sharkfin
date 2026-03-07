@@ -3636,21 +3636,10 @@ func TestWebhookNotFiredWithoutMention(t *testing.T) {
 // --- Backup tests ---
 
 func TestBackupExportImport(t *testing.T) {
-	bucket := os.Getenv("SHARKFIN_BACKUP_TEST_BUCKET")
-	if bucket == "" {
-		t.Skip("SHARKFIN_BACKUP_TEST_BUCKET not set")
-	}
 	if os.Getenv("SHARKFIN_DB") != "" {
 		t.Skip("backup e2e requires SQLite (SHARKFIN_DB must not be set)")
 	}
-	region := os.Getenv("SHARKFIN_BACKUP_TEST_REGION")
-	endpoint := os.Getenv("SHARKFIN_BACKUP_TEST_ENDPOINT")
-	accessKey := os.Getenv("SHARKFIN_BACKUP_TEST_ACCESS_KEY")
-	secretKey := os.Getenv("SHARKFIN_BACKUP_TEST_SECRET_KEY")
-	passphrase := os.Getenv("SHARKFIN_BACKUP_TEST_PASSPHRASE")
-	if passphrase == "" {
-		passphrase = "test-passphrase"
-	}
+	passphrase := "test-passphrase"
 
 	// --- Daemon A: populate data ---
 	addrA, err := harness.FreePort()
@@ -3701,64 +3690,33 @@ func TestBackupExportImport(t *testing.T) {
 	bob.DisconnectPresence()
 	dA.StopNoClean(t)
 
-	// --- Export ---
-	s3Flags := []string{
-		"--s3-bucket", bucket,
-		"--s3-region", region,
-		"--s3-access-key", accessKey,
-		"--s3-secret-key", secretKey,
-	}
-	if endpoint != "" {
-		s3Flags = append(s3Flags, "--s3-endpoint", endpoint)
-	}
-
-	exportArgs := append([]string{
+	// --- Export to local file ---
+	backupFile := filepath.Join(t.TempDir(), "backup.tar.xz.age")
+	exportOut, err := exec.Command(sharkfinBin,
 		"backup", "export",
 		"--db", dA.DBPath(),
 		"--passphrase", passphrase,
-	}, s3Flags...)
-
-	exportOut, err := exec.Command(sharkfinBin, exportArgs...).CombinedOutput()
+		"--local", backupFile,
+	).CombinedOutput()
 	if err != nil {
 		t.Fatalf("export: %v\n%s", err, exportOut)
 	}
+	t.Logf("export output: %s", exportOut)
 
-	// Parse key from "Uploaded: sharkfin-backup-...tar.xz.age (123 B)"
-	var key string
-	for _, line := range strings.Split(string(exportOut), "\n") {
-		if strings.HasPrefix(line, "Uploaded: ") {
-			fields := strings.Fields(line)
-			if len(fields) >= 2 {
-				key = fields[1]
-			}
-		}
-	}
-	if key == "" {
-		t.Fatalf("could not parse key from export output: %s", exportOut)
-	}
-	t.Logf("exported key: %s", key)
-
-	// --- Import into fresh DB, start daemon B ---
-	tmpDir, err := os.MkdirTemp("", "sharkfin-backup-import-*")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer os.RemoveAll(tmpDir)
-	dbPathB := filepath.Join(tmpDir, "imported.db")
-
-	importArgs := append([]string{
-		"backup", "import", key,
+	// --- Import from local file into fresh DB ---
+	dbPathB := filepath.Join(t.TempDir(), "imported.db")
+	importOut, err := exec.Command(sharkfinBin,
+		"backup", "import",
+		"--local", backupFile,
 		"--db", dbPathB,
 		"--passphrase", passphrase,
-	}, s3Flags...)
-
-	importOut, err := exec.Command(sharkfinBin, importArgs...).CombinedOutput()
+	).CombinedOutput()
 	if err != nil {
 		t.Fatalf("import: %v\n%s", err, importOut)
 	}
 	t.Logf("import output: %s", importOut)
 
-	// Start daemon B using the imported DB
+	// --- Start daemon B using the imported DB ---
 	addrB, err := harness.FreePort()
 	if err != nil {
 		t.Fatal(err)

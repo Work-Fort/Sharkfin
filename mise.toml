@@ -38,7 +38,7 @@ run = "rm -rf $BUILD_DIR"
 description = "Run end-to-end tests"
 depends = ["build"]
 dir = "tests/e2e"
-run = "go test -v -race -timeout 120s"
+run = "go test -v -race -timeout 180s"
 
 [tasks."install:local"]
 description = "Install sharkfin binary and systemd user service"

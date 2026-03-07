@@ -39,8 +39,8 @@ func getPassphrase(cmd *cobra.Command) (string, error) {
 	return "", fmt.Errorf("passphrase required: use --passphrase flag or SHARKFIN_BACKUP_PASSPHRASE env var")
 }
 
-func openDSN() string {
-	dsn := viper.GetString("db")
+func openDSN(cmd *cobra.Command) string {
+	dsn, _ := cmd.Flags().GetString("db")
 	if dsn == "" {
 		dsn = filepath.Join(config.GlobalPaths.StateDir, "sharkfin.db")
 	}
@@ -62,7 +62,6 @@ func NewBackupCmd() *cobra.Command {
 	cmd.PersistentFlags().String("s3-access-key", "", "S3 access key")
 	cmd.PersistentFlags().String("s3-secret-key", "", "S3 secret key")
 
-	_ = viper.BindPFlag("db", cmd.PersistentFlags().Lookup("db"))
 	_ = viper.BindPFlag("backup.s3-bucket", cmd.PersistentFlags().Lookup("s3-bucket"))
 	_ = viper.BindPFlag("backup.s3-region", cmd.PersistentFlags().Lookup("s3-region"))
 	_ = viper.BindPFlag("backup.s3-endpoint", cmd.PersistentFlags().Lookup("s3-endpoint"))
@@ -79,22 +78,18 @@ func NewBackupCmd() *cobra.Command {
 }
 
 func newExportCmd() *cobra.Command {
-	return &cobra.Command{
+	cmd := &cobra.Command{
 		Use:   "export",
-		Short: "Export config and database to an encrypted S3 backup",
+		Short: "Export config and database to an encrypted backup",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			localPath, _ := cmd.Flags().GetString("local")
 			passphrase, err := getPassphrase(cmd)
 			if err != nil {
 				return err
 			}
 
-			cfg := s3cfg()
-			if err := cfg.Validate(); err != nil {
-				return err
-			}
-
-			dsn := openDSN()
+			dsn := openDSN(cmd)
 			store, err := infra.Open(dsn)
 			if err != nil {
 				return fmt.Errorf("open store: %w", err)
@@ -129,6 +124,18 @@ func newExportCmd() *cobra.Command {
 				return fmt.Errorf("pack: %w", err)
 			}
 
+			if localPath != "" {
+				if err := os.WriteFile(localPath, packed, 0600); err != nil {
+					return fmt.Errorf("write local file: %w", err)
+				}
+				fmt.Fprintf(cmd.OutOrStdout(), "Exported: %s (%s)\n", localPath, humanSize(int64(len(packed))))
+				return nil
+			}
+
+			cfg := s3cfg()
+			if err := cfg.Validate(); err != nil {
+				return err
+			}
 			key := fmt.Sprintf("sharkfin-backup-%s.tar.xz.age",
 				time.Now().UTC().Format(time.RFC3339))
 			ctx := context.Background()
@@ -140,15 +147,19 @@ func newExportCmd() *cobra.Command {
 			return nil
 		},
 	}
+
+	cmd.Flags().String("local", "", "Write backup to a local file instead of S3")
+
+	return cmd
 }
 
 func newImportCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "import <key>",
+		Use:   "import [key]",
 		Short: "Download and restore an encrypted S3 backup",
-		Args:  cobra.ExactArgs(1),
+		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			key := args[0]
+			localPath, _ := cmd.Flags().GetString("local")
 			passphrase, err := getPassphrase(cmd)
 			if err != nil {
 				return err
@@ -156,15 +167,27 @@ func newImportCmd() *cobra.Command {
 			force, _ := cmd.Flags().GetBool("force")
 			restoreConfig, _ := cmd.Flags().GetBool("restore-config")
 
-			cfg := s3cfg()
-			if err := cfg.Validate(); err != nil {
-				return err
-			}
+			var packed []byte
+			if localPath != "" {
+				packed, err = os.ReadFile(localPath)
+				if err != nil {
+					return fmt.Errorf("read local file: %w", err)
+				}
+			} else {
+				if len(args) == 0 {
+					return fmt.Errorf("S3 key required (or use --local)")
+				}
+				key := args[0]
+				cfg := s3cfg()
+				if err := cfg.Validate(); err != nil {
+					return err
+				}
 
-			ctx := context.Background()
-			packed, err := cfg.Download(ctx, key)
-			if err != nil {
-				return fmt.Errorf("download: %w", err)
+				ctx := context.Background()
+				packed, err = cfg.Download(ctx, key)
+				if err != nil {
+					return fmt.Errorf("download: %w", err)
+				}
 			}
 
 			files, err := bk.Unpack(packed, passphrase)
@@ -181,7 +204,7 @@ func newImportCmd() *cobra.Command {
 				return fmt.Errorf("parse data.json: %w", err)
 			}
 
-			dsn := openDSN()
+			dsn := openDSN(cmd)
 			store, err := infra.Open(dsn)
 			if err != nil {
 				return fmt.Errorf("open store: %w", err)
@@ -213,6 +236,7 @@ func newImportCmd() *cobra.Command {
 		},
 	}
 
+	cmd.Flags().String("local", "", "Read backup from a local file instead of S3")
 	cmd.Flags().Bool("force", false, "Overwrite non-empty database")
 	cmd.Flags().Bool("restore-config", false, "Restore config.yaml from backup")
 
