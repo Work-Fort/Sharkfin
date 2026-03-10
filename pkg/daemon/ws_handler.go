@@ -58,7 +58,7 @@ func (h *WSHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	var userID int64
 	var notificationsOnly bool
 	token := h.sessions.CreateIdentityToken()
-	done, _ := h.sessions.AttachPresence(token)
+	done, _ := h.sessions.AttachPresence(token, nil)
 	defer func() {
 		if identified {
 			h.hub.Unregister(client)

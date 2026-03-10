@@ -39,7 +39,7 @@ func TestAttachPresence(t *testing.T) {
 	sm := newTestSessionManager(t)
 	token := sm.CreateIdentityToken()
 
-	done, err := sm.AttachPresence(token)
+	done, err := sm.AttachPresence(token, nil)
 	if err != nil {
 		t.Fatalf("attach presence: %v", err)
 	}
@@ -50,7 +50,7 @@ func TestAttachPresence(t *testing.T) {
 
 func TestAttachPresenceInvalidToken(t *testing.T) {
 	sm := newTestSessionManager(t)
-	_, err := sm.AttachPresence("bogus-token")
+	_, err := sm.AttachPresence("bogus-token", nil)
 	if err == nil {
 		t.Error("expected error for invalid token")
 	}
@@ -59,7 +59,7 @@ func TestAttachPresenceInvalidToken(t *testing.T) {
 func TestRegisterWithToken(t *testing.T) {
 	sm := newTestSessionManager(t)
 	token := sm.CreateIdentityToken()
-	sm.AttachPresence(token)
+	sm.AttachPresence(token, nil)
 
 	sessionID, err := sm.Register(token, "alice", "")
 	if err != nil {
@@ -86,13 +86,13 @@ func TestIdentifyWithToken(t *testing.T) {
 
 	// First register a user
 	token1 := sm.CreateIdentityToken()
-	sm.AttachPresence(token1)
+	sm.AttachPresence(token1, nil)
 	sm.Register(token1, "bob", "")
 	sm.DisconnectPresence(token1)
 
 	// Now identify as that user from a new session
 	token2 := sm.CreateIdentityToken()
-	sm.AttachPresence(token2)
+	sm.AttachPresence(token2, nil)
 	sessionID, err := sm.Identify(token2, "bob", "")
 	if err != nil {
 		t.Fatalf("identify: %v", err)
@@ -107,12 +107,12 @@ func TestIdentifyAlreadyOnline(t *testing.T) {
 
 	// Register user and stay online
 	token1 := sm.CreateIdentityToken()
-	sm.AttachPresence(token1)
+	sm.AttachPresence(token1, nil)
 	sm.Register(token1, "alice", "")
 
 	// Try to identify as alice from another session
 	token2 := sm.CreateIdentityToken()
-	sm.AttachPresence(token2)
+	sm.AttachPresence(token2, nil)
 	_, err := sm.Identify(token2, "alice", "")
 	if err == nil {
 		t.Error("expected error: user already online")
@@ -122,7 +122,7 @@ func TestIdentifyAlreadyOnline(t *testing.T) {
 func TestRegisterAfterIdentified(t *testing.T) {
 	sm := newTestSessionManager(t)
 	token := sm.CreateIdentityToken()
-	sm.AttachPresence(token)
+	sm.AttachPresence(token, nil)
 	sm.Register(token, "alice", "")
 
 	_, err := sm.Register(token, "bob", "")
@@ -134,7 +134,7 @@ func TestRegisterAfterIdentified(t *testing.T) {
 func TestIdentifyAfterIdentified(t *testing.T) {
 	sm := newTestSessionManager(t)
 	token := sm.CreateIdentityToken()
-	sm.AttachPresence(token)
+	sm.AttachPresence(token, nil)
 	sm.Register(token, "alice", "")
 
 	_, err := sm.Identify(token, "alice", "")
@@ -146,7 +146,7 @@ func TestIdentifyAfterIdentified(t *testing.T) {
 func TestGetSessionByMCPSessionID(t *testing.T) {
 	sm := newTestSessionManager(t)
 	token := sm.CreateIdentityToken()
-	sm.AttachPresence(token)
+	sm.AttachPresence(token, nil)
 	sessionID, _ := sm.Register(token, "alice", "")
 
 	session, err := sm.GetSession(sessionID)
@@ -161,7 +161,7 @@ func TestGetSessionByMCPSessionID(t *testing.T) {
 func TestDisconnectPresenceGoesOffline(t *testing.T) {
 	sm := newTestSessionManager(t)
 	token := sm.CreateIdentityToken()
-	sm.AttachPresence(token)
+	sm.AttachPresence(token, nil)
 	sm.Register(token, "alice", "")
 
 	if !sm.IsUserOnline("alice") {

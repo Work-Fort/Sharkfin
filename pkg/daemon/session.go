@@ -8,6 +8,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/gorilla/websocket"
+
 	"github.com/Work-Fort/sharkfin/pkg/domain"
 )
 
@@ -29,6 +31,8 @@ type IdentityToken struct {
 	PresenceDone chan struct{} // closed when presence should disconnect
 	HasPresence  bool
 	CreatedAt    time.Time
+	presenceConn *websocket.Conn
+	presenceMu   sync.Mutex
 }
 
 // MCPSession links an MCP session ID to a token and user.
@@ -69,7 +73,7 @@ func (sm *SessionManager) CreateIdentityToken() string {
 
 // AttachPresence links a presence connection to a token.
 // Returns a channel that is closed when the presence should disconnect.
-func (sm *SessionManager) AttachPresence(token string) (<-chan struct{}, error) {
+func (sm *SessionManager) AttachPresence(token string, conn *websocket.Conn) (<-chan struct{}, error) {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 
@@ -78,7 +82,47 @@ func (sm *SessionManager) AttachPresence(token string) (<-chan struct{}, error) 
 		return nil, fmt.Errorf("invalid token")
 	}
 	it.HasPresence = true
+	it.presenceConn = conn
 	return it.PresenceDone, nil
+}
+
+// PresenceWrite serializes a write to the token's presence WebSocket connection.
+// All writes to the presence conn (pings, notifications) must go through this
+// or SendNotification to satisfy gorilla/websocket's single-writer constraint.
+func (sm *SessionManager) PresenceWrite(token string, messageType int, data []byte) error {
+	sm.mu.RLock()
+	it, ok := sm.tokens[token]
+	sm.mu.RUnlock()
+	if !ok {
+		return fmt.Errorf("invalid token")
+	}
+	it.presenceMu.Lock()
+	defer it.presenceMu.Unlock()
+	if it.presenceConn == nil {
+		return fmt.Errorf("no presence connection")
+	}
+	it.presenceConn.SetWriteDeadline(time.Now().Add(10 * time.Second))
+	return it.presenceConn.WriteMessage(messageType, data)
+}
+
+// SendNotification sends a JSON notification to a user's presence WebSocket connection.
+func (sm *SessionManager) SendNotification(username string, data []byte) error {
+	sm.mu.RLock()
+	tokenStr, ok := sm.onlineUsers[username]
+	if !ok {
+		sm.mu.RUnlock()
+		return fmt.Errorf("user not online")
+	}
+	it := sm.tokens[tokenStr]
+	sm.mu.RUnlock()
+
+	it.presenceMu.Lock()
+	defer it.presenceMu.Unlock()
+	if it.presenceConn == nil {
+		return fmt.Errorf("no presence connection")
+	}
+	it.presenceConn.SetWriteDeadline(time.Now().Add(10 * time.Second))
+	return it.presenceConn.WriteMessage(websocket.TextMessage, data)
 }
 
 // Register creates a new user and associates the token with them.
@@ -183,6 +227,11 @@ func (sm *SessionManager) DisconnectPresence(token string) {
 	if !ok {
 		return
 	}
+
+	// Nil out presence connection so concurrent SendNotification won't write
+	it.presenceMu.Lock()
+	it.presenceConn = nil
+	it.presenceMu.Unlock()
 
 	// Close the done channel to signal the presence handler
 	select {

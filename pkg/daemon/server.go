@@ -36,6 +36,7 @@ func NewServer(addr string, store domain.Store, pongTimeout time.Duration, webho
 	var closers []interface{ Close() }
 	if bus != nil {
 		closers = append(closers, NewWebhookSubscriber(bus, store))
+		closers = append(closers, NewPresenceNotifier(bus, sm, store))
 	}
 	presenceHandler := NewPresenceHandler(sm, hub, pongTimeout)
 	wsHandler := NewWSHandler(sm, store, hub, pongTimeout)

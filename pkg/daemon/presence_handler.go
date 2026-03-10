@@ -42,13 +42,13 @@ func (h *PresenceHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	token := h.sessions.CreateIdentityToken()
 
-	done, err := h.sessions.AttachPresence(token)
+	done, err := h.sessions.AttachPresence(token, conn)
 	if err != nil {
 		return
 	}
 	defer h.sessions.DisconnectPresence(token)
 
-	if err := conn.WriteMessage(websocket.TextMessage, []byte(token)); err != nil {
+	if err := h.sessions.PresenceWrite(token, websocket.TextMessage, []byte(token)); err != nil {
 		return
 	}
 
@@ -78,8 +78,7 @@ func (h *PresenceHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	for {
 		select {
 		case <-ticker.C:
-			conn.SetWriteDeadline(time.Now().Add(h.pingInterval))
-			if err := conn.WriteMessage(websocket.PingMessage, nil); err != nil {
+			if err := h.sessions.PresenceWrite(token, websocket.PingMessage, nil); err != nil {
 				return
 			}
 		case <-readDone:
