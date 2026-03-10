@@ -57,3 +57,21 @@ type Store interface {
 	SettingsStore
 	Close() error
 }
+
+// Event is a typed message published to the event bus.
+type Event struct {
+	Type    string
+	Payload any
+}
+
+// Subscription receives events from the bus.
+type Subscription interface {
+	Events() <-chan Event
+	Close()
+}
+
+// EventBus is an in-process pub/sub system for domain events.
+type EventBus interface {
+	Publish(event Event)
+	Subscribe(eventTypes ...string) Subscription
+}

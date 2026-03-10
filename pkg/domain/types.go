@@ -64,3 +64,20 @@ type Role struct {
 	Name    string
 	BuiltIn bool
 }
+
+// Event type constants.
+const (
+	EventMessageNew     = "message.new"
+	EventPresenceUpdate = "presence.update"
+)
+
+// MessageEvent is the payload for EventMessageNew.
+type MessageEvent struct {
+	ChannelName string
+	ChannelType string // "channel" or "dm"
+	From        string
+	MessageID   int64
+	SentAt      time.Time
+	Mentions    []string
+	ThreadID    *int64
+}
