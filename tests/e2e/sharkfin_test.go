@@ -3757,3 +3757,235 @@ func TestBackupExportImport(t *testing.T) {
 		t.Errorf("expected 'hello from bob' in history, got: %s", hr.Text)
 	}
 }
+
+// --- Presence Notification tests ---
+
+// setupPresenceUser registers (or identifies) a user who has both:
+//   - a PresenceClient (WebSocket connection to /presence, for receiving notifications)
+//   - a regular MCP Client (HTTP, for calling tools like send_message)
+//
+// The MCP client is registered/identified using the token from the PresenceClient,
+// so the daemon links the presence connection to the user identity.
+func setupPresenceUser(t *testing.T, addr, username string, register bool) (*harness.PresenceClient, *harness.Client) {
+	t.Helper()
+
+	pc, err := harness.NewPresenceClient(addr)
+	if err != nil {
+		t.Fatalf("presence client for %s: %v", username, err)
+	}
+
+	mc := harness.NewClient(addr)
+	if err := mc.Initialize(); err != nil {
+		pc.Close()
+		t.Fatalf("initialize MCP for %s: %v", username, err)
+	}
+
+	var toolErr error
+	if register {
+		_, toolErr = mc.ToolCall("register", map[string]any{
+			"token": pc.Token(), "username": username, "password": "",
+		})
+	} else {
+		_, toolErr = mc.ToolCall("identify", map[string]any{
+			"token": pc.Token(), "username": username, "password": "",
+		})
+	}
+	if toolErr != nil {
+		pc.Close()
+		t.Fatalf("%s register/identify: %v", username, toolErr)
+	}
+
+	return pc, mc
+}
+
+func TestPresenceNotificationOnMention(t *testing.T) {
+	addr, err := harness.FreePort()
+	if err != nil {
+		t.Fatal(err)
+	}
+	d, err := harness.StartDaemon(sharkfinBin, addr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.StopFatal(t)
+
+	// Alice: regular MCP client (sender) — she doesn't need a PresenceClient
+	alice := harness.NewClient(addr)
+	if err := alice.RegisterFlow("alice"); err != nil {
+		t.Fatal(err)
+	}
+	defer alice.DisconnectPresence()
+
+	// Bob: needs both presence WS (for notifications) and MCP client (for tools)
+	bobPC, bobMCP := setupPresenceUser(t, addr, "bob", true)
+	defer bobPC.Close()
+	_ = bobMCP // bob's MCP client; not used for sending in this test
+
+	// Grant alice admin so she can create channels
+	if err := d.GrantAdmin(sharkfinBin, "alice"); err != nil {
+		t.Fatal(err)
+	}
+
+	// Alice creates a public channel and invites bob
+	r, err := alice.ToolCall("channel_create", map[string]any{
+		"name": "general", "public": true, "members": []string{"bob"},
+	})
+	if err != nil || r.Error != nil {
+		t.Fatalf("channel_create: err=%v rpc=%+v", err, r.Error)
+	}
+
+	// Alice sends a message mentioning bob
+	r, err = alice.ToolCall("send_message", map[string]any{
+		"channel": "general", "message": "hey @bob check this out",
+	})
+	if err != nil || r.Error != nil {
+		t.Fatalf("send_message: err=%v rpc=%+v", err, r.Error)
+	}
+
+	// Bob should receive a presence notification
+	notif, err := bobPC.ReadNotification(5 * time.Second)
+	if err != nil {
+		t.Fatalf("bob notification: %v", err)
+	}
+
+	if notif.Type != "message.new" {
+		t.Errorf("notification type = %q, want %q", notif.Type, "message.new")
+	}
+
+	var payload struct {
+		Channel     string `json:"channel"`
+		ChannelType string `json:"channel_type"`
+		From        string `json:"from"`
+		MessageID   int64  `json:"message_id"`
+	}
+	if err := json.Unmarshal(notif.D, &payload); err != nil {
+		t.Fatalf("unmarshal notification data: %v (raw: %s)", err, string(notif.D))
+	}
+	if payload.Channel != "general" {
+		t.Errorf("channel = %q, want %q", payload.Channel, "general")
+	}
+	if payload.ChannelType != "channel" {
+		t.Errorf("channel_type = %q, want %q", payload.ChannelType, "channel")
+	}
+	if payload.From != "alice" {
+		t.Errorf("from = %q, want %q", payload.From, "alice")
+	}
+	if payload.MessageID == 0 {
+		t.Error("message_id should be non-zero")
+	}
+}
+
+func TestPresenceNotificationOnDM(t *testing.T) {
+	addr, err := harness.FreePort()
+	if err != nil {
+		t.Fatal(err)
+	}
+	d, err := harness.StartDaemon(sharkfinBin, addr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.StopFatal(t)
+
+	// Alice: regular MCP client (sender)
+	alice := harness.NewClient(addr)
+	if err := alice.RegisterFlow("alice"); err != nil {
+		t.Fatal(err)
+	}
+	defer alice.DisconnectPresence()
+
+	// Bob: presence WS + MCP
+	bobPC, _ := setupPresenceUser(t, addr, "bob", true)
+	defer bobPC.Close()
+
+	// Alice opens a DM with bob
+	r, err := alice.ToolCall("dm_open", map[string]any{"username": "bob"})
+	if err != nil || r.Error != nil {
+		t.Fatalf("dm_open: err=%v rpc=%+v", err, r.Error)
+	}
+
+	// Alice sends a DM (no explicit mention needed for DM notifications)
+	r, err = alice.ToolCall("send_message", map[string]any{
+		"channel": "dm-alice-bob", "message": "hey bob, private message",
+	})
+	if err != nil || r.Error != nil {
+		t.Fatalf("send dm: err=%v rpc=%+v", err, r.Error)
+	}
+
+	// Bob should receive a presence notification for the DM
+	notif, err := bobPC.ReadNotification(5 * time.Second)
+	if err != nil {
+		t.Fatalf("bob DM notification: %v", err)
+	}
+
+	if notif.Type != "message.new" {
+		t.Errorf("notification type = %q, want %q", notif.Type, "message.new")
+	}
+
+	var payload struct {
+		Channel     string `json:"channel"`
+		ChannelType string `json:"channel_type"`
+		From        string `json:"from"`
+		MessageID   int64  `json:"message_id"`
+	}
+	if err := json.Unmarshal(notif.D, &payload); err != nil {
+		t.Fatalf("unmarshal DM notification: %v (raw: %s)", err, string(notif.D))
+	}
+	if payload.ChannelType != "dm" {
+		t.Errorf("channel_type = %q, want %q", payload.ChannelType, "dm")
+	}
+	if payload.From != "alice" {
+		t.Errorf("from = %q, want %q", payload.From, "alice")
+	}
+	if payload.MessageID == 0 {
+		t.Error("message_id should be non-zero")
+	}
+}
+
+func TestPresenceNoNotificationWithoutMention(t *testing.T) {
+	addr, err := harness.FreePort()
+	if err != nil {
+		t.Fatal(err)
+	}
+	d, err := harness.StartDaemon(sharkfinBin, addr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.StopFatal(t)
+
+	// Alice: sender
+	alice := harness.NewClient(addr)
+	if err := alice.RegisterFlow("alice"); err != nil {
+		t.Fatal(err)
+	}
+	defer alice.DisconnectPresence()
+
+	// Carol: should NOT receive notifications (not mentioned)
+	carolPC, _ := setupPresenceUser(t, addr, "carol", true)
+	defer carolPC.Close()
+
+	// Grant alice admin so she can create channels
+	if err := d.GrantAdmin(sharkfinBin, "alice"); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create channel with both users
+	r, err := alice.ToolCall("channel_create", map[string]any{
+		"name": "general", "public": true, "members": []string{"carol"},
+	})
+	if err != nil || r.Error != nil {
+		t.Fatalf("channel_create: err=%v rpc=%+v", err, r.Error)
+	}
+
+	// Alice sends a message WITHOUT mentioning anyone
+	r, err = alice.ToolCall("send_message", map[string]any{
+		"channel": "general", "message": "hello everyone, no mentions here",
+	})
+	if err != nil || r.Error != nil {
+		t.Fatalf("send_message: err=%v rpc=%+v", err, r.Error)
+	}
+
+	// Carol should NOT receive a notification
+	if err := carolPC.NoNotification(1 * time.Second); err != nil {
+		t.Errorf("carol should not get notified: %v", err)
+	}
+}

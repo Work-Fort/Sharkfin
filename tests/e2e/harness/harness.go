@@ -650,6 +650,101 @@ func (c *Client) SetRole(username, role string) (ToolResult, error) {
 	return c.ToolCall("set_role", map[string]any{"username": username, "role": role})
 }
 
+// --- PresenceClient ---
+
+// PresenceNotification is the JSON envelope sent over the presence WebSocket.
+type PresenceNotification struct {
+	Type string          `json:"type"`
+	D    json.RawMessage `json:"d"`
+}
+
+// PresenceClient connects to /presence and buffers incoming notifications.
+// Unlike Client.ConnectPresence(), notifications are not drained — they
+// accumulate so that tests can read and assert on them.
+type PresenceClient struct {
+	conn    *websocket.Conn
+	token   string
+	notifCh chan PresenceNotification
+	done    chan struct{}
+}
+
+// NewPresenceClient dials the /presence WebSocket, reads the identity token,
+// and starts a goroutine that buffers incoming notifications.
+func NewPresenceClient(daemonAddr string) (*PresenceClient, error) {
+	wsURL := fmt.Sprintf("ws://%s/presence", daemonAddr)
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("dial presence: %w", err)
+	}
+
+	// First message is the identity token.
+	conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	_, msg, err := conn.ReadMessage()
+	if err != nil {
+		conn.Close()
+		return nil, fmt.Errorf("read token: %w", err)
+	}
+
+	pc := &PresenceClient{
+		conn:    conn,
+		token:   string(msg),
+		notifCh: make(chan PresenceNotification, 64),
+		done:    make(chan struct{}),
+	}
+
+	go pc.readLoop()
+	return pc, nil
+}
+
+func (pc *PresenceClient) readLoop() {
+	defer close(pc.done)
+	for {
+		pc.conn.SetReadDeadline(time.Time{}) // no deadline — block until message or close
+		_, msg, err := pc.conn.ReadMessage()
+		if err != nil {
+			return
+		}
+		var notif PresenceNotification
+		if err := json.Unmarshal(msg, &notif); err != nil {
+			continue
+		}
+		pc.notifCh <- notif
+	}
+}
+
+// Token returns the identity token received on connect.
+func (pc *PresenceClient) Token() string { return pc.token }
+
+// ReadNotification reads a single notification with a timeout.
+func (pc *PresenceClient) ReadNotification(timeout time.Duration) (PresenceNotification, error) {
+	select {
+	case n := <-pc.notifCh:
+		return n, nil
+	case <-time.After(timeout):
+		return PresenceNotification{}, fmt.Errorf("timeout waiting for presence notification")
+	}
+}
+
+// NoNotification asserts that no notification arrives within the given duration.
+// Returns nil if no notification was received (the expected case), or an error
+// containing the unexpected notification.
+func (pc *PresenceClient) NoNotification(wait time.Duration) error {
+	select {
+	case n := <-pc.notifCh:
+		return fmt.Errorf("unexpected notification: type=%s d=%s", n.Type, string(n.D))
+	case <-time.After(wait):
+		return nil
+	}
+}
+
+// Close cleanly closes the presence WebSocket connection.
+func (pc *PresenceClient) Close() {
+	pc.conn.WriteMessage(websocket.CloseMessage,
+		websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""))
+	pc.conn.Close()
+	<-pc.done
+}
+
 // --- Postgres ---
 
 // resetPostgres drops and recreates the public schema so each test
