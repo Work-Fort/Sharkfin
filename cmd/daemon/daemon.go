@@ -16,6 +16,7 @@ import (
 
 	"github.com/Work-Fort/sharkfin/pkg/config"
 	pkgdaemon "github.com/Work-Fort/sharkfin/pkg/daemon"
+	"github.com/Work-Fort/sharkfin/pkg/domain"
 	"github.com/Work-Fort/sharkfin/pkg/infra"
 )
 
@@ -45,7 +46,8 @@ func NewDaemonCmd() *cobra.Command {
 			}
 
 			webhookURL := viper.GetString("webhook-url")
-			srv, err := pkgdaemon.NewServer(addr, store, pongTimeout, webhookURL)
+			bus := domain.NewEventBus()
+			srv, err := pkgdaemon.NewServer(addr, store, pongTimeout, webhookURL, bus)
 			if err != nil {
 				return fmt.Errorf("create server: %w", err)
 			}

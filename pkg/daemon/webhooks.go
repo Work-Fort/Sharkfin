@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"github.com/charmbracelet/log"
+
+	"github.com/Work-Fort/sharkfin/pkg/domain"
 )
 
 // WebhookPayload is the JSON body POSTed to the webhook URL.
@@ -63,4 +65,78 @@ func fireWebhooks(webhookURL string, evt WebhookEvent) {
 			}
 		}()
 	}
+}
+
+// computeRecipients returns the list of users who should be notified:
+// mentioned users + DM members, minus the sender.
+func computeRecipients(msg domain.MessageEvent, store domain.Store) []string {
+	seen := make(map[string]bool)
+	var recipients []string
+	for _, m := range msg.Mentions {
+		if m != msg.From && !seen[m] {
+			seen[m] = true
+			recipients = append(recipients, m)
+		}
+	}
+	if msg.ChannelType == "dm" {
+		ch, err := store.GetChannelByName(msg.ChannelName)
+		if err == nil {
+			if members, err := store.ChannelMemberUsernames(ch.ID); err == nil {
+				for _, m := range members {
+					if m != msg.From && !seen[m] {
+						seen[m] = true
+						recipients = append(recipients, m)
+					}
+				}
+			}
+		}
+	}
+	return recipients
+}
+
+// WebhookSubscriber listens for message events and fires webhooks.
+type WebhookSubscriber struct {
+	store domain.Store
+	sub   domain.Subscription
+}
+
+// NewWebhookSubscriber creates a subscriber that fires webhooks on new messages.
+func NewWebhookSubscriber(bus domain.EventBus, store domain.Store) *WebhookSubscriber {
+	ws := &WebhookSubscriber{
+		store: store,
+		sub:   bus.Subscribe(domain.EventMessageNew),
+	}
+	go ws.run()
+	return ws
+}
+
+func (ws *WebhookSubscriber) run() {
+	for evt := range ws.sub.Events() {
+		msg := evt.Payload.(domain.MessageEvent)
+		ws.handleMessage(msg)
+	}
+}
+
+func (ws *WebhookSubscriber) handleMessage(msg domain.MessageEvent) {
+	webhookURL, err := ws.store.GetSetting("webhook_url")
+	if err != nil || webhookURL == "" {
+		return
+	}
+
+	recipients := computeRecipients(msg, ws.store)
+	if len(recipients) > 0 {
+		fireWebhooks(webhookURL, WebhookEvent{
+			ChannelName: msg.ChannelName,
+			ChannelType: msg.ChannelType,
+			From:        msg.From,
+			MessageID:   msg.MessageID,
+			SentAt:      msg.SentAt,
+			Recipients:  recipients,
+		})
+	}
+}
+
+// Close stops the webhook subscriber.
+func (ws *WebhookSubscriber) Close() {
+	ws.sub.Close()
 }

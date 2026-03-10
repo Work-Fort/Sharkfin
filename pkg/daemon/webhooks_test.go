@@ -8,7 +8,22 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	"github.com/Work-Fort/sharkfin/pkg/domain"
+	"github.com/Work-Fort/sharkfin/pkg/infra/sqlite"
 )
+
+// testStore creates an in-memory SQLite store for tests.
+func testStore(t *testing.T) domain.Store {
+	t.Helper()
+	store, err := sqlite.Open(":memory:")
+	require.NoError(t, err)
+	t.Cleanup(func() { store.Close() })
+	return store
+}
 
 func TestFireWebhooks_SendsPayloadPerRecipient(t *testing.T) {
 	var mu sync.Mutex
@@ -118,4 +133,109 @@ func TestFireWebhooks_ServerDown(t *testing.T) {
 	})
 
 	time.Sleep(200 * time.Millisecond)
+}
+
+func TestWebhookSubscriberSendsOnMention(t *testing.T) {
+	var received []WebhookPayload
+	var mu sync.Mutex
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var p WebhookPayload
+		json.NewDecoder(r.Body).Decode(&p)
+		mu.Lock()
+		received = append(received, p)
+		mu.Unlock()
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer ts.Close()
+
+	store := testStore(t)
+	store.SetSetting("webhook_url", ts.URL)
+
+	bus := domain.NewEventBus()
+	sub := NewWebhookSubscriber(bus, store)
+	defer sub.Close()
+
+	bus.Publish(domain.Event{
+		Type: domain.EventMessageNew,
+		Payload: domain.MessageEvent{
+			ChannelName: "general",
+			ChannelType: "channel",
+			From:        "alice",
+			MessageID:   1,
+			SentAt:      time.Now(),
+			Mentions:    []string{"bob"},
+		},
+	})
+
+	require.Eventually(t, func() bool {
+		mu.Lock()
+		defer mu.Unlock()
+		return len(received) == 1
+	}, 2*time.Second, 50*time.Millisecond)
+
+	mu.Lock()
+	defer mu.Unlock()
+	assert.Equal(t, "general", received[0].Channel)
+	assert.Equal(t, "bob", received[0].Recipient)
+	assert.Equal(t, "alice", received[0].From)
+}
+
+func TestWebhookSubscriberNoWebhookURL(t *testing.T) {
+	store := testStore(t)
+	// No webhook_url set
+
+	bus := domain.NewEventBus()
+	sub := NewWebhookSubscriber(bus, store)
+	defer sub.Close()
+
+	bus.Publish(domain.Event{
+		Type: domain.EventMessageNew,
+		Payload: domain.MessageEvent{
+			From:     "alice",
+			Mentions: []string{"bob"},
+		},
+	})
+
+	// Give it time to process — should not panic
+	time.Sleep(100 * time.Millisecond)
+}
+
+func TestWebhookSubscriberExcludesSender(t *testing.T) {
+	var received []WebhookPayload
+	var mu sync.Mutex
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var p WebhookPayload
+		json.NewDecoder(r.Body).Decode(&p)
+		mu.Lock()
+		received = append(received, p)
+		mu.Unlock()
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer ts.Close()
+
+	store := testStore(t)
+	store.SetSetting("webhook_url", ts.URL)
+
+	bus := domain.NewEventBus()
+	sub := NewWebhookSubscriber(bus, store)
+	defer sub.Close()
+
+	// Alice mentions herself — should not generate a webhook
+	bus.Publish(domain.Event{
+		Type: domain.EventMessageNew,
+		Payload: domain.MessageEvent{
+			ChannelName: "general",
+			ChannelType: "channel",
+			From:        "alice",
+			MessageID:   1,
+			SentAt:      time.Now(),
+			Mentions:    []string{"alice"},
+		},
+	})
+
+	time.Sleep(200 * time.Millisecond)
+
+	mu.Lock()
+	defer mu.Unlock()
+	assert.Empty(t, received, "sender should not receive webhook for self-mention")
 }

@@ -16,6 +16,7 @@ type Hub struct {
 	mu      sync.RWMutex
 	clients map[string]*WSClient // username → client
 	states  map[string]string    // username → "active" or "idle"
+	bus     domain.EventBus
 }
 
 // WSClient represents a connected WebSocket client.
@@ -27,10 +28,11 @@ type WSClient struct {
 }
 
 // NewHub creates a new hub.
-func NewHub() *Hub {
+func NewHub(bus domain.EventBus) *Hub {
 	return &Hub{
 		clients: make(map[string]*WSClient),
 		states:  make(map[string]string),
+		bus:     bus,
 	}
 }
 
@@ -127,41 +129,20 @@ func (h *Hub) BroadcastMessage(channelID int64, channelName string, channelType 
 		}
 	}
 
-	// Fire webhooks for mentions and DM recipients (non-blocking).
-	if webhookURL, err := store.GetSetting("webhook_url"); err == nil && webhookURL != "" {
-		seen := make(map[string]bool)
-		var recipients []string
-
-		// Add mentioned users (excluding sender).
-		for _, m := range mentions {
-			if m != msg.From && !seen[m] {
-				seen[m] = true
-				recipients = append(recipients, m)
-			}
-		}
-
-		// For DMs, look up channel members and add non-sender participants.
-		if channelType == "dm" {
-			if members, err := store.ChannelMemberUsernames(channelID); err == nil {
-				for _, m := range members {
-					if m != msg.From && !seen[m] {
-						seen[m] = true
-						recipients = append(recipients, m)
-					}
-				}
-			}
-		}
-
-		if len(recipients) > 0 {
-			fireWebhooks(webhookURL, WebhookEvent{
+	// Publish event for subscribers (webhooks, presence notifications, etc.).
+	if h.bus != nil {
+		h.bus.Publish(domain.Event{
+			Type: domain.EventMessageNew,
+			Payload: domain.MessageEvent{
 				ChannelName: channelName,
 				ChannelType: channelType,
 				From:        msg.From,
 				MessageID:   msg.ID,
 				SentAt:      msg.CreatedAt,
-				Recipients:  recipients,
-			})
-		}
+				Mentions:    mentions,
+				ThreadID:    threadID,
+			},
+		})
 	}
 
 	// Phase 3: send under RLock so we never race with Unregister closing

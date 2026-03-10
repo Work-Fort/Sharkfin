@@ -21,17 +21,22 @@ type Server struct {
 	store      domain.Store
 	sessions   *SessionManager
 	httpServer *http.Server
+	closers    []interface{ Close() }
 }
 
 // NewServer creates a new sharkfind server.
-func NewServer(addr string, store domain.Store, pongTimeout time.Duration, webhookURL string) (*Server, error) {
+func NewServer(addr string, store domain.Store, pongTimeout time.Duration, webhookURL string, bus domain.EventBus) (*Server, error) {
 	// Set webhook_url if provided via flag (always overwrite).
 	if webhookURL != "" {
 		store.SetSetting("webhook_url", webhookURL)
 	}
 
 	sm := NewSessionManager(store)
-	hub := NewHub()
+	hub := NewHub(bus)
+	var closers []interface{ Close() }
+	if bus != nil {
+		closers = append(closers, NewWebhookSubscriber(bus, store))
+	}
 	presenceHandler := NewPresenceHandler(sm, hub, pongTimeout)
 	wsHandler := NewWSHandler(sm, store, hub, pongTimeout)
 
@@ -49,6 +54,7 @@ func NewServer(addr string, store domain.Store, pongTimeout time.Duration, webho
 		addr:     addr,
 		store:    store,
 		sessions: sm,
+		closers:  closers,
 		httpServer: &http.Server{
 			Addr:    addr,
 			Handler: mux,
@@ -73,6 +79,9 @@ func (s *Server) Start() error {
 // Shutdown gracefully stops the server.
 func (s *Server) Shutdown(ctx context.Context) error {
 	log.Info("shutting down sharkfind")
+	for _, c := range s.closers {
+		c.Close()
+	}
 	if err := s.httpServer.Shutdown(ctx); err != nil {
 		return err
 	}
