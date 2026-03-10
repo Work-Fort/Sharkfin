@@ -485,7 +485,7 @@ func TestToolsList(t *testing.T) {
 		"channel_create", "channel_invite", "channel_join", "send_message", "unread_messages",
 		"unread_counts", "mark_read", "history", "dm_list", "dm_open",
 		"capabilities", "set_state", "set_role", "create_role", "delete_role",
-		"grant_permission", "revoke_permission", "list_roles",
+		"grant_permission", "revoke_permission", "list_roles", "wait_for_messages",
 	}
 	if len(listResult.Tools) != len(expected) {
 		names := make([]string, len(listResult.Tools))

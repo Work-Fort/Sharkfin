@@ -13,6 +13,7 @@ import (
 	"os/signal"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/gorilla/websocket"
 	"github.com/spf13/cobra"
@@ -54,11 +55,12 @@ func NewMCPBridgeCmd() *cobra.Command {
 }
 
 type bridge struct {
-	client    *http.Client
-	mcpURL    string
-	wsURL     string
-	sessionID string
-	token     string
+	client        *http.Client
+	mcpURL        string
+	wsURL         string
+	sessionID     string
+	token         string
+	notifications chan json.RawMessage
 }
 
 func (b *bridge) startPresence(ctx context.Context) error {
@@ -83,11 +85,21 @@ func (b *bridge) startPresence(ctx context.Context) error {
 		conn.Close()
 	}()
 
-	// Read loop: processes server pings (gorilla auto-responds with pong)
+	b.notifications = make(chan json.RawMessage, 64)
+
+	// Read loop: processes server pings and feeds notifications into the channel
 	go func() {
 		for {
-			if _, _, err := conn.ReadMessage(); err != nil {
+			_, msg, err := conn.ReadMessage()
+			if err != nil {
+				close(b.notifications)
 				return
+			}
+			if json.Valid(msg) {
+				select {
+				case b.notifications <- json.RawMessage(msg):
+				default: // buffer full, drop
+				}
 			}
 		}
 	}()
@@ -104,6 +116,10 @@ func (b *bridge) processStdin() error {
 		}
 
 		if b.interceptGetIdentityToken(line) {
+			continue
+		}
+
+		if b.interceptWaitForMessages(line) {
 			continue
 		}
 
@@ -174,4 +190,158 @@ func (b *bridge) interceptGetIdentityToken(line string) bool {
 	os.Stdout.Write(data)
 	os.Stdout.Write([]byte("\n"))
 	return true
+}
+
+func (b *bridge) interceptWaitForMessages(line string) bool {
+	var req struct {
+		JSONRPC string          `json:"jsonrpc"`
+		Method  string          `json:"method"`
+		Params  json.RawMessage `json:"params"`
+		ID      json.RawMessage `json:"id"`
+	}
+	if err := json.Unmarshal([]byte(line), &req); err != nil {
+		return false
+	}
+	if req.Method != "tools/call" {
+		return false
+	}
+
+	var params struct {
+		Name      string                 `json:"name"`
+		Arguments map[string]interface{} `json:"arguments"`
+	}
+	if err := json.Unmarshal(req.Params, &params); err != nil {
+		return false
+	}
+	if params.Name != "wait_for_messages" {
+		return false
+	}
+
+	timeout := 30.0
+	if v, ok := params.Arguments["timeout"]; ok {
+		if t, ok := v.(float64); ok && t > 0 {
+			timeout = t
+		}
+	}
+
+	// Check for existing unreads first.
+	text, err := b.callUnreadMessages()
+	if err != nil {
+		b.respondToolError(req.ID, fmt.Sprintf("failed to fetch unreads: %v", err))
+		return true
+	}
+
+	// If there are already unread messages, return immediately.
+	if text != "null" && text != "[]" {
+		b.respondToolResult(req.ID, text)
+		return true
+	}
+
+	// Block until notification arrives or timeout.
+	timer := time.NewTimer(time.Duration(timeout * float64(time.Second)))
+	defer timer.Stop()
+
+	select {
+	case _, ok := <-b.notifications:
+		if !ok {
+			b.respondToolError(req.ID, "presence connection closed")
+			return true
+		}
+		// Got a notification — fetch unreads again.
+		text, err := b.callUnreadMessages()
+		if err != nil {
+			b.respondToolError(req.ID, fmt.Sprintf("failed to fetch unreads: %v", err))
+			return true
+		}
+		b.respondToolResult(req.ID, text)
+	case <-timer.C:
+		b.respondToolResult(req.ID, `{"status":"timeout","messages":[]}`)
+	}
+
+	return true
+}
+
+// callUnreadMessages calls the unread_messages tool via HTTP and returns the text content.
+func (b *bridge) callUnreadMessages() (string, error) {
+	rpcReq := map[string]interface{}{
+		"jsonrpc": "2.0",
+		"id":      1,
+		"method":  "tools/call",
+		"params": map[string]interface{}{
+			"name": "unread_messages",
+		},
+	}
+	body, err := json.Marshal(rpcReq)
+	if err != nil {
+		return "", fmt.Errorf("marshal request: %w", err)
+	}
+
+	httpReq, err := http.NewRequest("POST", b.mcpURL, bytes.NewReader(body))
+	if err != nil {
+		return "", fmt.Errorf("create request: %w", err)
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	if b.sessionID != "" {
+		httpReq.Header.Set("Mcp-Session-Id", b.sessionID)
+	}
+
+	resp, err := b.client.Do(httpReq)
+	if err != nil {
+		return "", fmt.Errorf("forward request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("read response: %w", err)
+	}
+
+	// Parse the JSON-RPC response to extract the text content.
+	var rpcResp struct {
+		Result struct {
+			Content []struct {
+				Type string `json:"type"`
+				Text string `json:"text"`
+			} `json:"content"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(respBody, &rpcResp); err != nil {
+		return "", fmt.Errorf("parse response: %w", err)
+	}
+
+	if len(rpcResp.Result.Content) > 0 {
+		return rpcResp.Result.Content[0].Text, nil
+	}
+	return "[]", nil
+}
+
+func (b *bridge) respondToolResult(id json.RawMessage, text string) {
+	resp := map[string]interface{}{
+		"jsonrpc": "2.0",
+		"id":      id,
+		"result": map[string]interface{}{
+			"content": []map[string]string{
+				{"type": "text", "text": text},
+			},
+		},
+	}
+	data, _ := json.Marshal(resp)
+	os.Stdout.Write(data)
+	os.Stdout.Write([]byte("\n"))
+}
+
+func (b *bridge) respondToolError(id json.RawMessage, msg string) {
+	resp := map[string]interface{}{
+		"jsonrpc": "2.0",
+		"id":      id,
+		"result": map[string]interface{}{
+			"isError": true,
+			"content": []map[string]string{
+				{"type": "text", "text": msg},
+			},
+		},
+	}
+	data, _ := json.Marshal(resp)
+	os.Stdout.Write(data)
+	os.Stdout.Write([]byte("\n"))
 }

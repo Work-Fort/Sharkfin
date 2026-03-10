@@ -99,6 +99,7 @@ func NewSharkfinMCP(sm *SessionManager, store domain.Store, hub *Hub) *SharkfinM
 		server.ServerTool{Tool: newRevokePermissionTool(), Handler: s.handleRevokePermission},
 		server.ServerTool{Tool: newListRolesTool(), Handler: s.handleListRoles},
 		server.ServerTool{Tool: newSetStateTool(), Handler: s.handleSetState},
+		server.ServerTool{Tool: newWaitForMessagesTool(), Handler: s.handleWaitForMessages},
 	)
 
 	return s
@@ -742,6 +743,12 @@ func (s *SharkfinMCP) handleSetState(ctx context.Context, req mcp.CallToolReques
 	s.hub.SetState(username, state)
 	s.hub.BroadcastPresence(username, true, state)
 	return mcp.NewToolResultText(fmt.Sprintf("state set to %s", state)), nil
+}
+
+func (s *SharkfinMCP) handleWaitForMessages(_ context.Context, _ mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	// The bridge intercepts this call and handles it client-side.
+	// This handler exists only so the tool appears in tools/list.
+	return mcp.NewToolResultError("wait_for_messages is only available via mcp-bridge"), nil
 }
 
 // broadcastCapabilities sends a capabilities event to all WS clients with the given role.

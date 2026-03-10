@@ -176,3 +176,12 @@ func newSetStateTool() mcp.Tool {
 		mcp.WithString("state", mcp.Required(), mcp.Description("State: active or idle")),
 	)
 }
+
+func newWaitForMessagesTool() mcp.Tool {
+	return mcp.NewTool("wait_for_messages",
+		mcp.WithDescription("Block until unread messages arrive or timeout. Returns unread messages."),
+		mcp.WithNumber("timeout",
+			mcp.Description("Max seconds to wait (default 30)"),
+		),
+	)
+}
