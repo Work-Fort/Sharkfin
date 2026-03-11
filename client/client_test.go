@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -741,5 +742,63 @@ func TestPresenceEvent(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("timeout waiting for presence event")
+	}
+}
+
+func TestReconnect(t *testing.T) {
+	var connCount atomic.Int32
+	srv, wsURL := mockServer(t, func(conn *websocket.Conn) {
+		n := connCount.Add(1)
+		sendHello(t, conn)
+		if n == 1 {
+			// First connection: close after reading one message.
+			conn.ReadMessage()
+			conn.Close()
+			return
+		}
+		// Second connection: stay open, reply to requests.
+		for {
+			_, msg, err := conn.ReadMessage()
+			if err != nil {
+				return
+			}
+			var req struct {
+				Ref string `json:"ref"`
+			}
+			json.Unmarshal(msg, &req)
+			ok := true
+			reply, _ := json.Marshal(map[string]any{
+				"type": "reply", "ref": req.Ref, "ok": ok,
+			})
+			conn.WriteMessage(websocket.TextMessage, reply)
+		}
+	})
+	defer srv.Close()
+
+	c, _ := Dial(context.Background(), wsURL,
+		WithReconnect(func(attempt int) time.Duration {
+			return 50 * time.Millisecond // fast backoff for test
+		}),
+	)
+	defer c.Close()
+
+	// Trigger disconnect by sending a message (server closes after first read).
+	c.Register(context.Background(), "alice", nil) // will fail
+
+	// Wait for reconnect event.
+	deadline := time.After(2 * time.Second)
+	for {
+		select {
+		case ev := <-c.Events():
+			if ev.Type == "reconnect" {
+				// After reconnect, requests should work.
+				if err := c.Register(context.Background(), "alice", nil); err != nil {
+					t.Fatalf("Register after reconnect: %v", err)
+				}
+				return
+			}
+		case <-deadline:
+			t.Fatal("timeout waiting for reconnect")
+		}
 	}
 }
