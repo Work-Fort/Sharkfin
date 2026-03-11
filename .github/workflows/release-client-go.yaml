@@ -1,0 +1,41 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+name: Release Go Client
+
+on:
+  push:
+    tags: ['client/v*']
+
+permissions:
+  contents: write
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: jdx/mise-action@v3
+      - run: cd client && go test -v -race -count=1 ./...
+
+  release:
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v4
+      - name: Extract version
+        id: version
+        run: echo "version=${GITHUB_REF#refs/tags/client/}" >> $GITHUB_OUTPUT
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: client/${{ steps.version.outputs.version }}
+          name: Go Client ${{ steps.version.outputs.version }}
+          body: |
+            ## Go Client ${{ steps.version.outputs.version }}
+
+            ```bash
+            go get github.com/Work-Fort/sharkfin/client@${{ steps.version.outputs.version }}
+            ```
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
