@@ -62,7 +62,7 @@ extracted server-side from `@username` patterns in the message body.
 Named sets of users (e.g. `@backend-team`) that expand to individual mentions
 at write time. CRUD operations via WS and MCP. Creator-only management.
 
-## 9. Client Libraries
+## 9. Client Libraries ✅
 
 [Design](2026-03-11-client-libraries-design.md) · [Go Plan](plans/2026-03-11-client-go.md) · [TS Plan](plans/2026-03-11-client-ts.md)
 
