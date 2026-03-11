@@ -107,6 +107,40 @@ func (b *bridge) startPresence(ctx context.Context) error {
 	return nil
 }
 
+// readResponseBody reads the HTTP response body, handling JSON, SSE, and 202.
+// Returns nil for 202 (notification accepted, no body).
+// For SSE, returns each data: line as a separate message.
+// For JSON, returns the body as a single-element slice.
+func readResponseBody(resp *http.Response) ([][]byte, error) {
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusAccepted {
+		return nil, nil
+	}
+
+	ct := resp.Header.Get("Content-Type")
+	if strings.HasPrefix(ct, "text/event-stream") {
+		var messages [][]byte
+		scanner := bufio.NewScanner(resp.Body)
+		for scanner.Scan() {
+			line := scanner.Text()
+			if strings.HasPrefix(line, "data: ") {
+				messages = append(messages, []byte(strings.TrimPrefix(line, "data: ")))
+			}
+		}
+		if err := scanner.Err(); err != nil {
+			return nil, fmt.Errorf("read SSE: %w", err)
+		}
+		return messages, nil
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read response: %w", err)
+	}
+	return [][]byte{body}, nil
+}
+
 func (b *bridge) processStdin() error {
 	scanner := bufio.NewScanner(os.Stdin)
 	for scanner.Scan() {
