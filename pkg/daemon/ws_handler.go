@@ -311,6 +311,42 @@ func (h *WSHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			} else if h.checkPermission(sendCh, req.Ref, username, "manage_roles") {
 				h.handleWSGetSettings(sendCh, req.Ref)
 			}
+		case "mention_group_create":
+			if notificationsOnly {
+				sendError(sendCh, req.Ref, "notification-only connection")
+			} else {
+				h.handleWSMentionGroupCreate(sendCh, req.Ref, req.D, userID)
+			}
+		case "mention_group_delete":
+			if notificationsOnly {
+				sendError(sendCh, req.Ref, "notification-only connection")
+			} else {
+				h.handleWSMentionGroupDelete(sendCh, req.Ref, req.D, username)
+			}
+		case "mention_group_get":
+			if notificationsOnly {
+				sendError(sendCh, req.Ref, "notification-only connection")
+			} else {
+				h.handleWSMentionGroupGet(sendCh, req.Ref, req.D)
+			}
+		case "mention_group_list":
+			if notificationsOnly {
+				sendError(sendCh, req.Ref, "notification-only connection")
+			} else {
+				h.handleWSMentionGroupList(sendCh, req.Ref)
+			}
+		case "mention_group_add_member":
+			if notificationsOnly {
+				sendError(sendCh, req.Ref, "notification-only connection")
+			} else {
+				h.handleWSMentionGroupAddMember(sendCh, req.Ref, req.D, username)
+			}
+		case "mention_group_remove_member":
+			if notificationsOnly {
+				sendError(sendCh, req.Ref, "notification-only connection")
+			} else {
+				h.handleWSMentionGroupRemoveMember(sendCh, req.Ref, req.D, username)
+			}
 		default:
 			sendError(sendCh, req.Ref, fmt.Sprintf("unknown type: %s", req.Type))
 		}
@@ -775,6 +811,141 @@ func (h *WSHandler) handleWSGetSettings(sendCh chan<- []byte, ref string) {
 		return
 	}
 	sendReply(sendCh, ref, true, map[string]interface{}{"settings": settings})
+}
+
+// --- Mention group handlers ---
+
+func (h *WSHandler) handleWSMentionGroupCreate(sendCh chan<- []byte, ref string, rawD json.RawMessage, userID int64) {
+	var d struct {
+		Slug string `json:"slug"`
+	}
+	if err := json.Unmarshal(rawD, &d); err != nil {
+		sendError(sendCh, ref, "invalid arguments")
+		return
+	}
+	if !slugRe.MatchString(d.Slug) {
+		sendError(sendCh, ref, "invalid slug: must match [a-zA-Z0-9_-]+")
+		return
+	}
+	if _, err := h.store.GetUserByUsername(d.Slug); err == nil {
+		sendError(sendCh, ref, fmt.Sprintf("slug conflicts with existing username: %s", d.Slug))
+		return
+	}
+	id, err := h.store.CreateMentionGroup(d.Slug, userID)
+	if err != nil {
+		sendError(sendCh, ref, err.Error())
+		return
+	}
+	sendReply(sendCh, ref, true, map[string]interface{}{"id": id, "slug": d.Slug})
+}
+
+func (h *WSHandler) handleWSMentionGroupDelete(sendCh chan<- []byte, ref string, rawD json.RawMessage, username string) {
+	var d struct {
+		Slug string `json:"slug"`
+	}
+	if err := json.Unmarshal(rawD, &d); err != nil {
+		sendError(sendCh, ref, "invalid arguments")
+		return
+	}
+	g, err := h.store.GetMentionGroup(d.Slug)
+	if err != nil {
+		sendError(sendCh, ref, err.Error())
+		return
+	}
+	if g.CreatedBy != username {
+		sendError(sendCh, ref, "only the group creator can delete it")
+		return
+	}
+	if err := h.store.DeleteMentionGroup(g.ID); err != nil {
+		sendError(sendCh, ref, err.Error())
+		return
+	}
+	sendReply(sendCh, ref, true, nil)
+}
+
+func (h *WSHandler) handleWSMentionGroupGet(sendCh chan<- []byte, ref string, rawD json.RawMessage) {
+	var d struct {
+		Slug string `json:"slug"`
+	}
+	if err := json.Unmarshal(rawD, &d); err != nil {
+		sendError(sendCh, ref, "invalid arguments")
+		return
+	}
+	g, err := h.store.GetMentionGroup(d.Slug)
+	if err != nil {
+		sendError(sendCh, ref, err.Error())
+		return
+	}
+	sendReply(sendCh, ref, true, g)
+}
+
+func (h *WSHandler) handleWSMentionGroupList(sendCh chan<- []byte, ref string) {
+	groups, err := h.store.ListMentionGroups()
+	if err != nil {
+		sendError(sendCh, ref, err.Error())
+		return
+	}
+	sendReply(sendCh, ref, true, map[string]interface{}{"groups": groups})
+}
+
+func (h *WSHandler) handleWSMentionGroupAddMember(sendCh chan<- []byte, ref string, rawD json.RawMessage, username string) {
+	var d struct {
+		Slug     string `json:"slug"`
+		Username string `json:"username"`
+	}
+	if err := json.Unmarshal(rawD, &d); err != nil {
+		sendError(sendCh, ref, "invalid arguments")
+		return
+	}
+	g, err := h.store.GetMentionGroup(d.Slug)
+	if err != nil {
+		sendError(sendCh, ref, err.Error())
+		return
+	}
+	if g.CreatedBy != username {
+		sendError(sendCh, ref, "only the group creator can manage members")
+		return
+	}
+	user, err := h.store.GetUserByUsername(d.Username)
+	if err != nil {
+		sendError(sendCh, ref, fmt.Sprintf("user not found: %s", d.Username))
+		return
+	}
+	if err := h.store.AddMentionGroupMember(g.ID, user.ID); err != nil {
+		sendError(sendCh, ref, err.Error())
+		return
+	}
+	sendReply(sendCh, ref, true, nil)
+}
+
+func (h *WSHandler) handleWSMentionGroupRemoveMember(sendCh chan<- []byte, ref string, rawD json.RawMessage, username string) {
+	var d struct {
+		Slug     string `json:"slug"`
+		Username string `json:"username"`
+	}
+	if err := json.Unmarshal(rawD, &d); err != nil {
+		sendError(sendCh, ref, "invalid arguments")
+		return
+	}
+	g, err := h.store.GetMentionGroup(d.Slug)
+	if err != nil {
+		sendError(sendCh, ref, err.Error())
+		return
+	}
+	if g.CreatedBy != username {
+		sendError(sendCh, ref, "only the group creator can manage members")
+		return
+	}
+	user, err := h.store.GetUserByUsername(d.Username)
+	if err != nil {
+		sendError(sendCh, ref, fmt.Sprintf("user not found: %s", d.Username))
+		return
+	}
+	if err := h.store.RemoveMentionGroupMember(g.ID, user.ID); err != nil {
+		sendError(sendCh, ref, err.Error())
+		return
+	}
+	sendReply(sendCh, ref, true, nil)
 }
 
 // --- Wire types and helpers ---
