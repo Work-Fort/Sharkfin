@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#MISE description="Run end-to-end tests"
+#MISE depends=["build"]
+#MISE dir="tests/e2e"
+set -euo pipefail
+
+go test -v -race -timeout 180s

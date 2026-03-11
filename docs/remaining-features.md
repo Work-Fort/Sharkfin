@@ -31,7 +31,7 @@ notifications. Implement `wait_for_messages` MCP tool in the bridge that
 blocks until unread messages arrive (or timeout), using the presence
 notification channel.
 
-## 5. Server Version Query
+## 5. Server Version Query ✅
 
 [Design](2026-03-10-server-version-design.md) · [Plan](plans/2026-03-10-server-version.md)
 
@@ -39,7 +39,16 @@ Expose server version to WS clients (hello envelope + `version` request type)
 and MCP clients (serverInfo). Plumb `cmd.Version` through constructors,
 replacing hardcoded `"0.1.0"`. Default to `"dev"` when built without ldflags.
 
-## 6. Container Image
+## 6. Bridge StreamableHTTP Robustness ✅
+
+[Plan](plans/2026-03-10-bridge-streamablehttp-fixes.md)
+
+Fix the MCP bridge to handle all StreamableHTTP response types: SSE streams
+(parse `data:` lines instead of `io.ReadAll`), 202 notification acknowledgments
+(skip stdout forwarding), and standard JSON. Addresses pitfalls identified by
+the Nexus team in `mcp-integration`.
+
+## 7. Container Image
 
 Dockerfile for the sharkfin daemon. CI publishes images to Docker Hub and
 GitHub Container Registry (ghcr.io) on release. Enables running sharkfin as a

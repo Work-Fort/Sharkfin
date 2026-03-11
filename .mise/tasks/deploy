@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#MISE description="Stop service, rebuild + install, restart service"
+set -euo pipefail
+
+BUILD_DIR=build
+BINARY_NAME=sharkfin
+GIT_SHORT_SHA=$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")
+VERSION="${VERSION:-dev-$GIT_SHORT_SHA}"
+
+mkdir -p "$BUILD_DIR"
+CGO_ENABLED=0 go build -ldflags "-X github.com/Work-Fort/sharkfin/cmd.Version=$VERSION" -o "$BUILD_DIR/$BINARY_NAME"
+
+systemctl --user stop sharkfin.service
+install -Dm755 "$BUILD_DIR/$BINARY_NAME" ~/.local/bin/$BINARY_NAME
+install -Dm644 dist/sharkfin.user.service ~/.config/systemd/user/sharkfin.service
+systemctl --user daemon-reload
+systemctl --user start sharkfin.service
+systemctl --user status sharkfin.service

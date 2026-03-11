@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#MISE description="Run all CI checks"
+#MISE depends=["lint", "test", "e2e"]
+set -euo pipefail

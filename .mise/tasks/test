@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#MISE description="Run tests with coverage"
+set -euo pipefail
+
+BUILD_DIR=build
+mkdir -p "$BUILD_DIR"
+
+go test -v -race -coverprofile="$BUILD_DIR/coverage.out" ./...
