@@ -539,9 +539,8 @@ func TestWSSendMessageWithMentions(t *testing.T) {
 	}, "inv1")
 
 	resp := wsReq(t, aliceConn, "send_message", map[string]interface{}{
-		"channel":  "general",
-		"body":     "hey @bob check this",
-		"mentions": []string{"bob"},
+		"channel": "general",
+		"body":    "hey @bob check this",
 	}, "m1")
 	if resp.OK == nil || !*resp.OK {
 		t.Fatalf("expected ok, got %+v", resp)
@@ -741,9 +740,8 @@ func TestWSSendMessageMentionInvalidUser(t *testing.T) {
 
 	// Invalid mentions are silently ignored
 	resp := wsReq(t, conn, "send_message", map[string]interface{}{
-		"channel":  "general",
-		"body":     "hey @nobody",
-		"mentions": []string{"nobody"},
+		"channel": "general",
+		"body":    "hey @nobody",
 	}, "m1")
 	if resp.OK == nil || !*resp.OK {
 		t.Error("expected ok: invalid mentions should be silently ignored")
