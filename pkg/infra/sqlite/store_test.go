@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/Work-Fort/sharkfin/pkg/domain"
+	"github.com/stretchr/testify/require"
 )
 
 func newTestStore(t *testing.T) *Store {
@@ -1133,6 +1134,98 @@ func TestIsEmpty(t *testing.T) {
 	if empty {
 		t.Error("expected non-empty store")
 	}
+}
+
+// --- Mention Groups ---
+
+func TestCreateMentionGroup(t *testing.T) {
+	s := newTestStore(t)
+	aliceID, _ := s.CreateUser("alice", "")
+
+	id, err := s.CreateMentionGroup("backend-team", aliceID)
+	require.NoError(t, err)
+	require.Greater(t, id, int64(0))
+
+	// Duplicate slug should fail.
+	_, err = s.CreateMentionGroup("backend-team", aliceID)
+	require.Error(t, err)
+}
+
+func TestGetMentionGroup(t *testing.T) {
+	s := newTestStore(t)
+	aliceID, _ := s.CreateUser("alice", "")
+	bobID, _ := s.CreateUser("bob", "")
+
+	id, _ := s.CreateMentionGroup("backend-team", aliceID)
+	require.NoError(t, s.AddMentionGroupMember(id, aliceID))
+	require.NoError(t, s.AddMentionGroupMember(id, bobID))
+
+	g, err := s.GetMentionGroup("backend-team")
+	require.NoError(t, err)
+	require.Equal(t, "backend-team", g.Slug)
+	require.Equal(t, "alice", g.CreatedBy)
+	require.ElementsMatch(t, []string{"alice", "bob"}, g.Members)
+}
+
+func TestListMentionGroups(t *testing.T) {
+	s := newTestStore(t)
+	aliceID, _ := s.CreateUser("alice", "")
+
+	s.CreateMentionGroup("team-a", aliceID)
+	s.CreateMentionGroup("team-b", aliceID)
+
+	groups, err := s.ListMentionGroups()
+	require.NoError(t, err)
+	require.Len(t, groups, 2)
+}
+
+func TestDeleteMentionGroup(t *testing.T) {
+	s := newTestStore(t)
+	aliceID, _ := s.CreateUser("alice", "")
+
+	id, _ := s.CreateMentionGroup("temp-team", aliceID)
+	require.NoError(t, s.DeleteMentionGroup(id))
+
+	_, err := s.GetMentionGroup("temp-team")
+	require.Error(t, err)
+}
+
+func TestMentionGroupMembers(t *testing.T) {
+	s := newTestStore(t)
+	aliceID, _ := s.CreateUser("alice", "")
+	bobID, _ := s.CreateUser("bob", "")
+
+	id, _ := s.CreateMentionGroup("team", aliceID)
+	require.NoError(t, s.AddMentionGroupMember(id, aliceID))
+	require.NoError(t, s.AddMentionGroupMember(id, bobID))
+
+	members, err := s.GetMentionGroupMembers(id)
+	require.NoError(t, err)
+	require.ElementsMatch(t, []string{"alice", "bob"}, members)
+
+	// Remove bob.
+	require.NoError(t, s.RemoveMentionGroupMember(id, bobID))
+	members, err = s.GetMentionGroupMembers(id)
+	require.NoError(t, err)
+	require.Equal(t, []string{"alice"}, members)
+
+	// Duplicate add is idempotent.
+	require.NoError(t, s.AddMentionGroupMember(id, aliceID))
+}
+
+func TestExpandMentionGroups(t *testing.T) {
+	s := newTestStore(t)
+	aliceID, _ := s.CreateUser("alice", "")
+	bobID, _ := s.CreateUser("bob", "")
+
+	id, _ := s.CreateMentionGroup("backend", aliceID)
+	s.AddMentionGroupMember(id, aliceID)
+	s.AddMentionGroupMember(id, bobID)
+
+	result, err := s.ExpandMentionGroups([]string{"backend", "nonexistent"})
+	require.NoError(t, err)
+	require.Len(t, result, 1)
+	require.ElementsMatch(t, []int64{aliceID, bobID}, result["backend"])
 }
 
 // --- Compile-time check ---
