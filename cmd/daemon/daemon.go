@@ -21,7 +21,7 @@ import (
 )
 
 // NewDaemonCmd creates the daemon subcommand.
-func NewDaemonCmd() *cobra.Command {
+func NewDaemonCmd(version string) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "daemon",
 		Short: "Start the sharkfind daemon",
@@ -47,7 +47,7 @@ func NewDaemonCmd() *cobra.Command {
 
 			webhookURL := viper.GetString("webhook-url")
 			bus := domain.NewEventBus()
-			srv, err := pkgdaemon.NewServer(addr, store, pongTimeout, webhookURL, bus)
+			srv, err := pkgdaemon.NewServer(addr, store, pongTimeout, webhookURL, bus, version)
 			if err != nil {
 				return fmt.Errorf("create server: %w", err)
 			}

@@ -55,7 +55,7 @@ type SharkfinMCP struct {
 }
 
 // NewSharkfinMCP creates the MCP server and registers all tools.
-func NewSharkfinMCP(sm *SessionManager, store domain.Store, hub *Hub) *SharkfinMCP {
+func NewSharkfinMCP(sm *SessionManager, store domain.Store, hub *Hub, version string) *SharkfinMCP {
 	s := &SharkfinMCP{
 		sessions:       sm,
 		store:          store,
@@ -70,7 +70,7 @@ func NewSharkfinMCP(sm *SessionManager, store domain.Store, hub *Hub) *SharkfinM
 		s.mu.Unlock()
 	})
 
-	s.mcpServer = server.NewMCPServer("sharkfin", "0.1.0",
+	s.mcpServer = server.NewMCPServer("sharkfin", version,
 		server.WithHooks(hooks),
 		server.WithToolHandlerMiddleware(s.authMiddleware),
 	)

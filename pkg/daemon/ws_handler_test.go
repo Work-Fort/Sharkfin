@@ -31,7 +31,7 @@ func newWSTestEnv(t *testing.T) *wsTestEnv {
 
 	sm := NewSessionManager(store)
 	hub := NewHub(nil)
-	wh := NewWSHandler(sm, store, hub, 20*time.Second)
+	wh := NewWSHandler(sm, store, hub, 20*time.Second, "test")
 	server := httptest.NewServer(wh)
 	t.Cleanup(func() { server.Close() })
 

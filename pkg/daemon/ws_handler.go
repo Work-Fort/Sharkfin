@@ -19,15 +19,17 @@ type WSHandler struct {
 	store       domain.Store
 	hub         *Hub
 	pongTimeout time.Duration
+	version     string
 }
 
 // NewWSHandler creates a new WebSocket handler.
-func NewWSHandler(sessions *SessionManager, store domain.Store, hub *Hub, pongTimeout time.Duration) *WSHandler {
+func NewWSHandler(sessions *SessionManager, store domain.Store, hub *Hub, pongTimeout time.Duration, version string) *WSHandler {
 	return &WSHandler{
 		sessions:    sessions,
 		store:       store,
 		hub:         hub,
 		pongTimeout: pongTimeout,
+		version:     version,
 	}
 }
 
@@ -45,6 +47,7 @@ func (h *WSHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		Type: "hello",
 		D: map[string]interface{}{
 			"heartbeat_interval": int(pingInterval.Seconds()),
+			"version":            h.version,
 		},
 	}
 	if err := writeWSJSON(conn, hello); err != nil {
@@ -185,6 +188,8 @@ func (h *WSHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 			case "ping":
 				sendPong(sendCh, req.Ref)
+			case "version":
+				sendReply(sendCh, req.Ref, true, map[string]string{"version": h.version})
 
 			default:
 				sendError(sendCh, req.Ref, "not identified: send identify or register first")
@@ -199,6 +204,8 @@ func (h *WSHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			sendError(sendCh, req.Ref, "already identified")
 		case "ping":
 			sendPong(sendCh, req.Ref)
+		case "version":
+			sendReply(sendCh, req.Ref, true, map[string]string{"version": h.version})
 
 		// Allowed in notifications_only mode (no permission check needed)
 		case "capabilities":

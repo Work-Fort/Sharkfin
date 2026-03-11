@@ -94,7 +94,11 @@ func init() {
 	rootCmd.AddCommand(admin.NewAdminCmd())
 	rootCmd.AddCommand(agent.NewAgentCmd())
 	rootCmd.AddCommand(backup.NewBackupCmd())
-	rootCmd.AddCommand(daemon.NewDaemonCmd())
+	version := Version
+	if version == "" {
+		version = "dev"
+	}
+	rootCmd.AddCommand(daemon.NewDaemonCmd(version))
 	rootCmd.AddCommand(mcpbridge.NewMCPBridgeCmd())
 	rootCmd.AddCommand(presence.NewPresenceCmd())
 

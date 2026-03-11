@@ -25,7 +25,7 @@ type Server struct {
 }
 
 // NewServer creates a new sharkfind server.
-func NewServer(addr string, store domain.Store, pongTimeout time.Duration, webhookURL string, bus domain.EventBus) (*Server, error) {
+func NewServer(addr string, store domain.Store, pongTimeout time.Duration, webhookURL string, bus domain.EventBus, version string) (*Server, error) {
 	// Set webhook_url if provided via flag (always overwrite).
 	if webhookURL != "" {
 		store.SetSetting("webhook_url", webhookURL)
@@ -39,9 +39,9 @@ func NewServer(addr string, store domain.Store, pongTimeout time.Duration, webho
 		closers = append(closers, NewPresenceNotifier(bus, sm, store))
 	}
 	presenceHandler := NewPresenceHandler(sm, hub, pongTimeout)
-	wsHandler := NewWSHandler(sm, store, hub, pongTimeout)
+	wsHandler := NewWSHandler(sm, store, hub, pongTimeout, version)
 
-	sharkfinMCP := NewSharkfinMCP(sm, store, hub)
+	sharkfinMCP := NewSharkfinMCP(sm, store, hub, version)
 	mcpTransport := mcpserver.NewStreamableHTTPServer(sharkfinMCP.Server(),
 		mcpserver.WithStateful(true),
 	)

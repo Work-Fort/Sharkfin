@@ -55,7 +55,7 @@ func startTestServer(t *testing.T) *testEnv {
 		t.Fatalf("open db: %v", err)
 	}
 
-	srv, err := pkgdaemon.NewServer(addr, store, 20*time.Second, "", nil)
+	srv, err := pkgdaemon.NewServer(addr, store, 20*time.Second, "", nil, "test")
 	if err != nil {
 		t.Fatalf("create server: %v", err)
 	}
