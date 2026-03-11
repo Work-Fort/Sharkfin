@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"sync"
 	"time"
 
@@ -14,6 +15,8 @@ import (
 
 	"github.com/Work-Fort/sharkfin/pkg/domain"
 )
+
+var slugRe = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
 
 type contextKey int
 
@@ -100,6 +103,12 @@ func NewSharkfinMCP(sm *SessionManager, store domain.Store, hub *Hub, version st
 		server.ServerTool{Tool: newListRolesTool(), Handler: s.handleListRoles},
 		server.ServerTool{Tool: newSetStateTool(), Handler: s.handleSetState},
 		server.ServerTool{Tool: newWaitForMessagesTool(), Handler: s.handleWaitForMessages},
+		server.ServerTool{Tool: newMentionGroupCreateTool(), Handler: s.handleMentionGroupCreate},
+		server.ServerTool{Tool: newMentionGroupDeleteTool(), Handler: s.handleMentionGroupDelete},
+		server.ServerTool{Tool: newMentionGroupGetTool(), Handler: s.handleMentionGroupGet},
+		server.ServerTool{Tool: newMentionGroupListTool(), Handler: s.handleMentionGroupList},
+		server.ServerTool{Tool: newMentionGroupAddMemberTool(), Handler: s.handleMentionGroupAddMember},
+		server.ServerTool{Tool: newMentionGroupRemoveMemberTool(), Handler: s.handleMentionGroupRemoveMember},
 	)
 
 	return s
@@ -782,4 +791,100 @@ func optionalInt64(req mcp.CallToolRequest, key string) *int64 {
 		return &i
 	}
 	return nil
+}
+
+// --- Mention group handlers ---
+
+func (s *SharkfinMCP) handleMentionGroupCreate(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	slug := req.GetString("slug", "")
+	if !slugRe.MatchString(slug) {
+		return mcp.NewToolResultError("invalid slug: must match [a-zA-Z0-9_-]+"), nil
+	}
+	// Reject if slug collides with an existing username.
+	if _, err := s.store.GetUserByUsername(slug); err == nil {
+		return mcp.NewToolResultError(fmt.Sprintf("slug conflicts with existing username: %s", slug)), nil
+	}
+	sender, err := s.store.GetUserByUsername(usernameFromCtx(ctx))
+	if err != nil {
+		return nil, fmt.Errorf("get user: %w", err)
+	}
+	id, err := s.store.CreateMentionGroup(slug, sender.ID)
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+	return mcp.NewToolResultText(fmt.Sprintf("created mention group @%s (id: %d)", slug, id)), nil
+}
+
+func (s *SharkfinMCP) handleMentionGroupDelete(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	slug := req.GetString("slug", "")
+	g, err := s.store.GetMentionGroup(slug)
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+	if g.CreatedBy != usernameFromCtx(ctx) {
+		return mcp.NewToolResultError("only the group creator can delete it"), nil
+	}
+	if err := s.store.DeleteMentionGroup(g.ID); err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+	return mcp.NewToolResultText(fmt.Sprintf("deleted mention group @%s", slug)), nil
+}
+
+func (s *SharkfinMCP) handleMentionGroupGet(_ context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	slug := req.GetString("slug", "")
+	g, err := s.store.GetMentionGroup(slug)
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+	data, _ := json.Marshal(g)
+	return mcp.NewToolResultText(string(data)), nil
+}
+
+func (s *SharkfinMCP) handleMentionGroupList(_ context.Context, _ mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	groups, err := s.store.ListMentionGroups()
+	if err != nil {
+		return nil, fmt.Errorf("list mention groups: %w", err)
+	}
+	data, _ := json.Marshal(groups)
+	return mcp.NewToolResultText(string(data)), nil
+}
+
+func (s *SharkfinMCP) handleMentionGroupAddMember(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	slug := req.GetString("slug", "")
+	username := req.GetString("username", "")
+	g, err := s.store.GetMentionGroup(slug)
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+	if g.CreatedBy != usernameFromCtx(ctx) {
+		return mcp.NewToolResultError("only the group creator can manage members"), nil
+	}
+	user, err := s.store.GetUserByUsername(username)
+	if err != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("user not found: %s", username)), nil
+	}
+	if err := s.store.AddMentionGroupMember(g.ID, user.ID); err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+	return mcp.NewToolResultText(fmt.Sprintf("added %s to @%s", username, slug)), nil
+}
+
+func (s *SharkfinMCP) handleMentionGroupRemoveMember(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	slug := req.GetString("slug", "")
+	username := req.GetString("username", "")
+	g, err := s.store.GetMentionGroup(slug)
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+	if g.CreatedBy != usernameFromCtx(ctx) {
+		return mcp.NewToolResultError("only the group creator can manage members"), nil
+	}
+	user, err := s.store.GetUserByUsername(username)
+	if err != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("user not found: %s", username)), nil
+	}
+	if err := s.store.RemoveMentionGroupMember(g.ID, user.ID); err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+	return mcp.NewToolResultText(fmt.Sprintf("removed %s from @%s", username, slug)), nil
 }

@@ -184,3 +184,46 @@ func newWaitForMessagesTool() mcp.Tool {
 		),
 	)
 }
+
+func newMentionGroupCreateTool() mcp.Tool {
+	return mcp.NewTool("mention_group_create",
+		mcp.WithDescription("Create a new mention group."),
+		mcp.WithString("slug", mcp.Required(), mcp.Description("The @-mentionable name for the group")),
+	)
+}
+
+func newMentionGroupDeleteTool() mcp.Tool {
+	return mcp.NewTool("mention_group_delete",
+		mcp.WithDescription("Delete a mention group. Only the creator can delete."),
+		mcp.WithString("slug", mcp.Required(), mcp.Description("Group slug")),
+	)
+}
+
+func newMentionGroupGetTool() mcp.Tool {
+	return mcp.NewTool("mention_group_get",
+		mcp.WithDescription("Get a mention group with its members."),
+		mcp.WithString("slug", mcp.Required(), mcp.Description("Group slug")),
+	)
+}
+
+func newMentionGroupListTool() mcp.Tool {
+	return mcp.NewTool("mention_group_list",
+		mcp.WithDescription("List all mention groups with their members."),
+	)
+}
+
+func newMentionGroupAddMemberTool() mcp.Tool {
+	return mcp.NewTool("mention_group_add_member",
+		mcp.WithDescription("Add a user to a mention group. Only the creator can manage members."),
+		mcp.WithString("slug", mcp.Required(), mcp.Description("Group slug")),
+		mcp.WithString("username", mcp.Required(), mcp.Description("Username to add")),
+	)
+}
+
+func newMentionGroupRemoveMemberTool() mcp.Tool {
+	return mcp.NewTool("mention_group_remove_member",
+		mcp.WithDescription("Remove a user from a mention group. Only the creator can manage members."),
+		mcp.WithString("slug", mcp.Required(), mcp.Description("Group slug")),
+		mcp.WithString("username", mcp.Required(), mcp.Description("Username to remove")),
+	)
+}
