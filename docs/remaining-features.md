@@ -48,7 +48,30 @@ Fix the MCP bridge to handle all StreamableHTTP response types: SSE streams
 (skip stdout forwarding), and standard JSON. Addresses pitfalls identified by
 the Nexus team in `mcp-integration`.
 
-## 7. Container Image
+## 7. Body-Only Mentions ✅
+
+[Design](2026-03-11-mentions-body-only-design.md) · [Plan](plans/2026-03-11-mentions-body-only.md)
+
+Remove explicit `mentions` parameter from `send_message`. All mentions are
+extracted server-side from `@username` patterns in the message body.
+
+## 8. Mention Groups ✅
+
+[Design](2026-03-11-mention-groups-design.md) · [Plan](plans/2026-03-11-mention-groups.md)
+
+Named sets of users (e.g. `@backend-team`) that expand to individual mentions
+at write time. CRUD operations via WS and MCP. Creator-only management.
+
+## 9. Client Libraries
+
+[Design](2026-03-11-client-libraries-design.md) · [Go Plan](plans/2026-03-11-client-go.md) · [TS Plan](plans/2026-03-11-client-ts.md)
+
+Idiomatic Go and TypeScript WebSocket client libraries. Go client at `client/`
+(channel-based events, gorilla/websocket). TypeScript client at `clients/ts/`
+published as `@workfort/sharkfin-client` (EventEmitter, zero runtime deps,
+Node + browser). Independently versioned via tag prefixes.
+
+## 10. Container Image
 
 Dockerfile for the sharkfin daemon. CI publishes images to Docker Hub and
 GitHub Container Registry (ghcr.io) on release. Enables running sharkfin as a
