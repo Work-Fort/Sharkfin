@@ -65,6 +65,14 @@ type Role struct {
 	BuiltIn bool
 }
 
+type MentionGroup struct {
+	ID        int64
+	Slug      string
+	CreatedBy string   // username of creator
+	Members   []string // member usernames
+	CreatedAt time.Time
+}
+
 // Event type constants.
 const (
 	EventMessageNew     = "message.new"

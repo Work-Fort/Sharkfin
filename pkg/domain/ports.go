@@ -42,6 +42,17 @@ type RoleStore interface {
 	SetUserType(username, userType string) error
 }
 
+type MentionGroupStore interface {
+	CreateMentionGroup(slug string, createdBy int64) (int64, error)
+	DeleteMentionGroup(id int64) error
+	GetMentionGroup(slug string) (*MentionGroup, error)
+	ListMentionGroups() ([]MentionGroup, error)
+	AddMentionGroupMember(groupID, userID int64) error
+	RemoveMentionGroupMember(groupID, userID int64) error
+	GetMentionGroupMembers(groupID int64) ([]string, error)
+	ExpandMentionGroups(slugs []string) (map[string][]int64, error)
+}
+
 type SettingsStore interface {
 	GetSetting(key string) (string, error)
 	SetSetting(key, value string) error
@@ -54,6 +65,7 @@ type Store interface {
 	ChannelStore
 	MessageStore
 	RoleStore
+	MentionGroupStore
 	SettingsStore
 	Close() error
 }
