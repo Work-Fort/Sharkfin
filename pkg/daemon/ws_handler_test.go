@@ -789,3 +789,52 @@ func TestWSUnreadMessages(t *testing.T) {
 		t.Errorf("channel = %q, want general", result.Messages[0].Channel)
 	}
 }
+
+func TestWSSendMessageWithMentionGroup(t *testing.T) {
+	env := newWSTestEnv(t)
+	aliceConn := registerWSUser(t, env, "alice")
+	grantAdmin(t, env, "alice")
+	bobConn := registerWSUser(t, env, "bob")
+
+	// Create a mention group.
+	resp := wsReq(t, aliceConn, "mention_group_create", map[string]interface{}{
+		"slug": "backend",
+	}, "mg1")
+	if resp.OK == nil || !*resp.OK {
+		t.Fatalf("create group: %+v", resp)
+	}
+	wsReq(t, aliceConn, "mention_group_add_member", map[string]interface{}{
+		"slug": "backend", "username": "bob",
+	}, "mg2")
+
+	// Create channel and invite bob.
+	wsReq(t, aliceConn, "channel_create", map[string]interface{}{
+		"name": "general", "public": true,
+	}, "c1")
+	wsReq(t, aliceConn, "channel_invite", map[string]interface{}{
+		"channel": "general", "username": "bob",
+	}, "inv1")
+
+	// Send with group mention.
+	resp = wsReq(t, aliceConn, "send_message", map[string]interface{}{
+		"channel": "general",
+		"body":    "hey @backend check this",
+	}, "m1")
+	if resp.OK == nil || !*resp.OK {
+		t.Fatalf("send: %+v", resp)
+	}
+
+	// Bob should receive broadcast with mentions (expanded from group).
+	bcast := readWSEnvelope(t, bobConn)
+	if bcast.Type != "message.new" {
+		t.Fatalf("type = %q, want message.new", bcast.Type)
+	}
+	d, _ := json.Marshal(bcast.D)
+	var msg struct {
+		Mentions []string `json:"mentions"`
+	}
+	json.Unmarshal(d, &msg)
+	if len(msg.Mentions) == 0 {
+		t.Error("expected mentions from group expansion")
+	}
+}
