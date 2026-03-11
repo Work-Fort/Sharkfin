@@ -175,14 +175,15 @@ func (b *bridge) processStdin() error {
 			b.sessionID = sid
 		}
 
-		body, err := io.ReadAll(resp.Body)
-		resp.Body.Close()
+		messages, err := readResponseBody(resp)
 		if err != nil {
 			return fmt.Errorf("read response: %w", err)
 		}
 
-		os.Stdout.Write(bytes.TrimRight(body, "\n"))
-		os.Stdout.Write([]byte("\n"))
+		for _, msg := range messages {
+			os.Stdout.Write(bytes.TrimRight(msg, "\n"))
+			os.Stdout.Write([]byte("\n"))
+		}
 	}
 	return scanner.Err()
 }
@@ -323,12 +324,16 @@ func (b *bridge) callUnreadMessages() (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("forward request: %w", err)
 	}
-	defer resp.Body.Close()
-
-	respBody, err := io.ReadAll(resp.Body)
+	messages, err := readResponseBody(resp)
 	if err != nil {
 		return "", fmt.Errorf("read response: %w", err)
 	}
+	if len(messages) == 0 {
+		return "", fmt.Errorf("no response body")
+	}
+
+	// Use the last message (the actual response, skipping any intermediate notifications).
+	respBody := messages[len(messages)-1]
 
 	// Parse the JSON-RPC response to extract the text content.
 	var rpcResp struct {
