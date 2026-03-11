@@ -486,6 +486,8 @@ func TestToolsList(t *testing.T) {
 		"unread_counts", "mark_read", "history", "dm_list", "dm_open",
 		"capabilities", "set_state", "set_role", "create_role", "delete_role",
 		"grant_permission", "revoke_permission", "list_roles", "wait_for_messages",
+		"mention_group_create", "mention_group_delete", "mention_group_get",
+		"mention_group_list", "mention_group_add_member", "mention_group_remove_member",
 	}
 	if len(listResult.Tools) != len(expected) {
 		names := make([]string, len(listResult.Tools))
@@ -4057,5 +4059,159 @@ func TestBridgeNotification(t *testing.T) {
 	}
 	if len(listResult.Result.Tools) == 0 {
 		t.Fatal("expected tools in list response")
+	}
+}
+
+func TestWSMentionGroupCRUD(t *testing.T) {
+	addr, err := harness.FreePort()
+	if err != nil {
+		t.Fatal(err)
+	}
+	d, err := harness.StartDaemon(sharkfinBin, addr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.StopFatal(t)
+
+	alice, err := harness.NewWSClient(addr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer alice.Close()
+	if err := alice.WSRegister("alice"); err != nil {
+		t.Fatal(err)
+	}
+
+	bob, err := harness.NewWSClient(addr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer bob.Close()
+	if err := bob.WSRegister("bob"); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create group.
+	env, err := alice.Req("mention_group_create", map[string]any{"slug": "team"}, "mg1")
+	if err != nil || env.OK == nil || !*env.OK {
+		t.Fatalf("create: err=%v env=%+v", err, env)
+	}
+
+	// Add member.
+	env, err = alice.Req("mention_group_add_member", map[string]any{
+		"slug": "team", "username": "bob",
+	}, "mg2")
+	if err != nil || env.OK == nil || !*env.OK {
+		t.Fatalf("add member: err=%v env=%+v", err, env)
+	}
+
+	// Get group.
+	env, err = alice.Req("mention_group_get", map[string]any{"slug": "team"}, "mg3")
+	if err != nil || env.OK == nil || !*env.OK {
+		t.Fatalf("get: err=%v env=%+v", err, env)
+	}
+
+	// List groups.
+	env, err = alice.Req("mention_group_list", nil, "mg4")
+	if err != nil || env.OK == nil || !*env.OK {
+		t.Fatalf("list: err=%v env=%+v", err, env)
+	}
+
+	// Bob cannot delete (not creator).
+	env, err = bob.Req("mention_group_delete", map[string]any{"slug": "team"}, "mg5")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if env.OK != nil && *env.OK {
+		t.Error("expected bob to be denied deletion")
+	}
+
+	// Remove member.
+	env, err = alice.Req("mention_group_remove_member", map[string]any{
+		"slug": "team", "username": "bob",
+	}, "mg6")
+	if err != nil || env.OK == nil || !*env.OK {
+		t.Fatalf("remove member: err=%v env=%+v", err, env)
+	}
+
+	// Delete group.
+	env, err = alice.Req("mention_group_delete", map[string]any{"slug": "team"}, "mg7")
+	if err != nil || env.OK == nil || !*env.OK {
+		t.Fatalf("delete: err=%v env=%+v", err, env)
+	}
+}
+
+func TestWSMentionGroupExpansion(t *testing.T) {
+	addr, err := harness.FreePort()
+	if err != nil {
+		t.Fatal(err)
+	}
+	d, err := harness.StartDaemon(sharkfinBin, addr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.StopFatal(t)
+
+	alice, err := harness.NewWSClient(addr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer alice.Close()
+	if err := alice.WSRegister("alice"); err != nil {
+		t.Fatal(err)
+	}
+
+	bob, err := harness.NewWSClient(addr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer bob.Close()
+	if err := bob.WSRegister("bob"); err != nil {
+		t.Fatal(err)
+	}
+
+	// Alice creates group and adds bob.
+	alice.Req("mention_group_create", map[string]any{"slug": "devs"}, "g1")
+	alice.Req("mention_group_add_member", map[string]any{
+		"slug": "devs", "username": "bob",
+	}, "g2")
+
+	// Grant admin so alice can create channels.
+	if err := d.GrantAdmin(sharkfinBin, "alice"); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create channel.
+	alice.Req("channel_create", map[string]any{
+		"name": "general", "public": true,
+	}, "c1")
+	alice.Req("channel_invite", map[string]any{
+		"channel": "general", "username": "bob",
+	}, "inv1")
+
+	// Send with @devs.
+	env, err := alice.Req("send_message", map[string]any{
+		"channel": "general",
+		"body":    "hey @devs review this",
+	}, "m1")
+	if err != nil || env.OK == nil || !*env.OK {
+		t.Fatalf("send: err=%v env=%+v", err, env)
+	}
+
+	// Bob should get broadcast (group expanded to include bob).
+	bcast, err := bob.Read()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bcast.Type != "message.new" {
+		t.Fatalf("type = %q, want message.new", bcast.Type)
+	}
+
+	// Bob should see the message via mentions_only filter.
+	env, err = bob.Req("unread_messages", map[string]any{
+		"mentions_only": true,
+	}, "u1")
+	if err != nil || env.OK == nil || !*env.OK {
+		t.Fatalf("unread: err=%v env=%+v", err, env)
 	}
 }
