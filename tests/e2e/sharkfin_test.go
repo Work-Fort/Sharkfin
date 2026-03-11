@@ -3989,3 +3989,75 @@ func TestPresenceNoNotificationWithoutMention(t *testing.T) {
 		t.Errorf("carol should not get notified: %v", err)
 	}
 }
+
+func TestBridgeNotification(t *testing.T) {
+	addr, err := harness.FreePort()
+	if err != nil {
+		t.Fatal(err)
+	}
+	d, err := harness.StartDaemon(sharkfinBin, addr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.StopFatal(t)
+
+	bridge, err := harness.StartBridge(sharkfinBin, addr, d.XDGDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer bridge.Kill()
+
+	// 1. Initialize
+	initResp, err := bridge.Send(map[string]any{
+		"jsonrpc": "2.0", "id": 1, "method": "initialize",
+		"params": map[string]any{
+			"protocolVersion": "2025-03-26",
+			"capabilities":    map[string]any{},
+			"clientInfo":      map[string]string{"name": "notif-test", "version": "0.1"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("initialize: %v", err)
+	}
+	var initResult struct {
+		Result struct {
+			ProtocolVersion string `json:"protocolVersion"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(initResp, &initResult); err != nil {
+		t.Fatalf("unmarshal initialize: %v (raw: %s)", err, initResp)
+	}
+
+	// 2. Send notifications/initialized (no id — this is a JSON-RPC notification).
+	// The server returns 202 with no body. The bridge must NOT write anything to stdout.
+	err = bridge.SendNotification(map[string]any{
+		"jsonrpc": "2.0",
+		"method":  "notifications/initialized",
+	})
+	if err != nil {
+		t.Fatalf("send notification: %v", err)
+	}
+
+	// 3. Verify bridge still works — send a tools/list request.
+	// If the bridge wrote garbage to stdout for the 202, this Send would
+	// read the garbage instead of the actual response and fail.
+	listResp, err := bridge.Send(map[string]any{
+		"jsonrpc": "2.0", "id": 2, "method": "tools/list",
+	})
+	if err != nil {
+		t.Fatalf("tools/list after notification: %v", err)
+	}
+	var listResult struct {
+		Result struct {
+			Tools []struct {
+				Name string `json:"name"`
+			} `json:"tools"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(listResp, &listResult); err != nil {
+		t.Fatalf("unmarshal tools/list: %v (raw: %s)", err, listResp)
+	}
+	if len(listResult.Result.Tools) == 0 {
+		t.Fatal("expected tools in list response")
+	}
+}

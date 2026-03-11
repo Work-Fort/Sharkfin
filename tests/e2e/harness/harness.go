@@ -479,6 +479,12 @@ func StartBridge(binary, daemonAddr, xdgDir string) (*Bridge, error) {
 	}, nil
 }
 
+// SendNotification sends a JSON-RPC notification (no id) to the bridge.
+// Notifications produce no stdout output (server returns 202).
+func (b *Bridge) SendNotification(request any) error {
+	return b.stdin.Encode(request)
+}
+
 func (b *Bridge) Send(request any) (json.RawMessage, error) {
 	if err := b.stdin.Encode(request); err != nil {
 		return nil, fmt.Errorf("write to bridge: %w", err)
