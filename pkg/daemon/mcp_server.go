@@ -370,7 +370,6 @@ func (s *SharkfinMCP) handleChannelJoin(ctx context.Context, req mcp.CallToolReq
 func (s *SharkfinMCP) handleSendMessage(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	channel := req.GetString("channel", "")
 	message := req.GetString("message", "")
-	mentionsList := req.GetStringSlice("mentions", nil)
 	threadID := optionalInt64(req, "thread_id")
 
 	sender, err := s.store.GetUserByUsername(usernameFromCtx(ctx))
@@ -391,7 +390,7 @@ func (s *SharkfinMCP) handleSendMessage(ctx context.Context, req mcp.CallToolReq
 		return mcp.NewToolResultError("you are not a participant of this channel"), nil
 	}
 
-	mentionUserIDs, mentionUsernames := resolveMentions(s.store, message, mentionsList)
+	mentionUserIDs, mentionUsernames := resolveMentions(s.store, message)
 
 	msgID, err := s.store.SendMessage(ch.ID, sender.ID, message, threadID, mentionUserIDs)
 	if err != nil {

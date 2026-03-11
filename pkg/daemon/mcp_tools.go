@@ -68,7 +68,6 @@ func newSendMessageTool() mcp.Tool {
 		mcp.WithDescription("Send a text message to a channel. You must be a participant of the channel."),
 		mcp.WithString("channel", mcp.Required(), mcp.Description("Channel name")),
 		mcp.WithString("message", mcp.Required(), mcp.Description("Message text (UTF-8)")),
-		mcp.WithArray("mentions", mcp.Description("Usernames to @mention in this message"), mcp.WithStringItems()),
 		mcp.WithNumber("thread_id", mcp.Description("Message ID of the parent message to reply to (creates a thread)")),
 	)
 }

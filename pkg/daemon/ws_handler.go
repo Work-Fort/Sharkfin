@@ -485,10 +485,9 @@ func (h *WSHandler) handleWSChannelJoin(sendCh chan<- []byte, ref string, rawD j
 
 func (h *WSHandler) handleWSSendMessage(sendCh chan<- []byte, ref string, rawD json.RawMessage, username string, userID int64) {
 	var d struct {
-		Channel  string   `json:"channel"`
-		Body     string   `json:"body"`
-		Mentions []string `json:"mentions"`
-		ThreadID *int64   `json:"thread_id"`
+		Channel  string `json:"channel"`
+		Body     string `json:"body"`
+		ThreadID *int64 `json:"thread_id"`
 	}
 	if err := json.Unmarshal(rawD, &d); err != nil {
 		sendError(sendCh, ref, "invalid arguments")
@@ -511,7 +510,7 @@ func (h *WSHandler) handleWSSendMessage(sendCh chan<- []byte, ref string, rawD j
 		return
 	}
 
-	mentionUserIDs, mentionUsernames := resolveMentions(h.store, d.Body, d.Mentions)
+	mentionUserIDs, mentionUsernames := resolveMentions(h.store, d.Body)
 
 	msgID, err := h.store.SendMessage(ch.ID, userID, d.Body, d.ThreadID, mentionUserIDs)
 	if err != nil {
