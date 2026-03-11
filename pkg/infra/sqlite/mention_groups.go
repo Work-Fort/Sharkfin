@@ -57,22 +57,25 @@ func (s *Store) ListMentionGroups() ([]domain.MentionGroup, error) {
 	if err != nil {
 		return nil, fmt.Errorf("list mention groups: %w", err)
 	}
-	defer rows.Close()
 
-	// Collect all groups first to avoid nested queries on the single SQLite connection.
+	// Collect all groups first, then close rows to release the single SQLite
+	// connection before issuing nested queries for members.
 	var groups []domain.MentionGroup
 	for rows.Next() {
 		var g domain.MentionGroup
 		if err := rows.Scan(&g.ID, &g.Slug, &g.CreatedBy, &g.CreatedAt); err != nil {
+			rows.Close()
 			return nil, fmt.Errorf("scan mention group: %w", err)
 		}
 		groups = append(groups, g)
 	}
 	if err := rows.Err(); err != nil {
+		rows.Close()
 		return nil, err
 	}
+	rows.Close()
 
-	// Now fetch members for each group (rows are closed).
+	// Now fetch members for each group (connection is released).
 	for i := range groups {
 		members, err := s.GetMentionGroupMembers(groups[i].ID)
 		if err != nil {
