@@ -114,7 +114,8 @@ jobs:
           VERSION="${{ needs.tag.outputs.new_tag }}"
           SUFFIX=""
           if [ "${{ matrix.goos }}" = "windows" ]; then SUFFIX=".exe"; fi
-          go build -ldflags "-X github.com/Work-Fort/sharkfin/cmd.Version=${VERSION}" \
+          go build -trimpath \
+            -ldflags "-s -w -X github.com/Work-Fort/sharkfin/cmd.Version=${VERSION}" \
             -o "sharkfin-${{ matrix.target }}${SUFFIX}"
 
       - name: Compress and generate checksum

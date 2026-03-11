@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: AGPL-3.0-or-later
-#MISE description="Build sharkfin"
+#MISE description="Build sharkfin (dev, dynamic)"
 #MISE sources=["**/*.go", "**/*.sql", "go.mod", "go.sum"]
 #MISE outputs=["build/sharkfin"]
 set -euo pipefail
