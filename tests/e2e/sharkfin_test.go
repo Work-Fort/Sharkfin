@@ -2134,9 +2134,8 @@ func TestWSMentions(t *testing.T) {
 
 	// Send with mention
 	env, err := alice.Req("send_message", map[string]any{
-		"channel":  "general",
-		"body":     "hey @bob look at this",
-		"mentions": []string{"bob"},
+		"channel": "general",
+		"body":    "hey @bob look at this",
 	}, "m1")
 	if err != nil {
 		t.Fatal(err)
@@ -2215,9 +2214,8 @@ func TestWSMentionInvalidUser(t *testing.T) {
 	}, "c1")
 
 	env, err := ws.Req("send_message", map[string]any{
-		"channel":  "general",
-		"body":     "hey @ghost",
-		"mentions": []string{"ghost"},
+		"channel": "general",
+		"body":    "hey @ghost",
 	}, "m1")
 	if err != nil {
 		t.Fatal(err)
@@ -3673,7 +3671,7 @@ func TestBackupExportImport(t *testing.T) {
 	}
 
 	r, err = alice.ToolCall("send_message", map[string]any{
-		"channel": "general", "message": "hello from alice", "mentions": []string{"bob"},
+		"channel": "general", "message": "hello from @bob via alice",
 	})
 	if err != nil || r.Error != nil {
 		t.Fatalf("send: err=%v rpc=%+v", err, r.Error)
@@ -3750,8 +3748,8 @@ func TestBackupExportImport(t *testing.T) {
 	if err != nil || hr.Error != nil {
 		t.Fatalf("history: err=%v rpc=%+v", err, hr.Error)
 	}
-	if !strings.Contains(hr.Text, "hello from alice") {
-		t.Errorf("expected 'hello from alice' in history, got: %s", hr.Text)
+	if !strings.Contains(hr.Text, "hello from @bob via alice") {
+		t.Errorf("expected 'hello from @bob via alice' in history, got: %s", hr.Text)
 	}
 	if !strings.Contains(hr.Text, "hello from bob") {
 		t.Errorf("expected 'hello from bob' in history, got: %s", hr.Text)
