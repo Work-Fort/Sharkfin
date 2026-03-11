@@ -13,13 +13,13 @@ source=("${url}/archive/refs/tags/v${pkgver}.tar.gz")
 sha256sums=('SKIP')
 
 build() {
-    cd "Sharkfin-v${pkgver}"
+    cd "Sharkfin-${pkgver}"
     export CGO_ENABLED=0
     go build -ldflags "-X github.com/Work-Fort/sharkfin/cmd.Version=v${pkgver}" -o sharkfin
 }
 
 package() {
-    cd "Sharkfin-v${pkgver}"
+    cd "Sharkfin-${pkgver}"
     install -Dm755 sharkfin "${pkgdir}/usr/bin/sharkfin"
     install -Dm644 dist/sharkfin.system.service "${pkgdir}/usr/lib/systemd/user/sharkfin.service"
 }
