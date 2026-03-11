@@ -66,11 +66,11 @@ type Role struct {
 }
 
 type MentionGroup struct {
-	ID        int64
-	Slug      string
-	CreatedBy string   // username of creator
-	Members   []string // member usernames
-	CreatedAt time.Time
+	ID        int64     `json:"id"`
+	Slug      string    `json:"slug"`
+	CreatedBy string    `json:"created_by,omitempty"`
+	Members   []string  `json:"members,omitempty"`
+	CreatedAt time.Time `json:"created_at,omitempty"`
 }
 
 // Event type constants.
