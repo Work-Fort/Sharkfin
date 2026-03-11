@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#MISE description="Uninstall sharkfin binary and systemd user service"
+set -euo pipefail
+
+systemctl --user disable --now sharkfin.service 2>/dev/null || true
+rm -f ~/.config/systemd/user/sharkfin.service
+systemctl --user daemon-reload
+rm -f ~/.local/bin/sharkfin
+echo "Uninstalled sharkfin binary and systemd user service"
