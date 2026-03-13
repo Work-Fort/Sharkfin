@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/Work-Fort/sharkfin-e2e/harness"
+	"github.com/gorilla/websocket"
 )
 
 var sharkfinBin string
@@ -49,32 +50,24 @@ func TestMain(m *testing.M) {
 	os.Exit(m.Run())
 }
 
-// --- Presence tests ---
-
-func TestPresenceConnect(t *testing.T) {
-	addr, err := harness.FreePort()
-	if err != nil {
-		t.Fatal(err)
+// newMCPClient creates an MCP client with JWT auth and auto-provisions the identity.
+func newMCPClient(t *testing.T, d *harness.Daemon, id, username, displayName, userType string) *harness.Client {
+	t.Helper()
+	token := d.SignJWT(id, username, displayName, userType)
+	c := harness.NewClient(d.Addr(), token)
+	if err := c.Initialize(); err != nil {
+		t.Fatalf("initialize %s: %v", username, err)
 	}
-	d, err := harness.StartDaemon(sharkfinBin, addr)
-	if err != nil {
-		t.Fatal(err)
+	// First tool call auto-provisions the identity
+	if _, err := c.ToolCall("user_list", map[string]any{}); err != nil {
+		t.Fatalf("provision %s: %v", username, err)
 	}
-	defer d.StopFatal(t)
-
-	c := harness.NewClient(addr)
-	if err := c.ConnectPresence(); err != nil {
-		t.Fatalf("connect presence: %v", err)
-	}
-	defer c.DisconnectPresence()
-
-	token := c.Token()
-	if len(token) != 64 {
-		t.Errorf("token length = %d, want 64 hex chars", len(token))
-	}
+	return c
 }
 
-func TestPresenceDisconnectMarksOffline(t *testing.T) {
+// --- Presence tests ---
+
+func TestPresenceWSDisconnectMarksOffline(t *testing.T) {
 	addr, err := harness.FreePort()
 	if err != nil {
 		t.Fatal(err)
@@ -85,29 +78,22 @@ func TestPresenceDisconnectMarksOffline(t *testing.T) {
 	}
 	defer d.StopFatal(t)
 
-	alice := harness.NewClient(addr)
-	if err := alice.RegisterFlow("alice"); err != nil {
-		t.Fatal(err)
-	}
-
-	r, err := alice.ToolCall("user_list", map[string]any{})
+	// Alice connects via WS (persistent connection = online)
+	aliceToken := d.SignJWT("uuid-alice", "alice", "Alice", "user")
+	ws, err := harness.NewWSClient(addr, aliceToken)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(r.Text, `"online":true`) {
-		t.Fatalf("expected alice online, got: %s", r.Text)
-	}
+	ws.Req("user_list", map[string]any{}, "prov")
 
-	alice.DisconnectPresence()
+	// Disconnect Alice's WS connection
+	ws.Close()
 	time.Sleep(200 * time.Millisecond)
 
-	checker := harness.NewClient(addr)
-	if err := checker.RegisterFlow("bob"); err != nil {
-		t.Fatal(err)
-	}
-	defer checker.DisconnectPresence()
+	// Bob checks user list — alice should be offline
+	bob := newMCPClient(t, d, "uuid-bob", "bob", "Bob", "user")
 
-	r, err = checker.ToolCall("user_list", map[string]any{})
+	r, err := bob.ToolCall("user_list", map[string]any{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -120,7 +106,7 @@ func TestPresenceDisconnectMarksOffline(t *testing.T) {
 
 	for _, u := range users {
 		if u.Username == "alice" && u.Online {
-			t.Error("alice should be offline after disconnect")
+			t.Error("alice should be offline after WS disconnect")
 		}
 	}
 }
@@ -158,7 +144,7 @@ func TestPresenceHardKillMarksOffline(t *testing.T) {
 	}
 	defer d.StopFatal(t)
 
-	bridge, err := harness.StartBridge(sharkfinBin, addr, d.XDGDir())
+	bridge, err := harness.StartBridge(sharkfinBin, addr, d.XDGDir(), "test-api-key")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -175,53 +161,25 @@ func TestPresenceHardKillMarksOffline(t *testing.T) {
 		t.Fatalf("initialize: %v", err)
 	}
 
-	tokenReq := map[string]any{
+	// Bridge auto-provisions via API key — call user_list to trigger identity creation
+	listReq := map[string]any{
 		"jsonrpc": "2.0", "id": 2, "method": "tools/call",
 		"params": map[string]any{
-			"name": "get_identity_token", "arguments": map[string]any{},
+			"name": "user_list", "arguments": map[string]any{},
 		},
 	}
-	tokenResp, err := bridge.Send(tokenReq)
-	if err != nil {
-		t.Fatalf("get_identity_token: %v", err)
-	}
-
-	var tokenResult struct {
-		Result struct {
-			Content []struct {
-				Text string `json:"text"`
-			} `json:"content"`
-		} `json:"result"`
-	}
-	if err := json.Unmarshal(tokenResp, &tokenResult); err != nil {
-		t.Fatalf("unmarshal token response: %v (raw: %s)", err, tokenResp)
-	}
-	if len(tokenResult.Result.Content) == 0 {
-		t.Fatalf("get_identity_token returned empty content (raw: %s)", tokenResp)
-	}
-	token := tokenResult.Result.Content[0].Text
-
-	regReq := map[string]any{
-		"jsonrpc": "2.0", "id": 3, "method": "tools/call",
-		"params": map[string]any{
-			"name": "register",
-			"arguments": map[string]any{
-				"token": token, "username": "alice", "password": "",
-			},
-		},
-	}
-	if _, err := bridge.Send(regReq); err != nil {
-		t.Fatalf("register: %v", err)
+	if _, err := bridge.Send(listReq); err != nil {
+		t.Fatalf("user_list: %v", err)
 	}
 
 	bridge.Kill()
 	time.Sleep(4 * time.Second)
 
-	checker := harness.NewClient(addr)
-	if err := checker.RegisterFlow("bob"); err != nil {
+	bobToken := d.SignJWT("uuid-bob", "bob", "Bob", "user")
+	checker := harness.NewClient(addr, bobToken)
+	if err := checker.Initialize(); err != nil {
 		t.Fatal(err)
 	}
-	defer checker.DisconnectPresence()
 
 	r, err := checker.ToolCall("user_list", map[string]any{})
 	if err != nil {
@@ -233,15 +191,15 @@ func TestPresenceHardKillMarksOffline(t *testing.T) {
 	}
 	json.Unmarshal([]byte(r.Text), &users)
 	for _, u := range users {
-		if u.Username == "alice" && u.Online {
-			t.Error("alice should be offline after bridge SIGKILL")
+		if u.Username == "bridge" && u.Online {
+			t.Error("bridge should be offline after SIGKILL")
 		}
 	}
 }
 
-// --- Identity tests ---
+// --- Identity tests (Passport auto-provisioning) ---
 
-func TestRegisterAndIdentify(t *testing.T) {
+func TestAutoProvisionOnFirstToolCall(t *testing.T) {
 	addr, err := harness.FreePort()
 	if err != nil {
 		t.Fatal(err)
@@ -252,148 +210,22 @@ func TestRegisterAndIdentify(t *testing.T) {
 	}
 	defer d.StopFatal(t)
 
-	alice := harness.NewClient(addr)
-	if err := alice.RegisterFlow("alice"); err != nil {
+	aliceToken := d.SignJWT("uuid-alice", "alice", "Alice", "user")
+	alice := harness.NewClient(addr, aliceToken)
+	if err := alice.Initialize(); err != nil {
 		t.Fatal(err)
 	}
-	alice.DisconnectPresence()
-	time.Sleep(100 * time.Millisecond)
 
-	alice2 := harness.NewClient(addr)
-	if err := alice2.IdentifyFlow("alice"); err != nil {
-		t.Fatalf("identify: %v", err)
-	}
-	defer alice2.DisconnectPresence()
-}
-
-func TestDoubleRegisterFails(t *testing.T) {
-	addr, err := harness.FreePort()
+	// First tool call auto-provisions identity
+	r, err := alice.ToolCall("user_list", map[string]any{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	d, err := harness.StartDaemon(sharkfinBin, addr)
-	if err != nil {
-		t.Fatal(err)
+	if r.Error != nil {
+		t.Fatalf("user_list error: %s", r.Error.Message)
 	}
-	defer d.StopFatal(t)
-
-	alice := harness.NewClient(addr)
-	if err := alice.RegisterFlow("alice"); err != nil {
-		t.Fatal(err)
-	}
-	defer alice.DisconnectPresence()
-
-	r, err := alice.ToolCall("register", map[string]any{
-		"token": "fake", "username": "bob", "password": "",
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if r.Error == nil {
-		t.Error("expected error on second register")
-	}
-}
-
-func TestIdentifyAfterRegisterFails(t *testing.T) {
-	addr, err := harness.FreePort()
-	if err != nil {
-		t.Fatal(err)
-	}
-	d, err := harness.StartDaemon(sharkfinBin, addr)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer d.StopFatal(t)
-
-	alice := harness.NewClient(addr)
-	if err := alice.RegisterFlow("alice"); err != nil {
-		t.Fatal(err)
-	}
-	defer alice.DisconnectPresence()
-
-	r, err := alice.ToolCall("identify", map[string]any{
-		"token": "fake", "username": "alice", "password": "",
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if r.Error == nil {
-		t.Error("expected error: already identified")
-	}
-}
-
-func TestDoubleLoginPrevention(t *testing.T) {
-	addr, err := harness.FreePort()
-	if err != nil {
-		t.Fatal(err)
-	}
-	d, err := harness.StartDaemon(sharkfinBin, addr)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer d.StopFatal(t)
-
-	alice := harness.NewClient(addr)
-	if err := alice.RegisterFlow("alice"); err != nil {
-		t.Fatal(err)
-	}
-	defer alice.DisconnectPresence()
-
-	alice2 := harness.NewClient(addr)
-	err = alice2.IdentifyFlow("alice")
-	if err == nil {
-		alice2.DisconnectPresence()
-		t.Fatal("expected error: user already online")
-	}
-	if !strings.Contains(err.Error(), "already online") {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestRegisterDuplicateUsername(t *testing.T) {
-	addr, err := harness.FreePort()
-	if err != nil {
-		t.Fatal(err)
-	}
-	d, err := harness.StartDaemon(sharkfinBin, addr)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer d.StopFatal(t)
-
-	alice := harness.NewClient(addr)
-	if err := alice.RegisterFlow("alice"); err != nil {
-		t.Fatal(err)
-	}
-	defer alice.DisconnectPresence()
-
-	alice2 := harness.NewClient(addr)
-	err = alice2.RegisterFlow("alice")
-	if err == nil {
-		alice2.DisconnectPresence()
-		t.Fatal("expected error: duplicate username or already online")
-	}
-}
-
-func TestIdentifyNonexistentUser(t *testing.T) {
-	addr, err := harness.FreePort()
-	if err != nil {
-		t.Fatal(err)
-	}
-	d, err := harness.StartDaemon(sharkfinBin, addr)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer d.StopFatal(t)
-
-	c := harness.NewClient(addr)
-	err = c.IdentifyFlow("nonexistent")
-	if err == nil {
-		c.DisconnectPresence()
-		t.Fatal("expected error: user not found")
-	}
-	if !strings.Contains(err.Error(), "not found") {
-		t.Fatalf("unexpected error: %v", err)
+	if !strings.Contains(r.Text, "alice") {
+		t.Errorf("expected alice in user list: %s", r.Text)
 	}
 }
 
@@ -410,7 +242,8 @@ func TestInitializeResponse(t *testing.T) {
 	}
 	defer d.StopFatal(t)
 
-	c := harness.NewClient(addr)
+	aliceToken := d.SignJWT("uuid-alice", "alice", "Alice", "user")
+	c := harness.NewClient(addr, aliceToken)
 	id := 1
 	result, rpcErr, headers, err := c.RawMCPRequest("initialize", id, map[string]any{
 		"protocolVersion": "2025-03-26",
@@ -457,7 +290,8 @@ func TestToolsList(t *testing.T) {
 	}
 	defer d.StopFatal(t)
 
-	c := harness.NewClient(addr)
+	aliceToken := d.SignJWT("uuid-alice", "alice", "Alice", "user")
+	c := harness.NewClient(addr, aliceToken)
 	if err := c.Initialize(); err != nil {
 		t.Fatal(err)
 	}
@@ -481,7 +315,7 @@ func TestToolsList(t *testing.T) {
 	}
 
 	expected := []string{
-		"get_identity_token", "register", "identify", "user_list", "channel_list",
+		"user_list", "channel_list",
 		"channel_create", "channel_invite", "channel_join", "send_message", "unread_messages",
 		"unread_counts", "mark_read", "history", "dm_list", "dm_open",
 		"capabilities", "set_state", "set_role", "create_role", "delete_role",
@@ -508,7 +342,7 @@ func TestToolsList(t *testing.T) {
 	}
 }
 
-func TestToolCallBeforeIdentify(t *testing.T) {
+func TestToolCallWithInvalidJWT(t *testing.T) {
 	addr, err := harness.FreePort()
 	if err != nil {
 		t.Fatal(err)
@@ -519,12 +353,8 @@ func TestToolCallBeforeIdentify(t *testing.T) {
 	}
 	defer d.StopFatal(t)
 
-	c := harness.NewClient(addr)
-	if err := c.ConnectPresence(); err != nil {
-		t.Fatal(err)
-	}
-	defer c.DisconnectPresence()
-
+	// Use an invalid JWT token
+	c := harness.NewClient(addr, "invalid-jwt-token")
 	if err := c.Initialize(); err != nil {
 		t.Fatal(err)
 	}
@@ -534,10 +364,7 @@ func TestToolCallBeforeIdentify(t *testing.T) {
 		t.Fatal(err)
 	}
 	if r.Error == nil {
-		t.Fatal("expected error for tool call before identify")
-	}
-	if !strings.Contains(strings.ToLower(r.Error.Message), "not identified") {
-		t.Errorf("error message = %q, want it to contain 'not identified'", r.Error.Message)
+		t.Fatal("expected error for tool call with invalid JWT")
 	}
 }
 
@@ -552,7 +379,8 @@ func TestUnknownMethod(t *testing.T) {
 	}
 	defer d.StopFatal(t)
 
-	c := harness.NewClient(addr)
+	aliceToken := d.SignJWT("uuid-alice", "alice", "Alice", "user")
+	c := harness.NewClient(addr, aliceToken)
 	if err := c.Initialize(); err != nil {
 		t.Fatal(err)
 	}
@@ -577,7 +405,8 @@ func TestUnknownTool(t *testing.T) {
 	}
 	defer d.StopFatal(t)
 
-	c := harness.NewClient(addr)
+	aliceToken := d.SignJWT("uuid-alice", "alice", "Alice", "user")
+	c := harness.NewClient(addr, aliceToken)
 	if err := c.Initialize(); err != nil {
 		t.Fatal(err)
 	}
@@ -602,7 +431,8 @@ func TestInvalidJSON(t *testing.T) {
 	}
 	defer d.StopFatal(t)
 
-	c := harness.NewClient(addr)
+	aliceToken := d.SignJWT("uuid-alice", "alice", "Alice", "user")
+	c := harness.NewClient(addr, aliceToken)
 	status, body, err := c.RawPost("/mcp", "this is not json{{{")
 	if err != nil {
 		t.Fatalf("request: %v", err)
@@ -629,7 +459,8 @@ func TestMethodNotAllowed(t *testing.T) {
 	}
 	defer d.StopFatal(t)
 
-	c := harness.NewClient(addr)
+	aliceToken := d.SignJWT("uuid-alice", "alice", "Alice", "user")
+	c := harness.NewClient(addr, aliceToken)
 	status, err := c.RawGet("/mcp")
 	if err != nil {
 		t.Fatalf("request: %v", err)
@@ -655,11 +486,13 @@ func TestChannelCreateAndList(t *testing.T) {
 	}
 	defer d.StopFatal(t)
 
-	alice := harness.NewClient(addr)
-	if err := alice.RegisterFlow("alice"); err != nil {
+	aliceToken := d.SignJWT("uuid-alice", "alice", "Alice", "user")
+	alice := harness.NewClient(addr, aliceToken)
+	if err := alice.Initialize(); err != nil {
 		t.Fatal(err)
 	}
-	defer alice.DisconnectPresence()
+	// Provision alice with first tool call
+	alice.ToolCall("user_list", map[string]any{})
 
 	if err := d.GrantAdmin(sharkfinBin, "alice"); err != nil {
 		t.Fatal(err)
@@ -717,23 +550,26 @@ func TestPrivateChannelVisibility(t *testing.T) {
 	}
 	defer d.StopFatal(t)
 
-	alice := harness.NewClient(addr)
-	if err := alice.RegisterFlow("alice"); err != nil {
+	aliceToken := d.SignJWT("uuid-alice", "alice", "Alice", "user")
+	alice := harness.NewClient(addr, aliceToken)
+	if err := alice.Initialize(); err != nil {
 		t.Fatal(err)
 	}
-	defer alice.DisconnectPresence()
+	alice.ToolCall("user_list", map[string]any{})
 
-	bob := harness.NewClient(addr)
-	if err := bob.RegisterFlow("bob"); err != nil {
+	bobToken := d.SignJWT("uuid-bob", "bob", "Bob", "user")
+	bob := harness.NewClient(addr, bobToken)
+	if err := bob.Initialize(); err != nil {
 		t.Fatal(err)
 	}
-	defer bob.DisconnectPresence()
+	bob.ToolCall("user_list", map[string]any{})
 
-	charlie := harness.NewClient(addr)
-	if err := charlie.RegisterFlow("charlie"); err != nil {
+	charlieToken := d.SignJWT("uuid-charlie", "charlie", "Charlie", "user")
+	charlie := harness.NewClient(addr, charlieToken)
+	if err := charlie.Initialize(); err != nil {
 		t.Fatal(err)
 	}
-	defer charlie.DisconnectPresence()
+	charlie.ToolCall("user_list", map[string]any{})
 
 	if err := d.GrantAdmin(sharkfinBin, "alice"); err != nil {
 		t.Fatal(err)
@@ -782,17 +618,19 @@ func TestPublicChannelVisibleToAll(t *testing.T) {
 	}
 	defer d.StopFatal(t)
 
-	alice := harness.NewClient(addr)
-	if err := alice.RegisterFlow("alice"); err != nil {
+	aliceToken := d.SignJWT("uuid-alice", "alice", "Alice", "user")
+	alice := harness.NewClient(addr, aliceToken)
+	if err := alice.Initialize(); err != nil {
 		t.Fatal(err)
 	}
-	defer alice.DisconnectPresence()
+	alice.ToolCall("user_list", map[string]any{})
 
-	bob := harness.NewClient(addr)
-	if err := bob.RegisterFlow("bob"); err != nil {
+	bobToken := d.SignJWT("uuid-bob", "bob", "Bob", "user")
+	bob := harness.NewClient(addr, bobToken)
+	if err := bob.Initialize(); err != nil {
 		t.Fatal(err)
 	}
-	defer bob.DisconnectPresence()
+	bob.ToolCall("user_list", map[string]any{})
 
 	if err := d.GrantAdmin(sharkfinBin, "alice"); err != nil {
 		t.Fatal(err)
@@ -830,11 +668,7 @@ func TestChannelCreatePermissionDenied(t *testing.T) {
 	}
 	defer d.StopFatal(t)
 
-	alice := harness.NewClient(addr)
-	if err := alice.RegisterFlow("alice"); err != nil {
-		t.Fatal(err)
-	}
-	defer alice.DisconnectPresence()
+	alice := newMCPClient(t, d, "uuid-alice", "alice", "Alice", "user")
 
 	// alice has "user" role which lacks create_channel permission
 	r, err := alice.ToolCall("channel_create", map[string]any{
@@ -863,23 +697,9 @@ func TestChannelInvite(t *testing.T) {
 	}
 	defer d.StopFatal(t)
 
-	alice := harness.NewClient(addr)
-	if err := alice.RegisterFlow("alice"); err != nil {
-		t.Fatal(err)
-	}
-	defer alice.DisconnectPresence()
-
-	bob := harness.NewClient(addr)
-	if err := bob.RegisterFlow("bob"); err != nil {
-		t.Fatal(err)
-	}
-	defer bob.DisconnectPresence()
-
-	charlie := harness.NewClient(addr)
-	if err := charlie.RegisterFlow("charlie"); err != nil {
-		t.Fatal(err)
-	}
-	defer charlie.DisconnectPresence()
+	alice := newMCPClient(t, d, "uuid-alice", "alice", "Alice", "user")
+	bob := newMCPClient(t, d, "uuid-bob", "bob", "Bob", "user")
+	charlie := newMCPClient(t, d, "uuid-charlie", "charlie", "Charlie", "user")
 
 	if err := d.GrantAdmin(sharkfinBin, "alice"); err != nil {
 		t.Fatal(err)
@@ -943,23 +763,9 @@ func TestChannelInviteByNonMember(t *testing.T) {
 	}
 	defer d.StopFatal(t)
 
-	alice := harness.NewClient(addr)
-	if err := alice.RegisterFlow("alice"); err != nil {
-		t.Fatal(err)
-	}
-	defer alice.DisconnectPresence()
-
-	bob := harness.NewClient(addr)
-	if err := bob.RegisterFlow("bob"); err != nil {
-		t.Fatal(err)
-	}
-	defer bob.DisconnectPresence()
-
-	charlie := harness.NewClient(addr)
-	if err := charlie.RegisterFlow("charlie"); err != nil {
-		t.Fatal(err)
-	}
-	defer charlie.DisconnectPresence()
+	alice := newMCPClient(t, d, "uuid-alice", "alice", "Alice", "user")
+	bob := newMCPClient(t, d, "uuid-bob", "bob", "Bob", "user")
+	_ = newMCPClient(t, d, "uuid-charlie", "charlie", "Charlie", "user")
 
 	if err := d.GrantAdmin(sharkfinBin, "alice"); err != nil {
 		t.Fatal(err)
@@ -1003,17 +809,8 @@ func TestSendAndReceiveMessage(t *testing.T) {
 	}
 	defer d.StopFatal(t)
 
-	alice := harness.NewClient(addr)
-	if err := alice.RegisterFlow("alice"); err != nil {
-		t.Fatal(err)
-	}
-	defer alice.DisconnectPresence()
-
-	bob := harness.NewClient(addr)
-	if err := bob.RegisterFlow("bob"); err != nil {
-		t.Fatal(err)
-	}
-	defer bob.DisconnectPresence()
+	alice := newMCPClient(t, d, "uuid-alice", "alice", "Alice", "user")
+	bob := newMCPClient(t, d, "uuid-bob", "bob", "Bob", "user")
 
 	if err := d.GrantAdmin(sharkfinBin, "alice"); err != nil {
 		t.Fatal(err)
@@ -1086,17 +883,8 @@ func TestUnreadMessagesAreConsumed(t *testing.T) {
 	}
 	defer d.StopFatal(t)
 
-	alice := harness.NewClient(addr)
-	if err := alice.RegisterFlow("alice"); err != nil {
-		t.Fatal(err)
-	}
-	defer alice.DisconnectPresence()
-
-	bob := harness.NewClient(addr)
-	if err := bob.RegisterFlow("bob"); err != nil {
-		t.Fatal(err)
-	}
-	defer bob.DisconnectPresence()
+	alice := newMCPClient(t, d, "uuid-alice", "alice", "Alice", "user")
+	bob := newMCPClient(t, d, "uuid-bob", "bob", "Bob", "user")
 
 	if err := d.GrantAdmin(sharkfinBin, "alice"); err != nil {
 		t.Fatal(err)
@@ -1193,17 +981,8 @@ func TestUnreadFilterByChannel(t *testing.T) {
 	}
 	defer d.StopFatal(t)
 
-	alice := harness.NewClient(addr)
-	if err := alice.RegisterFlow("alice"); err != nil {
-		t.Fatal(err)
-	}
-	defer alice.DisconnectPresence()
-
-	bob := harness.NewClient(addr)
-	if err := bob.RegisterFlow("bob"); err != nil {
-		t.Fatal(err)
-	}
-	defer bob.DisconnectPresence()
+	alice := newMCPClient(t, d, "uuid-alice", "alice", "Alice", "user")
+	bob := newMCPClient(t, d, "uuid-bob", "bob", "Bob", "user")
 
 	if err := d.GrantAdmin(sharkfinBin, "alice"); err != nil {
 		t.Fatal(err)
@@ -1286,11 +1065,7 @@ func TestSendToNonexistentChannel(t *testing.T) {
 	}
 	defer d.StopFatal(t)
 
-	alice := harness.NewClient(addr)
-	if err := alice.RegisterFlow("alice"); err != nil {
-		t.Fatal(err)
-	}
-	defer alice.DisconnectPresence()
+	alice := newMCPClient(t, d, "uuid-alice", "alice", "Alice", "user")
 
 	r, err := alice.ToolCall("send_message", map[string]any{
 		"channel": "doesnt-exist",
@@ -1315,17 +1090,8 @@ func TestNonParticipantCannotSend(t *testing.T) {
 	}
 	defer d.StopFatal(t)
 
-	alice := harness.NewClient(addr)
-	if err := alice.RegisterFlow("alice"); err != nil {
-		t.Fatal(err)
-	}
-	defer alice.DisconnectPresence()
-
-	bob := harness.NewClient(addr)
-	if err := bob.RegisterFlow("bob"); err != nil {
-		t.Fatal(err)
-	}
-	defer bob.DisconnectPresence()
+	alice := newMCPClient(t, d, "uuid-alice", "alice", "Alice", "user")
+	bob := newMCPClient(t, d, "uuid-bob", "bob", "Bob", "user")
 
 	if err := d.GrantAdmin(sharkfinBin, "alice"); err != nil {
 		t.Fatal(err)
@@ -1370,17 +1136,8 @@ func TestMultipleMessagesOrdering(t *testing.T) {
 	}
 	defer d.StopFatal(t)
 
-	alice := harness.NewClient(addr)
-	if err := alice.RegisterFlow("alice"); err != nil {
-		t.Fatal(err)
-	}
-	defer alice.DisconnectPresence()
-
-	bob := harness.NewClient(addr)
-	if err := bob.RegisterFlow("bob"); err != nil {
-		t.Fatal(err)
-	}
-	defer bob.DisconnectPresence()
+	alice := newMCPClient(t, d, "uuid-alice", "alice", "Alice", "user")
+	bob := newMCPClient(t, d, "uuid-bob", "bob", "Bob", "user")
 
 	if err := d.GrantAdmin(sharkfinBin, "alice"); err != nil {
 		t.Fatal(err)
@@ -1446,11 +1203,7 @@ func TestMCPHistory(t *testing.T) {
 	}
 	defer d.StopFatal(t)
 
-	alice := harness.NewClient(addr)
-	if err := alice.RegisterFlow("alice"); err != nil {
-		t.Fatal(err)
-	}
-	defer alice.DisconnectPresence()
+	alice := newMCPClient(t, d, "uuid-alice", "alice", "Alice", "user")
 
 	if err := d.GrantAdmin(sharkfinBin, "alice"); err != nil {
 		t.Fatal(err)
@@ -1546,7 +1299,7 @@ func TestBridgeEndToEnd(t *testing.T) {
 	}
 	defer d.StopFatal(t)
 
-	bridge, err := harness.StartBridge(sharkfinBin, addr, d.XDGDir())
+	bridge, err := harness.StartBridge(sharkfinBin, addr, d.XDGDir(), "test-api-key")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1577,68 +1330,28 @@ func TestBridgeEndToEnd(t *testing.T) {
 		t.Errorf("protocolVersion = %q, want %q", initResult.Result.ProtocolVersion, "2025-03-26")
 	}
 
-	// 2. Get identity token
-	tokenReq := map[string]any{
+	// 2. Trigger auto-provisioning by making a tool call (user_list is benign).
+	provReq := map[string]any{
 		"jsonrpc": "2.0", "id": 2, "method": "tools/call",
 		"params": map[string]any{
-			"name": "get_identity_token", "arguments": map[string]any{},
+			"name":      "user_list",
+			"arguments": map[string]any{},
 		},
 	}
-	tokenResp, err := bridge.Send(tokenReq)
+	provResp, err := bridge.Send(provReq)
 	if err != nil {
-		t.Fatalf("get_identity_token: %v", err)
+		t.Fatalf("user_list (provision): %v", err)
 	}
-	var tokenResult struct {
-		Result struct {
-			Content []struct {
-				Text string `json:"text"`
-			} `json:"content"`
-		} `json:"result"`
-	}
-	if err := json.Unmarshal(tokenResp, &tokenResult); err != nil {
-		t.Fatalf("unmarshal token: %v (raw: %s)", err, tokenResp)
-	}
-	if len(tokenResult.Result.Content) == 0 {
-		t.Fatalf("get_identity_token returned empty content (raw: %s)", tokenResp)
-	}
-	token := tokenResult.Result.Content[0].Text
-	if len(token) != 64 {
-		t.Errorf("token length = %d, want 64", len(token))
-	}
+	t.Logf("user_list provision response: %s", provResp)
 
-	// 3. Register
-	regReq := map[string]any{
-		"jsonrpc": "2.0", "id": 3, "method": "tools/call",
-		"params": map[string]any{
-			"name": "register",
-			"arguments": map[string]any{
-				"token": token, "username": "bridge-alice", "password": "",
-			},
-		},
-	}
-	regResp, err := bridge.Send(regReq)
-	if err != nil {
-		t.Fatalf("register: %v", err)
-	}
-	var regResult struct {
-		Error *struct {
-			Message string `json:"message"`
-		} `json:"error"`
-	}
-	if err := json.Unmarshal(regResp, &regResult); err != nil {
-		t.Fatalf("unmarshal register: %v (raw: %s)", err, regResp)
-	}
-	if regResult.Error != nil {
-		t.Fatalf("register error: %s", regResult.Error.Message)
-	}
-
-	if err := d.GrantAdmin(sharkfinBin, "bridge-alice"); err != nil {
+	// 3. Grant admin to bridge identity (now provisioned)
+	if err := d.GrantAdmin(sharkfinBin, "bridge"); err != nil {
 		t.Fatal(err)
 	}
 
 	// 4. Create channel
 	chReq := map[string]any{
-		"jsonrpc": "2.0", "id": 4, "method": "tools/call",
+		"jsonrpc": "2.0", "id": 3, "method": "tools/call",
 		"params": map[string]any{
 			"name": "channel_create",
 			"arguments": map[string]any{
@@ -1664,7 +1377,7 @@ func TestBridgeEndToEnd(t *testing.T) {
 
 	// 5. Send message
 	msgReq := map[string]any{
-		"jsonrpc": "2.0", "id": 5, "method": "tools/call",
+		"jsonrpc": "2.0", "id": 4, "method": "tools/call",
 		"params": map[string]any{
 			"name": "send_message",
 			"arguments": map[string]any{
@@ -1738,16 +1451,13 @@ func TestPresenceExitsOnDaemonRestart(t *testing.T) {
 	defer d2.StopFatal(t)
 
 	// Verify a new client can connect
-	c := harness.NewClient(addr)
-	if err := c.RegisterFlow("restart-user"); err != nil {
-		t.Fatalf("register after restart: %v", err)
-	}
-	defer c.DisconnectPresence()
+	c := newMCPClient(t, d2, "uuid-restart", "restart-user", "Restart User", "user")
+	_ = c
 }
 
 // --- WebSocket chat tests ---
 
-func TestWSRegisterAndIdentify(t *testing.T) {
+func TestWSConnectAndUserList(t *testing.T) {
 	addr, err := harness.FreePort()
 	if err != nil {
 		t.Fatal(err)
@@ -1758,12 +1468,9 @@ func TestWSRegisterAndIdentify(t *testing.T) {
 	}
 	defer d.StopFatal(t)
 
-	// Register via WS
-	ws1, err := harness.NewWSClient(addr)
+	aliceToken := d.SignJWT("uuid-alice", "alice", "Alice", "user")
+	ws1, err := harness.NewWSClient(addr, aliceToken)
 	if err != nil {
-		t.Fatal(err)
-	}
-	if err := ws1.WSRegister("alice"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1779,23 +1486,22 @@ func TestWSRegisterAndIdentify(t *testing.T) {
 		t.Errorf("expected alice in user list: %s", string(env.D))
 	}
 
-	// Disconnect
+	// Disconnect and reconnect with same token
 	ws1.Close()
 	time.Sleep(100 * time.Millisecond)
 
-	// Re-identify on new connection
-	ws2, err := harness.NewWSClient(addr)
+	ws2, err := harness.NewWSClient(addr, aliceToken)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer ws2.Close()
 
-	env, err = ws2.Req("identify", map[string]string{"username": "alice"}, "i1")
+	env, err = ws2.Req("user_list", map[string]any{}, "u2")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if env.OK == nil || !*env.OK {
-		t.Errorf("identify failed: %s", string(env.D))
+		t.Errorf("user_list after reconnect failed: %s", string(env.D))
 	}
 }
 
@@ -1810,23 +1516,23 @@ func TestWSChannelCreateAndInvite(t *testing.T) {
 	}
 	defer d.StopFatal(t)
 
-	alice, err := harness.NewWSClient(addr)
+	aliceToken := d.SignJWT("uuid-alice", "alice", "Alice", "user")
+	alice, err := harness.NewWSClient(addr, aliceToken)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer alice.Close()
-	if err := alice.WSRegister("alice"); err != nil {
-		t.Fatal(err)
-	}
 
-	bob, err := harness.NewWSClient(addr)
+	bobToken := d.SignJWT("uuid-bob", "bob", "Bob", "user")
+	bob, err := harness.NewWSClient(addr, bobToken)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer bob.Close()
-	if err := bob.WSRegister("bob"); err != nil {
-		t.Fatal(err)
-	}
+
+	// Auto-provision both users
+	alice.Req("user_list", map[string]any{}, "prov1")
+	bob.Req("user_list", map[string]any{}, "prov2")
 
 	if err := d.GrantAdmin(sharkfinBin, "alice"); err != nil {
 		t.Fatal(err)
@@ -1877,23 +1583,22 @@ func TestWSSendAndBroadcast(t *testing.T) {
 	}
 	defer d.StopFatal(t)
 
-	alice, err := harness.NewWSClient(addr)
+	aliceToken := d.SignJWT("uuid-alice", "alice", "Alice", "user")
+	alice, err := harness.NewWSClient(addr, aliceToken)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer alice.Close()
-	if err := alice.WSRegister("alice"); err != nil {
-		t.Fatal(err)
-	}
 
-	bob, err := harness.NewWSClient(addr)
+	bobToken := d.SignJWT("uuid-bob", "bob", "Bob", "user")
+	bob, err := harness.NewWSClient(addr, bobToken)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer bob.Close()
-	if err := bob.WSRegister("bob"); err != nil {
-		t.Fatal(err)
-	}
+
+	alice.Req("user_list", map[string]any{}, "prov1")
+	bob.Req("user_list", map[string]any{}, "prov2")
 
 	if err := d.GrantAdmin(sharkfinBin, "alice"); err != nil {
 		t.Fatal(err)
@@ -1959,14 +1664,13 @@ func TestWSHistory(t *testing.T) {
 	}
 	defer d.StopFatal(t)
 
-	ws, err := harness.NewWSClient(addr)
+	aliceToken := d.SignJWT("uuid-alice", "alice", "Alice", "user")
+	ws, err := harness.NewWSClient(addr, aliceToken)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer ws.Close()
-	if err := ws.WSRegister("alice"); err != nil {
-		t.Fatal(err)
-	}
+	ws.Req("user_list", map[string]any{}, "prov")
 
 	if err := d.GrantAdmin(sharkfinBin, "alice"); err != nil {
 		t.Fatal(err)
@@ -2022,23 +1726,22 @@ func TestWSUnreadMessages(t *testing.T) {
 	}
 	defer d.StopFatal(t)
 
-	alice, err := harness.NewWSClient(addr)
+	aliceToken := d.SignJWT("uuid-alice", "alice", "Alice", "user")
+	alice, err := harness.NewWSClient(addr, aliceToken)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer alice.Close()
-	if err := alice.WSRegister("alice"); err != nil {
-		t.Fatal(err)
-	}
 
-	bob, err := harness.NewWSClient(addr)
+	bobToken := d.SignJWT("uuid-bob", "bob", "Bob", "user")
+	bob, err := harness.NewWSClient(addr, bobToken)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer bob.Close()
-	if err := bob.WSRegister("bob"); err != nil {
-		t.Fatal(err)
-	}
+
+	alice.Req("user_list", map[string]any{}, "prov1")
+	bob.Req("user_list", map[string]any{}, "prov2")
 
 	if err := d.GrantAdmin(sharkfinBin, "alice"); err != nil {
 		t.Fatal(err)
@@ -2105,23 +1808,22 @@ func TestWSMentions(t *testing.T) {
 	}
 	defer d.StopFatal(t)
 
-	alice, err := harness.NewWSClient(addr)
+	aliceToken := d.SignJWT("uuid-alice", "alice", "Alice", "user")
+	alice, err := harness.NewWSClient(addr, aliceToken)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer alice.Close()
-	if err := alice.WSRegister("alice"); err != nil {
-		t.Fatal(err)
-	}
 
-	bob, err := harness.NewWSClient(addr)
+	bobToken := d.SignJWT("uuid-bob", "bob", "Bob", "user")
+	bob, err := harness.NewWSClient(addr, bobToken)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer bob.Close()
-	if err := bob.WSRegister("bob"); err != nil {
-		t.Fatal(err)
-	}
+
+	alice.Req("user_list", map[string]any{}, "prov1")
+	bob.Req("user_list", map[string]any{}, "prov2")
 
 	if err := d.GrantAdmin(sharkfinBin, "alice"); err != nil {
 		t.Fatal(err)
@@ -2198,14 +1900,13 @@ func TestWSMentionInvalidUser(t *testing.T) {
 	}
 	defer d.StopFatal(t)
 
-	ws, err := harness.NewWSClient(addr)
+	aliceToken := d.SignJWT("uuid-alice", "alice", "Alice", "user")
+	ws, err := harness.NewWSClient(addr, aliceToken)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer ws.Close()
-	if err := ws.WSRegister("alice"); err != nil {
-		t.Fatal(err)
-	}
+	ws.Req("user_list", map[string]any{}, "prov")
 
 	if err := d.GrantAdmin(sharkfinBin, "alice"); err != nil {
 		t.Fatal(err)
@@ -2239,23 +1940,22 @@ func TestWSThreadReply(t *testing.T) {
 	}
 	defer d.StopFatal(t)
 
-	alice, err := harness.NewWSClient(addr)
+	aliceToken := d.SignJWT("uuid-alice", "alice", "Alice", "user")
+	alice, err := harness.NewWSClient(addr, aliceToken)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer alice.Close()
-	if err := alice.WSRegister("alice"); err != nil {
-		t.Fatal(err)
-	}
 
-	bob, err := harness.NewWSClient(addr)
+	bobToken := d.SignJWT("uuid-bob", "bob", "Bob", "user")
+	bob, err := harness.NewWSClient(addr, bobToken)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer bob.Close()
-	if err := bob.WSRegister("bob"); err != nil {
-		t.Fatal(err)
-	}
+
+	alice.Req("user_list", map[string]any{}, "prov1")
+	bob.Req("user_list", map[string]any{}, "prov2")
 
 	if err := d.GrantAdmin(sharkfinBin, "alice"); err != nil {
 		t.Fatal(err)
@@ -2341,14 +2041,13 @@ func TestWSNestedReplyRejected(t *testing.T) {
 	}
 	defer d.StopFatal(t)
 
-	ws, err := harness.NewWSClient(addr)
+	aliceToken := d.SignJWT("uuid-alice", "alice", "Alice", "user")
+	ws, err := harness.NewWSClient(addr, aliceToken)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer ws.Close()
-	if err := ws.WSRegister("alice"); err != nil {
-		t.Fatal(err)
-	}
+	ws.Req("user_list", map[string]any{}, "prov")
 
 	if err := d.GrantAdmin(sharkfinBin, "alice"); err != nil {
 		t.Fatal(err)
@@ -2400,21 +2099,16 @@ func TestWSAndMCPInterop(t *testing.T) {
 	defer d.StopFatal(t)
 
 	// Alice on MCP
-	alice := harness.NewClient(addr)
-	if err := alice.RegisterFlow("alice"); err != nil {
-		t.Fatal(err)
-	}
-	defer alice.DisconnectPresence()
+	alice := newMCPClient(t, d, "uuid-alice", "alice", "Alice", "user")
 
 	// Bob on WS
-	bob, err := harness.NewWSClient(addr)
+	bobToken := d.SignJWT("uuid-bob", "bob", "Bob", "user")
+	bob, err := harness.NewWSClient(addr, bobToken)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer bob.Close()
-	if err := bob.WSRegister("bob"); err != nil {
-		t.Fatal(err)
-	}
+	bob.Req("user_list", map[string]any{}, "prov")
 
 	if err := d.GrantAdmin(sharkfinBin, "alice"); err != nil {
 		t.Fatal(err)
@@ -2477,17 +2171,8 @@ func TestUnreadCounts(t *testing.T) {
 	}
 	defer d.StopFatal(t)
 
-	alice := harness.NewClient(addr)
-	if err := alice.RegisterFlow("alice"); err != nil {
-		t.Fatal(err)
-	}
-	defer alice.DisconnectPresence()
-
-	bob := harness.NewClient(addr)
-	if err := bob.RegisterFlow("bob"); err != nil {
-		t.Fatal(err)
-	}
-	defer bob.DisconnectPresence()
+	alice := newMCPClient(t, d, "uuid-alice", "alice", "Alice", "user")
+	bob := newMCPClient(t, d, "uuid-bob", "bob", "Bob", "user")
 
 	if err := d.GrantAdmin(sharkfinBin, "alice"); err != nil {
 		t.Fatal(err)
@@ -2580,17 +2265,8 @@ func TestMarkReadForwardOnly(t *testing.T) {
 	}
 	defer d.StopFatal(t)
 
-	alice := harness.NewClient(addr)
-	if err := alice.RegisterFlow("alice"); err != nil {
-		t.Fatal(err)
-	}
-	defer alice.DisconnectPresence()
-
-	bob := harness.NewClient(addr)
-	if err := bob.RegisterFlow("bob"); err != nil {
-		t.Fatal(err)
-	}
-	defer bob.DisconnectPresence()
+	alice := newMCPClient(t, d, "uuid-alice", "alice", "Alice", "user")
+	bob := newMCPClient(t, d, "uuid-bob", "bob", "Bob", "user")
 
 	if err := d.GrantAdmin(sharkfinBin, "alice"); err != nil {
 		t.Fatal(err)
@@ -2681,22 +2357,17 @@ func TestWSUnreadCountsAndMarkRead(t *testing.T) {
 	}
 	defer d.StopFatal(t)
 
-	// Register alice via MCP
-	alice := harness.NewClient(addr)
-	if err := alice.RegisterFlow("alice"); err != nil {
-		t.Fatal(err)
-	}
-	defer alice.DisconnectPresence()
+	// Alice via MCP
+	alice := newMCPClient(t, d, "uuid-alice", "alice", "Alice", "user")
 
 	// Bob connects via WS
-	ws, err := harness.NewWSClient(addr)
+	bobToken := d.SignJWT("uuid-bob", "bob", "Bob", "user")
+	ws, err := harness.NewWSClient(addr, bobToken)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer ws.Close()
-	if err := ws.WSRegister("bob"); err != nil {
-		t.Fatal(err)
-	}
+	ws.Req("user_list", map[string]any{}, "prov")
 
 	if err := d.GrantAdmin(sharkfinBin, "alice"); err != nil {
 		t.Fatal(err)
@@ -2803,17 +2474,8 @@ func TestWebhookOnMention(t *testing.T) {
 	defer d.StopFatal(t)
 
 	// Register alice and bob
-	alice := harness.NewClient(addr)
-	if err := alice.RegisterFlow("alice"); err != nil {
-		t.Fatal(err)
-	}
-	defer alice.DisconnectPresence()
-
-	bob := harness.NewClient(addr)
-	if err := bob.RegisterFlow("bob"); err != nil {
-		t.Fatal(err)
-	}
-	defer bob.DisconnectPresence()
+	alice := newMCPClient(t, d, "uuid-alice", "alice", "Alice", "user")
+	_ = newMCPClient(t, d, "uuid-bob", "bob", "Bob", "user")
 
 	if err := d.GrantAdmin(sharkfinBin, "alice"); err != nil {
 		t.Fatal(err)
@@ -2887,17 +2549,9 @@ func TestWebhookOnDM(t *testing.T) {
 	defer d.StopFatal(t)
 
 	// Register alice and bob
-	alice := harness.NewClient(addr)
-	if err := alice.RegisterFlow("alice"); err != nil {
-		t.Fatal(err)
-	}
-	defer alice.DisconnectPresence()
-
-	bob := harness.NewClient(addr)
-	if err := bob.RegisterFlow("bob"); err != nil {
-		t.Fatal(err)
-	}
-	defer bob.DisconnectPresence()
+	alice := newMCPClient(t, d, "uuid-alice", "alice", "Alice", "user")
+	bob := newMCPClient(t, d, "uuid-bob", "bob", "Bob", "user")
+	_ = bob
 
 	// Open DM
 	r, err := alice.ToolCall("dm_open", map[string]any{"username": "bob"})
@@ -2951,11 +2605,7 @@ func TestRBACDefaultPermissions(t *testing.T) {
 	defer d.StopFatal(t)
 
 	// Register an admin to create a channel
-	admin := harness.NewClient(addr)
-	if err := admin.RegisterFlow("admin-user"); err != nil {
-		t.Fatal(err)
-	}
-	defer admin.DisconnectPresence()
+	admin := newMCPClient(t, d, "uuid-admin", "admin-user", "Admin User", "user")
 
 	if err := d.GrantAdmin(sharkfinBin, "admin-user"); err != nil {
 		t.Fatal(err)
@@ -2968,12 +2618,8 @@ func TestRBACDefaultPermissions(t *testing.T) {
 		t.Fatalf("channel_create: err=%v rpc=%+v", err, r.Error)
 	}
 
-	// Register a normal user via MCP (gets "agent" role, same perms as "user")
-	alice := harness.NewClient(addr)
-	if err := alice.RegisterFlow("alice"); err != nil {
-		t.Fatal(err)
-	}
-	defer alice.DisconnectPresence()
+	// Register a normal user via MCP
+	alice := newMCPClient(t, d, "uuid-alice", "alice", "Alice", "user")
 
 	// Alice should be able to join the channel and send a message
 	r, err = alice.ToolCall("channel_join", map[string]any{"channel": "general"})
@@ -3015,11 +2661,7 @@ func TestRBACAdminCanManageRoles(t *testing.T) {
 	defer d.StopFatal(t)
 
 	// Register a user
-	alice := harness.NewClient(addr)
-	if err := alice.RegisterFlow("alice"); err != nil {
-		t.Fatal(err)
-	}
-	defer alice.DisconnectPresence()
+	alice := newMCPClient(t, d, "uuid-alice", "alice", "Alice", "user")
 
 	// Verify alice cannot create channels initially
 	r, err := alice.ToolCall("channel_create", map[string]any{
@@ -3060,11 +2702,7 @@ func TestCapabilitiesQueryMCP(t *testing.T) {
 	}
 	defer d.StopFatal(t)
 
-	alice := harness.NewClient(addr)
-	if err := alice.RegisterFlow("alice"); err != nil {
-		t.Fatal(err)
-	}
-	defer alice.DisconnectPresence()
+	alice := newMCPClient(t, d, "uuid-alice", "alice", "Alice", "user")
 
 	r, err := alice.Capabilities()
 	if err != nil {
@@ -3115,14 +2753,13 @@ func TestCapabilitiesQueryWS(t *testing.T) {
 	}
 	defer d.StopFatal(t)
 
-	ws, err := harness.NewWSClient(addr)
+	aliceToken := d.SignJWT("uuid-alice", "alice", "Alice", "user")
+	ws, err := harness.NewWSClient(addr, aliceToken)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer ws.Close()
-	if err := ws.WSRegister("alice"); err != nil {
-		t.Fatal(err)
-	}
+	ws.Req("user_list", map[string]any{}, "prov")
 
 	env, err := ws.Capabilities()
 	if err != nil {
@@ -3172,24 +2809,22 @@ func TestPresenceBroadcastOnWS(t *testing.T) {
 	}
 	defer d.StopFatal(t)
 
-	// Register first user
-	ws1, err := harness.NewWSClient(addr)
+	// Connect first user
+	aliceToken := d.SignJWT("uuid-alice", "alice", "Alice", "user")
+	ws1, err := harness.NewWSClient(addr, aliceToken)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer ws1.Close()
-	if err := ws1.WSRegister("alice"); err != nil {
-		t.Fatal(err)
-	}
+	ws1.Req("user_list", map[string]any{}, "prov")
 
-	// Register second user — first should receive presence broadcast
-	ws2, err := harness.NewWSClient(addr)
+	// Connect second user — first should receive presence broadcast
+	bobToken := d.SignJWT("uuid-bob", "bob", "Bob", "user")
+	ws2, err := harness.NewWSClient(addr, bobToken)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := ws2.WSRegister("bob"); err != nil {
-		t.Fatal(err)
-	}
+	ws2.Req("user_list", map[string]any{}, "prov")
 
 	// Read broadcasts on ws1 until we get bob's online presence
 	var foundOnline bool
@@ -3252,15 +2887,14 @@ func TestActiveIdleState(t *testing.T) {
 	}
 	defer d.StopFatal(t)
 
-	// Register first WS user and set to active
-	ws1, err := harness.NewWSClient(addr)
+	// Connect first WS user and set to active
+	aliceToken := d.SignJWT("uuid-alice", "alice", "Alice", "user")
+	ws1, err := harness.NewWSClient(addr, aliceToken)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer ws1.Close()
-	if err := ws1.WSRegister("alice"); err != nil {
-		t.Fatal(err)
-	}
+	ws1.Req("user_list", map[string]any{}, "prov")
 
 	env, err := ws1.SetState("active")
 	if err != nil {
@@ -3270,15 +2904,14 @@ func TestActiveIdleState(t *testing.T) {
 		t.Fatalf("set_state failed: %s", string(env.D))
 	}
 
-	// Register second WS user
-	ws2, err := harness.NewWSClient(addr)
+	// Connect second WS user
+	bobToken := d.SignJWT("uuid-bob", "bob", "Bob", "user")
+	ws2, err := harness.NewWSClient(addr, bobToken)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer ws2.Close()
-	if err := ws2.WSRegister("bob"); err != nil {
-		t.Fatal(err)
-	}
+	ws2.Req("user_list", map[string]any{}, "prov")
 
 	// Drain alice's presence broadcast on ws2 (from register)
 	// We should see alice's presence broadcast when bob connects;
@@ -3320,11 +2953,7 @@ func TestActiveIdleState(t *testing.T) {
 	}
 
 	// Also test via MCP set_state tool
-	mcpUser := harness.NewClient(addr)
-	if err := mcpUser.RegisterFlow("charlie"); err != nil {
-		t.Fatal(err)
-	}
-	defer mcpUser.DisconnectPresence()
+	mcpUser := newMCPClient(t, d, "uuid-charlie", "charlie", "Charlie", "user")
 
 	r, err := mcpUser.SetState("active")
 	if err != nil {
@@ -3349,12 +2978,8 @@ func TestNotificationsOnlyMode(t *testing.T) {
 	}
 	defer d.StopFatal(t)
 
-	// Register a normal user first (to create channels and send messages)
-	admin := harness.NewClient(addr)
-	if err := admin.RegisterFlow("admin-user"); err != nil {
-		t.Fatal(err)
-	}
-	defer admin.DisconnectPresence()
+	// Register an admin to create channels and send messages
+	admin := newMCPClient(t, d, "uuid-admin", "admin-user", "Admin User", "user")
 	if err := d.GrantAdmin(sharkfinBin, "admin-user"); err != nil {
 		t.Fatal(err)
 	}
@@ -3365,27 +2990,23 @@ func TestNotificationsOnlyMode(t *testing.T) {
 		t.Fatalf("channel_create: err=%v rpc=%+v", err, r.Error)
 	}
 
-	// Connect a WS user with notifications_only
-	ws, err := harness.NewWSClient(addr)
+	// Connect a WS user with notifications_only query parameter
+	notifToken := d.SignJWT("uuid-notif", "notif-user", "Notif User", "user")
+	wsURL := fmt.Sprintf("ws://%s/ws?notifications_only=true", addr)
+	wsHeader := http.Header{}
+	wsHeader.Set("Authorization", "Bearer "+notifToken)
+	wsConn, _, err := websocket.DefaultDialer.Dial(wsURL, wsHeader)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("dial ws: %v", err)
 	}
+	ws := harness.NewWSClientFromConn(wsConn)
 	defer ws.Close()
 
-	// Register with notifications_only: true
-	env, err := ws.Req("register", map[string]any{
-		"username":           "notif-user",
-		"notifications_only": true,
-	}, "reg")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if env.OK == nil || !*env.OK {
-		t.Fatalf("register notifications_only failed: %s", string(env.D))
-	}
+	// Provision the user
+	ws.Req("user_list", map[string]any{}, "prov")
 
 	// (a) send_message should return error "notification-only connection"
-	env, err = ws.Req("send_message", map[string]any{
+	env, err := ws.Req("send_message", map[string]any{
 		"channel": "general", "message": "should fail",
 	}, "m1")
 	if err != nil {
@@ -3466,7 +3087,7 @@ func TestNotificationsOnlyMode(t *testing.T) {
 	}
 }
 
-func TestAgentTypeOnMCPRegister(t *testing.T) {
+func TestIdentityTypeFromJWT(t *testing.T) {
 	addr, err := harness.FreePort()
 	if err != nil {
 		t.Fatal(err)
@@ -3477,11 +3098,8 @@ func TestAgentTypeOnMCPRegister(t *testing.T) {
 	}
 	defer d.StopFatal(t)
 
-	alice := harness.NewClient(addr)
-	if err := alice.RegisterFlow("alice"); err != nil {
-		t.Fatal(err)
-	}
-	defer alice.DisconnectPresence()
+	// Create alice with type "user" in JWT
+	alice := newMCPClient(t, d, "uuid-alice", "alice", "Alice", "user")
 
 	r, err := alice.ToolCall("user_list", map[string]any{})
 	if err != nil {
@@ -3503,8 +3121,8 @@ func TestAgentTypeOnMCPRegister(t *testing.T) {
 	for _, u := range users {
 		if u.Username == "alice" {
 			found = true
-			if u.Type != "agent" {
-				t.Errorf("alice type = %q, want %q", u.Type, "agent")
+			if u.Type != "user" {
+				t.Errorf("alice type = %q, want %q", u.Type, "user")
 			}
 		}
 	}
@@ -3513,7 +3131,7 @@ func TestAgentTypeOnMCPRegister(t *testing.T) {
 	}
 }
 
-func TestUserTypeOnWSRegister(t *testing.T) {
+func TestUserTypeOnWSConnect(t *testing.T) {
 	addr, err := harness.FreePort()
 	if err != nil {
 		t.Fatal(err)
@@ -3524,14 +3142,13 @@ func TestUserTypeOnWSRegister(t *testing.T) {
 	}
 	defer d.StopFatal(t)
 
-	ws, err := harness.NewWSClient(addr)
+	aliceToken := d.SignJWT("uuid-alice", "alice", "Alice", "user")
+	ws, err := harness.NewWSClient(addr, aliceToken)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer ws.Close()
-	if err := ws.WSRegister("alice"); err != nil {
-		t.Fatal(err)
-	}
+	ws.Req("user_list", map[string]any{}, "prov")
 
 	// Query user_list via WS
 	env, err := ws.Req("user_list", map[string]any{}, "u1")
@@ -3591,17 +3208,9 @@ func TestWebhookNotFiredWithoutMention(t *testing.T) {
 	defer d.StopFatal(t)
 
 	// Register alice and bob
-	alice := harness.NewClient(addr)
-	if err := alice.RegisterFlow("alice"); err != nil {
-		t.Fatal(err)
-	}
-	defer alice.DisconnectPresence()
-
-	bob := harness.NewClient(addr)
-	if err := bob.RegisterFlow("bob"); err != nil {
-		t.Fatal(err)
-	}
-	defer bob.DisconnectPresence()
+	alice := newMCPClient(t, d, "uuid-alice", "alice", "Alice", "user")
+	bob := newMCPClient(t, d, "uuid-bob", "bob", "Bob", "user")
+	_ = bob
 
 	if err := d.GrantAdmin(sharkfinBin, "alice"); err != nil {
 		t.Fatal(err)
@@ -3652,14 +3261,8 @@ func TestBackupExportImport(t *testing.T) {
 	}
 	defer dA.Cleanup()
 
-	alice := harness.NewClient(addrA)
-	if err := alice.RegisterFlow("alice"); err != nil {
-		t.Fatal(err)
-	}
-	bob := harness.NewClient(addrA)
-	if err := bob.RegisterFlow("bob"); err != nil {
-		t.Fatal(err)
-	}
+	alice := newMCPClient(t, dA, "uuid-alice", "alice", "Alice", "user")
+	bob := newMCPClient(t, dA, "uuid-bob", "bob", "Bob", "user")
 
 	if err := dA.GrantAdmin(sharkfinBin, "alice"); err != nil {
 		t.Fatal(err)
@@ -3686,8 +3289,8 @@ func TestBackupExportImport(t *testing.T) {
 		t.Fatalf("send: err=%v rpc=%+v", err, r.Error)
 	}
 
-	alice.DisconnectPresence()
-	bob.DisconnectPresence()
+	_ = alice
+	_ = bob
 	dA.StopNoClean(t)
 
 	// --- Export to local file ---
@@ -3728,11 +3331,11 @@ func TestBackupExportImport(t *testing.T) {
 	defer dB.StopFatal(t)
 
 	// --- Verify via MCP ---
-	verifier := harness.NewClient(addrB)
-	if err := verifier.IdentifyFlow("alice"); err != nil {
+	aliceTokenB := dB.SignJWT("uuid-alice", "alice", "Alice", "user")
+	verifier := harness.NewClient(addrB, aliceTokenB)
+	if err := verifier.Initialize(); err != nil {
 		t.Fatal(err)
 	}
-	defer verifier.DisconnectPresence()
 
 	// Verify users
 	ur, err := verifier.ToolCall("user_list", map[string]any{})
@@ -3760,39 +3363,31 @@ func TestBackupExportImport(t *testing.T) {
 
 // --- Presence Notification tests ---
 
-// setupPresenceUser registers (or identifies) a user who has both:
+// setupPresenceUser creates a user with both:
 //   - a PresenceClient (WebSocket connection to /presence, for receiving notifications)
 //   - a regular MCP Client (HTTP, for calling tools like send_message)
 //
-// The MCP client is registered/identified using the token from the PresenceClient,
-// so the daemon links the presence connection to the user identity.
-func setupPresenceUser(t *testing.T, addr, username string, register bool) (*harness.PresenceClient, *harness.Client) {
+// Both use the same JWT for authentication.
+func setupPresenceUser(t *testing.T, d *harness.Daemon, id, username, displayName string) (*harness.PresenceClient, *harness.Client) {
 	t.Helper()
 
-	pc, err := harness.NewPresenceClient(addr)
+	token := d.SignJWT(id, username, displayName, "user")
+
+	pc, err := harness.NewPresenceClient(d.Addr(), token)
 	if err != nil {
 		t.Fatalf("presence client for %s: %v", username, err)
 	}
 
-	mc := harness.NewClient(addr)
+	mc := harness.NewClient(d.Addr(), token)
 	if err := mc.Initialize(); err != nil {
 		pc.Close()
 		t.Fatalf("initialize MCP for %s: %v", username, err)
 	}
 
-	var toolErr error
-	if register {
-		_, toolErr = mc.ToolCall("register", map[string]any{
-			"token": pc.Token(), "username": username, "password": "",
-		})
-	} else {
-		_, toolErr = mc.ToolCall("identify", map[string]any{
-			"token": pc.Token(), "username": username, "password": "",
-		})
-	}
-	if toolErr != nil {
+	// Auto-provision identity
+	if _, err := mc.ToolCall("user_list", map[string]any{}); err != nil {
 		pc.Close()
-		t.Fatalf("%s register/identify: %v", username, toolErr)
+		t.Fatalf("provision %s: %v", username, err)
 	}
 
 	return pc, mc
@@ -3810,14 +3405,10 @@ func TestPresenceNotificationOnMention(t *testing.T) {
 	defer d.StopFatal(t)
 
 	// Alice: regular MCP client (sender) — she doesn't need a PresenceClient
-	alice := harness.NewClient(addr)
-	if err := alice.RegisterFlow("alice"); err != nil {
-		t.Fatal(err)
-	}
-	defer alice.DisconnectPresence()
+	alice := newMCPClient(t, d, "uuid-alice", "alice", "Alice", "user")
 
 	// Bob: needs both presence WS (for notifications) and MCP client (for tools)
-	bobPC, bobMCP := setupPresenceUser(t, addr, "bob", true)
+	bobPC, bobMCP := setupPresenceUser(t, d, "uuid-bob", "bob", "Bob")
 	defer bobPC.Close()
 	_ = bobMCP // bob's MCP client; not used for sending in this test
 
@@ -3887,14 +3478,10 @@ func TestPresenceNotificationOnDM(t *testing.T) {
 	defer d.StopFatal(t)
 
 	// Alice: regular MCP client (sender)
-	alice := harness.NewClient(addr)
-	if err := alice.RegisterFlow("alice"); err != nil {
-		t.Fatal(err)
-	}
-	defer alice.DisconnectPresence()
+	alice := newMCPClient(t, d, "uuid-alice", "alice", "Alice", "user")
 
 	// Bob: presence WS + MCP
-	bobPC, _ := setupPresenceUser(t, addr, "bob", true)
+	bobPC, _ := setupPresenceUser(t, d, "uuid-bob", "bob", "Bob")
 	defer bobPC.Close()
 
 	// Alice opens a DM with bob
@@ -3953,14 +3540,10 @@ func TestPresenceNoNotificationWithoutMention(t *testing.T) {
 	defer d.StopFatal(t)
 
 	// Alice: sender
-	alice := harness.NewClient(addr)
-	if err := alice.RegisterFlow("alice"); err != nil {
-		t.Fatal(err)
-	}
-	defer alice.DisconnectPresence()
+	alice := newMCPClient(t, d, "uuid-alice", "alice", "Alice", "user")
 
 	// Carol: should NOT receive notifications (not mentioned)
-	carolPC, _ := setupPresenceUser(t, addr, "carol", true)
+	carolPC, _ := setupPresenceUser(t, d, "uuid-carol", "carol", "Carol")
 	defer carolPC.Close()
 
 	// Grant alice admin so she can create channels
@@ -4001,7 +3584,7 @@ func TestBridgeNotification(t *testing.T) {
 	}
 	defer d.StopFatal(t)
 
-	bridge, err := harness.StartBridge(sharkfinBin, addr, d.XDGDir())
+	bridge, err := harness.StartBridge(sharkfinBin, addr, d.XDGDir(), "test-api-key")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -4073,23 +3656,22 @@ func TestWSMentionGroupCRUD(t *testing.T) {
 	}
 	defer d.StopFatal(t)
 
-	alice, err := harness.NewWSClient(addr)
+	aliceToken := d.SignJWT("uuid-alice", "alice", "Alice", "user")
+	alice, err := harness.NewWSClient(addr, aliceToken)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer alice.Close()
-	if err := alice.WSRegister("alice"); err != nil {
-		t.Fatal(err)
-	}
 
-	bob, err := harness.NewWSClient(addr)
+	bobToken := d.SignJWT("uuid-bob", "bob", "Bob", "user")
+	bob, err := harness.NewWSClient(addr, bobToken)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer bob.Close()
-	if err := bob.WSRegister("bob"); err != nil {
-		t.Fatal(err)
-	}
+
+	alice.Req("user_list", map[string]any{}, "prov1")
+	bob.Req("user_list", map[string]any{}, "prov2")
 
 	// Create group.
 	env, err := alice.Req("mention_group_create", map[string]any{"slug": "team"}, "mg1")
@@ -4152,23 +3734,22 @@ func TestWSMentionGroupExpansion(t *testing.T) {
 	}
 	defer d.StopFatal(t)
 
-	alice, err := harness.NewWSClient(addr)
+	aliceToken := d.SignJWT("uuid-alice", "alice", "Alice", "user")
+	alice, err := harness.NewWSClient(addr, aliceToken)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer alice.Close()
-	if err := alice.WSRegister("alice"); err != nil {
-		t.Fatal(err)
-	}
 
-	bob, err := harness.NewWSClient(addr)
+	bobToken := d.SignJWT("uuid-bob", "bob", "Bob", "user")
+	bob, err := harness.NewWSClient(addr, bobToken)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer bob.Close()
-	if err := bob.WSRegister("bob"); err != nil {
-		t.Fatal(err)
-	}
+
+	alice.Req("user_list", map[string]any{}, "prov1")
+	bob.Req("user_list", map[string]any{}, "prov2")
 
 	// Alice creates group and adds bob.
 	alice.Req("mention_group_create", map[string]any{"slug": "devs"}, "g1")

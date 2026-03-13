@@ -311,7 +311,15 @@ func (c *Client) RawMCPRequest(method string, id int, params any) (json.RawMessa
 
 func (c *Client) RawPost(path, body string) (int, []byte, error) {
 	url := fmt.Sprintf("http://%s%s", c.addr, path)
-	resp, err := http.Post(url, "application/json", strings.NewReader(body))
+	req, err := http.NewRequest("POST", url, strings.NewReader(body))
+	if err != nil {
+		return 0, nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if c.authToken != "" {
+		req.Header.Set("Authorization", "Bearer "+c.authToken)
+	}
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return 0, nil, err
 	}
@@ -498,6 +506,12 @@ func NewWSClient(daemonAddr string, authToken string) (*WSClient, error) {
 	}
 
 	return &WSClient{conn: conn}, nil
+}
+
+// NewWSClientFromConn wraps an existing websocket connection as a WSClient.
+// Use this when you need custom dial options (e.g., query parameters).
+func NewWSClientFromConn(conn *websocket.Conn) *WSClient {
+	return &WSClient{conn: conn}
 }
 
 // Close cleanly closes the WebSocket connection.
