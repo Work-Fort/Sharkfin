@@ -22,12 +22,17 @@ import (
 
 // NewMCPBridgeCmd creates the mcp-bridge subcommand.
 func NewMCPBridgeCmd() *cobra.Command {
-	return &cobra.Command{
+	cmd := &cobra.Command{
 		Use:   "mcp-bridge",
 		Short: "MCP stdio to HTTP bridge",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			addr := viper.GetString("daemon")
+
+			apiKey := viper.GetString("api-key")
+			if apiKey == "" {
+				return fmt.Errorf("--api-key is required")
+			}
 
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
@@ -43,6 +48,7 @@ func NewMCPBridgeCmd() *cobra.Command {
 				client: &http.Client{},
 				mcpURL: fmt.Sprintf("http://%s/mcp", addr),
 				wsURL:  fmt.Sprintf("ws://%s/presence", addr),
+				apiKey: apiKey,
 			}
 
 			if err := b.startPresence(ctx); err != nil {
@@ -52,6 +58,11 @@ func NewMCPBridgeCmd() *cobra.Command {
 			return b.processStdin()
 		},
 	}
+
+	cmd.Flags().String("api-key", "", "API key for bridge authentication")
+	_ = viper.BindPFlag("api-key", cmd.Flags().Lookup("api-key"))
+
+	return cmd
 }
 
 type bridge struct {
@@ -59,23 +70,17 @@ type bridge struct {
 	mcpURL        string
 	wsURL         string
 	sessionID     string
-	token         string
+	apiKey        string
 	notifications chan json.RawMessage
 }
 
 func (b *bridge) startPresence(ctx context.Context) error {
-	conn, _, err := websocket.DefaultDialer.Dial(b.wsURL, nil)
+	header := http.Header{}
+	header.Set("Authorization", "Bearer "+b.apiKey)
+	conn, _, err := websocket.DefaultDialer.Dial(b.wsURL, header)
 	if err != nil {
 		return fmt.Errorf("dial presence: %w", err)
 	}
-
-	// Read token (first message from server)
-	_, msg, err := conn.ReadMessage()
-	if err != nil {
-		conn.Close()
-		return fmt.Errorf("read token: %w", err)
-	}
-	b.token = string(msg)
 
 	// Close WebSocket when context is cancelled
 	go func() {
@@ -149,10 +154,6 @@ func (b *bridge) processStdin() error {
 			continue
 		}
 
-		if b.interceptGetIdentityToken(line) {
-			continue
-		}
-
 		if b.interceptWaitForMessages(line) {
 			continue
 		}
@@ -162,6 +163,7 @@ func (b *bridge) processStdin() error {
 			return fmt.Errorf("create request: %w", err)
 		}
 		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Authorization", "Bearer "+b.apiKey)
 		if b.sessionID != "" {
 			req.Header.Set("Mcp-Session-Id", b.sessionID)
 		}
@@ -186,45 +188,6 @@ func (b *bridge) processStdin() error {
 		}
 	}
 	return scanner.Err()
-}
-
-func (b *bridge) interceptGetIdentityToken(line string) bool {
-	var req struct {
-		JSONRPC string          `json:"jsonrpc"`
-		Method  string          `json:"method"`
-		Params  json.RawMessage `json:"params"`
-		ID      json.RawMessage `json:"id"`
-	}
-	if err := json.Unmarshal([]byte(line), &req); err != nil {
-		return false
-	}
-	if req.Method != "tools/call" {
-		return false
-	}
-
-	var params struct {
-		Name string `json:"name"`
-	}
-	if err := json.Unmarshal(req.Params, &params); err != nil {
-		return false
-	}
-	if params.Name != "get_identity_token" {
-		return false
-	}
-
-	resp := map[string]interface{}{
-		"jsonrpc": "2.0",
-		"id":      req.ID,
-		"result": map[string]interface{}{
-			"content": []map[string]string{
-				{"type": "text", "text": b.token},
-			},
-		},
-	}
-	data, _ := json.Marshal(resp)
-	os.Stdout.Write(data)
-	os.Stdout.Write([]byte("\n"))
-	return true
 }
 
 func (b *bridge) interceptWaitForMessages(line string) bool {
@@ -316,6 +279,7 @@ func (b *bridge) callUnreadMessages() (string, error) {
 		return "", fmt.Errorf("create request: %w", err)
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("Authorization", "Bearer "+b.apiKey)
 	if b.sessionID != "" {
 		httpReq.Header.Set("Mcp-Session-Id", b.sessionID)
 	}
