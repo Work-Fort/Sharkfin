@@ -10,6 +10,7 @@ import (
 	"github.com/charmbracelet/log"
 	"github.com/gorilla/websocket"
 
+	auth "github.com/Work-Fort/Passport/go/service-auth"
 	"github.com/Work-Fort/sharkfin/pkg/domain"
 )
 
@@ -19,61 +20,64 @@ var upgrader = websocket.Upgrader{
 
 // WSHandler handles WebSocket connections for non-MCP clients.
 type WSHandler struct {
-	sessions    *SessionManager
 	store       domain.Store
 	hub         *Hub
+	presence    *PresenceHandler
 	pongTimeout time.Duration
 	version     string
 }
 
 // NewWSHandler creates a new WebSocket handler.
-func NewWSHandler(sessions *SessionManager, store domain.Store, hub *Hub, pongTimeout time.Duration, version string) *WSHandler {
-	return &WSHandler{
-		sessions:    sessions,
-		store:       store,
-		hub:         hub,
-		pongTimeout: pongTimeout,
-		version:     version,
-	}
+func NewWSHandler(store domain.Store, hub *Hub, presence *PresenceHandler, pongTimeout time.Duration, version string) *WSHandler {
+	return &WSHandler{store: store, hub: hub, presence: presence, pongTimeout: pongTimeout, version: version}
 }
 
 func (h *WSHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	identity, ok := auth.IdentityFromContext(r.Context())
+	if !ok {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	// Auto-provision identity.
+	role := identity.Type
+	if role == "" {
+		role = "user"
+	}
+	if err := h.store.UpsertIdentity(identity.ID, identity.Username, identity.DisplayName, identity.Type, role); err != nil {
+		http.Error(w, "identity provisioning failed", http.StatusInternalServerError)
+		return
+	}
+
+	localIdentity, err := h.store.GetIdentityByID(identity.ID)
+	if err != nil {
+		http.Error(w, "identity lookup failed", http.StatusInternalServerError)
+		return
+	}
+
+	notificationsOnly := r.URL.Query().Get("notifications_only") == "true"
+
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		return
 	}
 	defer conn.Close()
 
+	username := localIdentity.Username
+	identityID := localIdentity.ID
 	pingInterval := h.pongTimeout / 2
 
-	// Send hello
-	hello := wsEnvelope{
-		Type: "hello",
-		D: map[string]interface{}{
-			"heartbeat_interval": int(pingInterval.Seconds()),
-			"version":            h.version,
-		},
-	}
-	if err := writeWSJSON(conn, hello); err != nil {
-		return
-	}
+	client := &WSClient{username: username, identityID: identityID, send: make(chan []byte, 256), hub: h.hub}
+	h.hub.Register(client)
+	h.hub.SetState(username, "idle")
+	h.hub.BroadcastPresence(username, true, "idle")
+	log.Info("ws: connect", "user", username, "notifications_only", notificationsOnly, "clients", h.hub.ClientCount())
 
-	// Connection state
-	var client *WSClient
-	var identified bool
-	var username string
-	var userID int64
-	var notificationsOnly bool
-	token := h.sessions.CreateIdentityToken()
-	done, _ := h.sessions.AttachPresence(token, nil)
 	defer func() {
-		if identified {
-			h.hub.Unregister(client)
-			h.hub.ClearState(username)
-			h.hub.BroadcastPresence(username, false, "")
-			log.Info("ws: disconnect", "user", username, "clients", h.hub.ClientCount())
-		}
-		h.sessions.DisconnectPresence(token)
+		h.hub.Unregister(client)
+		h.hub.ClearState(username)
+		h.hub.BroadcastPresence(username, false, "")
+		log.Info("ws: disconnect", "user", username, "clients", h.hub.ClientCount())
 	}()
 
 	// Set up keepalive
@@ -84,7 +88,7 @@ func (h *WSHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	})
 
 	// Write pump goroutine — sends outbound messages and pings
-	sendCh := make(chan []byte, 256)
+	sendCh := client.send
 	writeDone := make(chan struct{})
 	go func() {
 		defer close(writeDone)
@@ -105,8 +109,6 @@ func (h *WSHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				if err := conn.WriteMessage(websocket.PingMessage, nil); err != nil {
 					return
 				}
-			case <-done:
-				return
 			}
 		}
 	}()
@@ -124,88 +126,8 @@ func (h *WSHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 
-		// Before identification: only allow identify/register/ping
-		if !identified {
-			switch req.Type {
-			case "identify":
-				var d struct {
-					Username          string `json:"username"`
-					NotificationsOnly bool   `json:"notifications_only"`
-				}
-				json.Unmarshal(req.D, &d)
-				if d.Username == "" {
-					sendReply(sendCh, req.Ref, false, map[string]string{"message": "username required"})
-					continue
-				}
-				t0 := time.Now()
-				_, err := h.sessions.Identify(token, d.Username, "")
-				if err != nil {
-					sendReply(sendCh, req.Ref, false, map[string]string{"message": err.Error()})
-					continue
-				}
-				u, err := h.store.GetUserByUsername(d.Username)
-				if err != nil {
-					sendReply(sendCh, req.Ref, false, map[string]string{"message": err.Error()})
-					continue
-				}
-				identified = true
-				username = d.Username
-				userID = u.ID
-				notificationsOnly = d.NotificationsOnly
-				client = &WSClient{username: username, userID: userID, send: sendCh, hub: h.hub}
-				h.hub.Register(client)
-				h.hub.SetState(username, "idle")
-				h.hub.BroadcastPresence(username, true, "idle")
-				sendReply(sendCh, req.Ref, true, nil)
-				log.Info("ws: connect", "user", username, "notifications_only", notificationsOnly, "clients", h.hub.ClientCount(), "elapsed", time.Since(t0))
-
-			case "register":
-				var d struct {
-					Username          string `json:"username"`
-					NotificationsOnly bool   `json:"notifications_only"`
-				}
-				json.Unmarshal(req.D, &d)
-				if d.Username == "" {
-					sendReply(sendCh, req.Ref, false, map[string]string{"message": "username required"})
-					continue
-				}
-				_, err := h.sessions.Register(token, d.Username, "")
-				if err != nil {
-					sendReply(sendCh, req.Ref, false, map[string]string{"message": err.Error()})
-					continue
-				}
-				u, err := h.store.GetUserByUsername(d.Username)
-				if err != nil {
-					sendReply(sendCh, req.Ref, false, map[string]string{"message": err.Error()})
-					continue
-				}
-				identified = true
-				username = d.Username
-				userID = u.ID
-				notificationsOnly = d.NotificationsOnly
-				client = &WSClient{username: username, userID: userID, send: sendCh, hub: h.hub}
-				h.hub.Register(client)
-				h.hub.SetState(username, "idle")
-				h.hub.BroadcastPresence(username, true, "idle")
-				sendReply(sendCh, req.Ref, true, nil)
-				log.Info("ws: connect", "user", username, "notifications_only", notificationsOnly, "clients", h.hub.ClientCount())
-
-			case "ping":
-				sendPong(sendCh, req.Ref)
-			case "version":
-				sendReply(sendCh, req.Ref, true, map[string]string{"version": h.version})
-
-			default:
-				sendError(sendCh, req.Ref, "not identified: send identify or register first")
-			}
-			continue
-		}
-
-		// After identification: dispatch all request types
 		t0 := time.Now()
 		switch req.Type {
-		case "identify", "register":
-			sendError(sendCh, req.Ref, "already identified")
 		case "ping":
 			sendPong(sendCh, req.Ref)
 		case "version":
@@ -243,65 +165,65 @@ func (h *WSHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			if notificationsOnly {
 				sendError(sendCh, req.Ref, "notification-only connection")
 			} else if h.checkPermission(sendCh, req.Ref, username, "channel_list") {
-				h.handleWSChannelList(sendCh, req.Ref, userID)
+				h.handleWSChannelList(sendCh, req.Ref, identityID)
 			}
 		case "channel_create":
 			if notificationsOnly {
 				sendError(sendCh, req.Ref, "notification-only connection")
 			} else if h.checkPermission(sendCh, req.Ref, username, "create_channel") {
-				h.handleWSChannelCreate(sendCh, req.Ref, req.D, username, userID)
+				h.handleWSChannelCreate(sendCh, req.Ref, req.D, username, identityID)
 			}
 		case "channel_invite":
 			if notificationsOnly {
 				sendError(sendCh, req.Ref, "notification-only connection")
 			} else if h.checkPermission(sendCh, req.Ref, username, "invite_channel") {
-				h.handleWSChannelInvite(sendCh, req.Ref, req.D, userID)
+				h.handleWSChannelInvite(sendCh, req.Ref, req.D, identityID)
 			}
 		case "channel_join":
 			if notificationsOnly {
 				sendError(sendCh, req.Ref, "notification-only connection")
 			} else if h.checkPermission(sendCh, req.Ref, username, "join_channel") {
-				h.handleWSChannelJoin(sendCh, req.Ref, req.D, userID)
+				h.handleWSChannelJoin(sendCh, req.Ref, req.D, identityID)
 			}
 		case "send_message":
 			if notificationsOnly {
 				sendError(sendCh, req.Ref, "notification-only connection")
 			} else if h.checkPermission(sendCh, req.Ref, username, "send_message") {
-				h.handleWSSendMessage(sendCh, req.Ref, req.D, username, userID)
+				h.handleWSSendMessage(sendCh, req.Ref, req.D, username, identityID)
 			}
 		case "history":
 			if notificationsOnly {
 				sendError(sendCh, req.Ref, "notification-only connection")
 			} else if h.checkPermission(sendCh, req.Ref, username, "history") {
-				h.handleWSHistory(sendCh, req.Ref, req.D, userID)
+				h.handleWSHistory(sendCh, req.Ref, req.D, identityID)
 			}
 		case "unread_messages":
 			if notificationsOnly {
 				sendError(sendCh, req.Ref, "notification-only connection")
 			} else if h.checkPermission(sendCh, req.Ref, username, "unread_messages") {
-				h.handleWSUnreadMessages(sendCh, req.Ref, req.D, userID)
+				h.handleWSUnreadMessages(sendCh, req.Ref, req.D, identityID)
 			}
 		case "unread_counts":
 			if h.checkPermission(sendCh, req.Ref, username, "unread_counts") {
-				h.handleWSUnreadCounts(sendCh, req.Ref, userID)
+				h.handleWSUnreadCounts(sendCh, req.Ref, identityID)
 			}
 		case "dm_list":
 			if notificationsOnly {
 				sendError(sendCh, req.Ref, "notification-only connection")
 			} else if h.checkPermission(sendCh, req.Ref, username, "dm_list") {
-				h.handleWSDMList(sendCh, req.Ref, userID)
+				h.handleWSDMList(sendCh, req.Ref, identityID)
 			}
 		case "dm_open":
 			if notificationsOnly {
 				sendError(sendCh, req.Ref, "notification-only connection")
 			} else if h.checkPermission(sendCh, req.Ref, username, "dm_open") {
-				h.handleWSDMOpen(sendCh, req.Ref, req.D, username, userID)
+				h.handleWSDMOpen(sendCh, req.Ref, req.D, username, identityID)
 			}
 		case "mark_read":
 			if notificationsOnly {
 				sendError(sendCh, req.Ref, "notification-only connection")
 			} else if h.checkPermission(sendCh, req.Ref, username, "mark_read") {
-				h.handleWSMarkRead(sendCh, req.Ref, req.D, userID)
+				h.handleWSMarkRead(sendCh, req.Ref, req.D, identityID)
 			}
 		case "set_setting":
 			if notificationsOnly {
@@ -319,7 +241,7 @@ func (h *WSHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			if notificationsOnly {
 				sendError(sendCh, req.Ref, "notification-only connection")
 			} else {
-				h.handleWSMentionGroupCreate(sendCh, req.Ref, req.D, userID)
+				h.handleWSMentionGroupCreate(sendCh, req.Ref, req.D, identityID)
 			}
 		case "mention_group_delete":
 			if notificationsOnly {
@@ -373,7 +295,7 @@ func (h *WSHandler) checkPermission(sendCh chan<- []byte, ref, username, permiss
 // --- Request handlers ---
 
 func (h *WSHandler) handleWSUserList(sendCh chan<- []byte, ref string) {
-	users, err := h.store.ListUsers()
+	identities, err := h.store.ListIdentities()
 	if err != nil {
 		sendError(sendCh, ref, err.Error())
 		return
@@ -385,24 +307,24 @@ func (h *WSHandler) handleWSUserList(sendCh chan<- []byte, ref string) {
 		State    string `json:"state,omitempty"`
 	}
 	var list []userInfo
-	for _, u := range users {
-		online := h.sessions.IsUserOnline(u.Username)
+	for _, i := range identities {
+		online := h.presence.IsOnline(i.Username)
 		info := userInfo{
-			Username: u.Username,
+			Username: i.Username,
 			Online:   online,
-			Type:     u.Type,
+			Type:     i.Type,
 		}
 		if online {
-			info.State = h.hub.GetState(u.Username)
+			info.State = h.hub.GetState(i.Username)
 		}
 		list = append(list, info)
 	}
 	sendReply(sendCh, ref, true, map[string]interface{}{"users": list})
 }
 
-func (h *WSHandler) handleWSChannelList(sendCh chan<- []byte, ref string, userID int64) {
+func (h *WSHandler) handleWSChannelList(sendCh chan<- []byte, ref string, identityID string) {
 	t0 := time.Now()
-	channels, err := h.store.ListAllChannelsWithMembership(userID)
+	channels, err := h.store.ListAllChannelsWithMembership(identityID)
 	if err != nil {
 		sendError(sendCh, ref, err.Error())
 		return
@@ -418,10 +340,10 @@ func (h *WSHandler) handleWSChannelList(sendCh chan<- []byte, ref string, userID
 		list = append(list, channelInfo{Name: ch.Name, Public: ch.Public, Member: ch.Member})
 	}
 	sendReply(sendCh, ref, true, map[string]interface{}{"channels": list})
-	log.Debug("ws: channel_list", "user_id", userID, "count", len(list), "db", dbElapsed, "total", time.Since(t0))
+	log.Debug("ws: channel_list", "identity_id", identityID, "count", len(list), "db", dbElapsed, "total", time.Since(t0))
 }
 
-func (h *WSHandler) handleWSChannelCreate(sendCh chan<- []byte, ref string, rawD json.RawMessage, username string, userID int64) {
+func (h *WSHandler) handleWSChannelCreate(sendCh chan<- []byte, ref string, rawD json.RawMessage, username string, identityID string) {
 	var d struct {
 		Name    string   `json:"name"`
 		Public  bool     `json:"public"`
@@ -432,15 +354,15 @@ func (h *WSHandler) handleWSChannelCreate(sendCh chan<- []byte, ref string, rawD
 		return
 	}
 
-	memberIDs := []int64{userID}
+	memberIDs := []string{identityID}
 	for _, m := range d.Members {
-		u, err := h.store.GetUserByUsername(m)
+		identity, err := h.store.GetIdentityByUsername(m)
 		if err != nil {
 			sendError(sendCh, ref, fmt.Sprintf("user not found: %s", m))
 			return
 		}
-		if u.ID != userID {
-			memberIDs = append(memberIDs, u.ID)
+		if identity.ID != identityID {
+			memberIDs = append(memberIDs, identity.ID)
 		}
 	}
 
@@ -452,7 +374,7 @@ func (h *WSHandler) handleWSChannelCreate(sendCh chan<- []byte, ref string, rawD
 	sendReply(sendCh, ref, true, map[string]string{"name": d.Name})
 }
 
-func (h *WSHandler) handleWSChannelInvite(sendCh chan<- []byte, ref string, rawD json.RawMessage, callerID int64) {
+func (h *WSHandler) handleWSChannelInvite(sendCh chan<- []byte, ref string, rawD json.RawMessage, callerID string) {
 	var d struct {
 		Channel  string `json:"channel"`
 		Username string `json:"username"`
@@ -478,7 +400,7 @@ func (h *WSHandler) handleWSChannelInvite(sendCh chan<- []byte, ref string, rawD
 		return
 	}
 
-	invitee, err := h.store.GetUserByUsername(d.Username)
+	invitee, err := h.store.GetIdentityByUsername(d.Username)
 	if err != nil {
 		sendError(sendCh, ref, fmt.Sprintf("user not found: %s", d.Username))
 		return
@@ -491,7 +413,7 @@ func (h *WSHandler) handleWSChannelInvite(sendCh chan<- []byte, ref string, rawD
 	sendReply(sendCh, ref, true, nil)
 }
 
-func (h *WSHandler) handleWSChannelJoin(sendCh chan<- []byte, ref string, rawD json.RawMessage, userID int64) {
+func (h *WSHandler) handleWSChannelJoin(sendCh chan<- []byte, ref string, rawD json.RawMessage, identityID string) {
 	var d struct {
 		Channel string `json:"channel"`
 	}
@@ -506,7 +428,7 @@ func (h *WSHandler) handleWSChannelJoin(sendCh chan<- []byte, ref string, rawD j
 		return
 	}
 
-	isMember, err := h.store.IsChannelMember(ch.ID, userID)
+	isMember, err := h.store.IsChannelMember(ch.ID, identityID)
 	if err != nil {
 		sendError(sendCh, ref, err.Error())
 		return
@@ -516,14 +438,14 @@ func (h *WSHandler) handleWSChannelJoin(sendCh chan<- []byte, ref string, rawD j
 		return
 	}
 
-	if err := h.store.AddChannelMember(ch.ID, userID); err != nil {
+	if err := h.store.AddChannelMember(ch.ID, identityID); err != nil {
 		sendError(sendCh, ref, err.Error())
 		return
 	}
 	sendReply(sendCh, ref, true, nil)
 }
 
-func (h *WSHandler) handleWSSendMessage(sendCh chan<- []byte, ref string, rawD json.RawMessage, username string, userID int64) {
+func (h *WSHandler) handleWSSendMessage(sendCh chan<- []byte, ref string, rawD json.RawMessage, username string, identityID string) {
 	var d struct {
 		Channel  string `json:"channel"`
 		Body     string `json:"body"`
@@ -540,7 +462,7 @@ func (h *WSHandler) handleWSSendMessage(sendCh chan<- []byte, ref string, rawD j
 		return
 	}
 
-	isMember, err := h.store.IsChannelMember(ch.ID, userID)
+	isMember, err := h.store.IsChannelMember(ch.ID, identityID)
 	if err != nil {
 		sendError(sendCh, ref, err.Error())
 		return
@@ -550,9 +472,9 @@ func (h *WSHandler) handleWSSendMessage(sendCh chan<- []byte, ref string, rawD j
 		return
 	}
 
-	mentionUserIDs, mentionUsernames := resolveMentions(h.store, d.Body)
+	mentionIDs, mentionUsernames := resolveMentions(h.store, d.Body)
 
-	msgID, err := h.store.SendMessage(ch.ID, userID, d.Body, d.ThreadID, mentionUserIDs)
+	msgID, err := h.store.SendMessage(ch.ID, identityID, d.Body, d.ThreadID, mentionIDs)
 	if err != nil {
 		sendError(sendCh, ref, err.Error())
 		return
@@ -562,17 +484,17 @@ func (h *WSHandler) handleWSSendMessage(sendCh chan<- []byte, ref string, rawD j
 
 	// Broadcast to other WS clients
 	msg := domain.Message{
-		ID:        msgID,
-		ChannelID: ch.ID,
-		UserID:    userID,
-		Body:      d.Body,
-		CreatedAt: time.Now(),
-		From:      username,
+		ID:         msgID,
+		ChannelID:  ch.ID,
+		IdentityID: identityID,
+		Body:       d.Body,
+		CreatedAt:  time.Now(),
+		From:       username,
 	}
 	h.hub.BroadcastMessage(ch.ID, ch.Name, ch.Type, msg, mentionUsernames, d.ThreadID, h.store)
 }
 
-func (h *WSHandler) handleWSHistory(sendCh chan<- []byte, ref string, rawD json.RawMessage, userID int64) {
+func (h *WSHandler) handleWSHistory(sendCh chan<- []byte, ref string, rawD json.RawMessage, identityID string) {
 	var d struct {
 		Channel  string `json:"channel"`
 		Before   *int64 `json:"before"`
@@ -623,7 +545,7 @@ func (h *WSHandler) handleWSHistory(sendCh chan<- []byte, ref string, rawD json.
 	sendReply(sendCh, ref, true, map[string]interface{}{"channel": d.Channel, "messages": list})
 }
 
-func (h *WSHandler) handleWSUnreadMessages(sendCh chan<- []byte, ref string, rawD json.RawMessage, userID int64) {
+func (h *WSHandler) handleWSUnreadMessages(sendCh chan<- []byte, ref string, rawD json.RawMessage, identityID string) {
 	var d struct {
 		Channel      string `json:"channel"`
 		MentionsOnly bool   `json:"mentions_only"`
@@ -643,7 +565,7 @@ func (h *WSHandler) handleWSUnreadMessages(sendCh chan<- []byte, ref string, raw
 		channelID = &ch.ID
 	}
 
-	messages, err := h.store.GetUnreadMessages(userID, channelID, d.MentionsOnly, d.ThreadID)
+	messages, err := h.store.GetUnreadMessages(identityID, channelID, d.MentionsOnly, d.ThreadID)
 	if err != nil {
 		sendError(sendCh, ref, err.Error())
 		return
@@ -679,8 +601,8 @@ func (h *WSHandler) handleWSUnreadMessages(sendCh chan<- []byte, ref string, raw
 	sendReply(sendCh, ref, true, map[string]interface{}{"messages": list})
 }
 
-func (h *WSHandler) handleWSUnreadCounts(sendCh chan<- []byte, ref string, userID int64) {
-	counts, err := h.store.GetUnreadCounts(userID)
+func (h *WSHandler) handleWSUnreadCounts(sendCh chan<- []byte, ref string, identityID string) {
+	counts, err := h.store.GetUnreadCounts(identityID)
 	if err != nil {
 		sendError(sendCh, ref, err.Error())
 		return
@@ -703,7 +625,7 @@ func (h *WSHandler) handleWSUnreadCounts(sendCh chan<- []byte, ref string, userI
 	sendReply(sendCh, ref, true, map[string]interface{}{"counts": list})
 }
 
-func (h *WSHandler) handleWSDMList(sendCh chan<- []byte, ref string, userID int64) {
+func (h *WSHandler) handleWSDMList(sendCh chan<- []byte, ref string, identityID string) {
 	dms, err := h.store.ListAllDMs()
 	if err != nil {
 		sendError(sendCh, ref, err.Error())
@@ -720,7 +642,7 @@ func (h *WSHandler) handleWSDMList(sendCh chan<- []byte, ref string, userID int6
 	sendReply(sendCh, ref, true, map[string]interface{}{"dms": list})
 }
 
-func (h *WSHandler) handleWSDMOpen(sendCh chan<- []byte, ref string, rawD json.RawMessage, username string, userID int64) {
+func (h *WSHandler) handleWSDMOpen(sendCh chan<- []byte, ref string, rawD json.RawMessage, username string, identityID string) {
 	var d struct {
 		Username string `json:"username"`
 	}
@@ -737,13 +659,13 @@ func (h *WSHandler) handleWSDMOpen(sendCh chan<- []byte, ref string, rawD json.R
 		return
 	}
 
-	other, err := h.store.GetUserByUsername(d.Username)
+	other, err := h.store.GetIdentityByUsername(d.Username)
 	if err != nil {
 		sendError(sendCh, ref, fmt.Sprintf("user not found: %s", d.Username))
 		return
 	}
 
-	dmName, created, err := h.store.OpenDM(userID, other.ID, d.Username)
+	dmName, created, err := h.store.OpenDM(identityID, other.ID, d.Username)
 	if err != nil {
 		sendError(sendCh, ref, err.Error())
 		return
@@ -755,7 +677,7 @@ func (h *WSHandler) handleWSDMOpen(sendCh chan<- []byte, ref string, rawD json.R
 	})
 }
 
-func (h *WSHandler) handleWSMarkRead(sendCh chan<- []byte, ref string, rawD json.RawMessage, userID int64) {
+func (h *WSHandler) handleWSMarkRead(sendCh chan<- []byte, ref string, rawD json.RawMessage, identityID string) {
 	var d struct {
 		Channel   string `json:"channel"`
 		MessageID *int64 `json:"message_id"`
@@ -775,7 +697,7 @@ func (h *WSHandler) handleWSMarkRead(sendCh chan<- []byte, ref string, rawD json
 		return
 	}
 
-	isMember, err := h.store.IsChannelMember(ch.ID, userID)
+	isMember, err := h.store.IsChannelMember(ch.ID, identityID)
 	if err != nil {
 		sendError(sendCh, ref, err.Error())
 		return
@@ -785,7 +707,7 @@ func (h *WSHandler) handleWSMarkRead(sendCh chan<- []byte, ref string, rawD json
 		return
 	}
 
-	if err := h.store.MarkRead(userID, ch.ID, d.MessageID); err != nil {
+	if err := h.store.MarkRead(identityID, ch.ID, d.MessageID); err != nil {
 		sendError(sendCh, ref, err.Error())
 		return
 	}
@@ -819,7 +741,7 @@ func (h *WSHandler) handleWSGetSettings(sendCh chan<- []byte, ref string) {
 
 // --- Mention group handlers ---
 
-func (h *WSHandler) handleWSMentionGroupCreate(sendCh chan<- []byte, ref string, rawD json.RawMessage, userID int64) {
+func (h *WSHandler) handleWSMentionGroupCreate(sendCh chan<- []byte, ref string, rawD json.RawMessage, identityID string) {
 	var d struct {
 		Slug string `json:"slug"`
 	}
@@ -831,11 +753,11 @@ func (h *WSHandler) handleWSMentionGroupCreate(sendCh chan<- []byte, ref string,
 		sendError(sendCh, ref, "invalid slug: must match [a-zA-Z0-9_-]+")
 		return
 	}
-	if _, err := h.store.GetUserByUsername(d.Slug); err == nil {
+	if _, err := h.store.GetIdentityByUsername(d.Slug); err == nil {
 		sendError(sendCh, ref, fmt.Sprintf("slug conflicts with existing username: %s", d.Slug))
 		return
 	}
-	id, err := h.store.CreateMentionGroup(d.Slug, userID)
+	id, err := h.store.CreateMentionGroup(d.Slug, identityID)
 	if err != nil {
 		sendError(sendCh, ref, err.Error())
 		return
@@ -910,12 +832,12 @@ func (h *WSHandler) handleWSMentionGroupAddMember(sendCh chan<- []byte, ref stri
 		sendError(sendCh, ref, "only the group creator can manage members")
 		return
 	}
-	user, err := h.store.GetUserByUsername(d.Username)
+	identity, err := h.store.GetIdentityByUsername(d.Username)
 	if err != nil {
 		sendError(sendCh, ref, fmt.Sprintf("user not found: %s", d.Username))
 		return
 	}
-	if err := h.store.AddMentionGroupMember(g.ID, user.ID); err != nil {
+	if err := h.store.AddMentionGroupMember(g.ID, identity.ID); err != nil {
 		sendError(sendCh, ref, err.Error())
 		return
 	}
@@ -940,12 +862,12 @@ func (h *WSHandler) handleWSMentionGroupRemoveMember(sendCh chan<- []byte, ref s
 		sendError(sendCh, ref, "only the group creator can manage members")
 		return
 	}
-	user, err := h.store.GetUserByUsername(d.Username)
+	identity, err := h.store.GetIdentityByUsername(d.Username)
 	if err != nil {
 		sendError(sendCh, ref, fmt.Sprintf("user not found: %s", d.Username))
 		return
 	}
-	if err := h.store.RemoveMentionGroupMember(g.ID, user.ID); err != nil {
+	if err := h.store.RemoveMentionGroupMember(g.ID, identity.ID); err != nil {
 		sendError(sendCh, ref, err.Error())
 		return
 	}
