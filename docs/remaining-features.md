@@ -71,7 +71,7 @@ Idiomatic Go and TypeScript WebSocket client libraries. Go client at `client/`
 published as `@workfort/sharkfin-client` (EventEmitter, zero runtime deps,
 Node + browser). Independently versioned via tag prefixes.
 
-## 10. Passport Authentication
+## 10. Passport Authentication ✅
 
 [Design](2026-03-13-passport-auth-design.md) · [Plan](plans/2026-03-13-passport-auth.md)
 
@@ -80,8 +80,7 @@ provider). JWT auth at WS upgrade via JWKS, API key auth for bridge.
 `--passport-url` required flag. UUID-based identities, auto-provisioned on
 first auth. Client libraries updated to pass tokens at connect time.
 
-## 11. Container Image
+## 11. Container Image ✅
 
-Dockerfile for the sharkfin daemon. CI publishes images to Docker Hub and
-GitHub Container Registry (ghcr.io) on release. Enables running sharkfin as a
-Nexus container.
+Dockerfile for the sharkfin daemon. CI publishes images to GitHub Container
+Registry (ghcr.io) on release. Enables running sharkfin as a Nexus container.
