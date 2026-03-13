@@ -6,27 +6,7 @@ import (
 	"encoding/json"
 )
 
-// --- Identity ---
-
-// Register creates a new user and authenticates this connection.
-func (c *Client) Register(ctx context.Context, username string, opts *RegisterOpts) error {
-	d := map[string]any{"username": username}
-	if opts != nil && opts.NotificationsOnly {
-		d["notifications_only"] = true
-	}
-	_, err := c.request(ctx, "register", d)
-	return err
-}
-
-// Identify authenticates as an existing user.
-func (c *Client) Identify(ctx context.Context, username string, opts *IdentifyOpts) error {
-	d := map[string]any{"username": username}
-	if opts != nil && opts.NotificationsOnly {
-		d["notifications_only"] = true
-	}
-	_, err := c.request(ctx, "identify", d)
-	return err
-}
+// --- Users ---
 
 // Users returns all registered users.
 func (c *Client) Users(ctx context.Context) ([]User, error) {

@@ -77,16 +77,6 @@ type MentionGroup struct {
 
 // Option structs for methods with optional parameters.
 
-// RegisterOpts are optional parameters for Register.
-type RegisterOpts struct {
-	NotificationsOnly bool
-}
-
-// IdentifyOpts are optional parameters for Identify.
-type IdentifyOpts struct {
-	NotificationsOnly bool
-}
-
 // SendOpts are optional parameters for SendMessage.
 type SendOpts struct {
 	ThreadID *int64

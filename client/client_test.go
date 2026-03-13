@@ -31,129 +31,6 @@ func mockServer(t *testing.T, handler func(*websocket.Conn)) (*httptest.Server, 
 	return srv, wsURL
 }
 
-func sendHello(t *testing.T, conn *websocket.Conn) {
-	t.Helper()
-	hello := map[string]any{
-		"type": "hello",
-		"d": map[string]any{
-			"heartbeat_interval": 10,
-			"version":            "v0.1.0",
-		},
-	}
-	data, _ := json.Marshal(hello)
-	if err := conn.WriteMessage(websocket.TextMessage, data); err != nil {
-		t.Fatalf("send hello: %v", err)
-	}
-}
-
-func TestDialReadsHello(t *testing.T) {
-	srv, wsURL := mockServer(t, func(conn *websocket.Conn) {
-		sendHello(t, conn)
-		for {
-			if _, _, err := conn.ReadMessage(); err != nil {
-				return
-			}
-		}
-	})
-	defer srv.Close()
-
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-
-	c, err := Dial(ctx, wsURL)
-	if err != nil {
-		t.Fatalf("Dial: %v", err)
-	}
-	defer c.Close()
-
-	if c.ServerVersion() != "v0.1.0" {
-		t.Errorf("ServerVersion = %q, want %q", c.ServerVersion(), "v0.1.0")
-	}
-	if c.HeartbeatInterval() != 10 {
-		t.Errorf("HeartbeatInterval = %d, want 10", c.HeartbeatInterval())
-	}
-}
-
-func TestClose(t *testing.T) {
-	srv, wsURL := mockServer(t, func(conn *websocket.Conn) {
-		sendHello(t, conn)
-		for {
-			if _, _, err := conn.ReadMessage(); err != nil {
-				return
-			}
-		}
-	})
-	defer srv.Close()
-
-	c, err := Dial(context.Background(), wsURL)
-	if err != nil {
-		t.Fatalf("Dial: %v", err)
-	}
-
-	if err := c.Close(); err != nil {
-		t.Errorf("Close: %v", err)
-	}
-
-	if _, ok := <-c.Events(); ok {
-		t.Error("Events channel should be closed after Close")
-	}
-
-	if err := c.Close(); err != ErrClosed {
-		t.Errorf("second Close = %v, want ErrClosed", err)
-	}
-}
-
-func TestEventDelivery(t *testing.T) {
-	srv, wsURL := mockServer(t, func(conn *websocket.Conn) {
-		sendHello(t, conn)
-		time.Sleep(50 * time.Millisecond)
-		broadcast := map[string]any{
-			"type": "message.new",
-			"d": map[string]any{
-				"id":           1,
-				"channel":      "general",
-				"channel_type": "channel",
-				"from":         "alice",
-				"body":         "hello",
-				"sent_at":      "2026-03-11T00:00:00Z",
-			},
-		}
-		data, _ := json.Marshal(broadcast)
-		conn.WriteMessage(websocket.TextMessage, data)
-		for {
-			if _, _, err := conn.ReadMessage(); err != nil {
-				return
-			}
-		}
-	})
-	defer srv.Close()
-
-	c, err := Dial(context.Background(), wsURL)
-	if err != nil {
-		t.Fatalf("Dial: %v", err)
-	}
-	defer c.Close()
-
-	select {
-	case ev := <-c.Events():
-		if ev.Type != "message.new" {
-			t.Errorf("event type = %q, want message.new", ev.Type)
-		}
-		msg, err := ev.AsMessage()
-		if err != nil {
-			t.Fatalf("AsMessage: %v", err)
-		}
-		if msg.From != "alice" {
-			t.Errorf("From = %q, want alice", msg.From)
-		}
-		if msg.Channel != "general" {
-			t.Errorf("Channel = %q, want general", msg.Channel)
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("timeout waiting for event")
-	}
-}
-
 func readReqAndReply(t *testing.T, conn *websocket.Conn, response any) {
 	t.Helper()
 	_, msg, err := conn.ReadMessage()
@@ -205,10 +82,8 @@ func readReqAndError(t *testing.T, conn *websocket.Conn, errMsg string) {
 	conn.WriteMessage(websocket.TextMessage, data)
 }
 
-func TestRegister(t *testing.T) {
+func TestDialConnects(t *testing.T) {
 	srv, wsURL := mockServer(t, func(conn *websocket.Conn) {
-		sendHello(t, conn)
-		readReqAndReply(t, conn, nil)
 		for {
 			if _, _, err := conn.ReadMessage(); err != nil {
 				return
@@ -216,17 +91,61 @@ func TestRegister(t *testing.T) {
 		}
 	})
 	defer srv.Close()
-	c, _ := Dial(context.Background(), wsURL)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	c, err := Dial(ctx, wsURL)
+	if err != nil {
+		t.Fatalf("Dial: %v", err)
+	}
 	defer c.Close()
-	if err := c.Register(context.Background(), "alice", nil); err != nil {
-		t.Fatalf("Register: %v", err)
+}
+
+func TestClose(t *testing.T) {
+	srv, wsURL := mockServer(t, func(conn *websocket.Conn) {
+		for {
+			if _, _, err := conn.ReadMessage(); err != nil {
+				return
+			}
+		}
+	})
+	defer srv.Close()
+
+	c, err := Dial(context.Background(), wsURL)
+	if err != nil {
+		t.Fatalf("Dial: %v", err)
+	}
+
+	if err := c.Close(); err != nil {
+		t.Errorf("Close: %v", err)
+	}
+
+	if _, ok := <-c.Events(); ok {
+		t.Error("Events channel should be closed after Close")
+	}
+
+	if err := c.Close(); err != ErrClosed {
+		t.Errorf("second Close = %v, want ErrClosed", err)
 	}
 }
 
-func TestIdentify(t *testing.T) {
+func TestEventDelivery(t *testing.T) {
 	srv, wsURL := mockServer(t, func(conn *websocket.Conn) {
-		sendHello(t, conn)
-		readReqAndReply(t, conn, nil)
+		time.Sleep(50 * time.Millisecond)
+		broadcast := map[string]any{
+			"type": "message.new",
+			"d": map[string]any{
+				"id":           1,
+				"channel":      "general",
+				"channel_type": "channel",
+				"from":         "alice",
+				"body":         "hello",
+				"sent_at":      "2026-03-11T00:00:00Z",
+			},
+		}
+		data, _ := json.Marshal(broadcast)
+		conn.WriteMessage(websocket.TextMessage, data)
 		for {
 			if _, _, err := conn.ReadMessage(); err != nil {
 				return
@@ -234,17 +153,36 @@ func TestIdentify(t *testing.T) {
 		}
 	})
 	defer srv.Close()
-	c, _ := Dial(context.Background(), wsURL)
+
+	c, err := Dial(context.Background(), wsURL)
+	if err != nil {
+		t.Fatalf("Dial: %v", err)
+	}
 	defer c.Close()
-	if err := c.Identify(context.Background(), "alice", nil); err != nil {
-		t.Fatalf("Identify: %v", err)
+
+	select {
+	case ev := <-c.Events():
+		if ev.Type != "message.new" {
+			t.Errorf("event type = %q, want message.new", ev.Type)
+		}
+		msg, err := ev.AsMessage()
+		if err != nil {
+			t.Fatalf("AsMessage: %v", err)
+		}
+		if msg.From != "alice" {
+			t.Errorf("From = %q, want alice", msg.From)
+		}
+		if msg.Channel != "general" {
+			t.Errorf("Channel = %q, want general", msg.Channel)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for event")
 	}
 }
 
 func TestServerError(t *testing.T) {
 	srv, wsURL := mockServer(t, func(conn *websocket.Conn) {
-		sendHello(t, conn)
-		readReqAndError(t, conn, "user not found")
+		readReqAndError(t, conn, "not authorized")
 		for {
 			if _, _, err := conn.ReadMessage(); err != nil {
 				return
@@ -254,7 +192,7 @@ func TestServerError(t *testing.T) {
 	defer srv.Close()
 	c, _ := Dial(context.Background(), wsURL)
 	defer c.Close()
-	err := c.Identify(context.Background(), "nonexistent", nil)
+	err := c.Ping(context.Background())
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -262,14 +200,13 @@ func TestServerError(t *testing.T) {
 	if !errors.As(err, &se) {
 		t.Fatalf("expected ServerError, got %T: %v", err, err)
 	}
-	if se.Message != "user not found" {
-		t.Errorf("Message = %q, want %q", se.Message, "user not found")
+	if se.Message != "not authorized" {
+		t.Errorf("Message = %q, want %q", se.Message, "not authorized")
 	}
 }
 
 func TestUsers(t *testing.T) {
 	srv, wsURL := mockServer(t, func(conn *websocket.Conn) {
-		sendHello(t, conn)
 		readReqAndReply(t, conn, map[string]any{
 			"users": []map[string]any{
 				{"username": "alice", "online": true, "type": "human", "state": "active"},
@@ -299,7 +236,6 @@ func TestUsers(t *testing.T) {
 
 func TestChannels(t *testing.T) {
 	srv, wsURL := mockServer(t, func(conn *websocket.Conn) {
-		sendHello(t, conn)
 		readReqAndReply(t, conn, map[string]any{
 			"channels": []map[string]any{
 				{"name": "general", "public": true, "member": true},
@@ -328,7 +264,6 @@ func TestChannels(t *testing.T) {
 
 func TestCreateChannel(t *testing.T) {
 	srv, wsURL := mockServer(t, func(conn *websocket.Conn) {
-		sendHello(t, conn)
 		readReqAndReply(t, conn, map[string]any{"name": "test"})
 		for {
 			if _, _, err := conn.ReadMessage(); err != nil {
@@ -346,7 +281,6 @@ func TestCreateChannel(t *testing.T) {
 
 func TestJoinChannel(t *testing.T) {
 	srv, wsURL := mockServer(t, func(conn *websocket.Conn) {
-		sendHello(t, conn)
 		readReqAndReply(t, conn, nil)
 		for {
 			if _, _, err := conn.ReadMessage(); err != nil {
@@ -364,7 +298,6 @@ func TestJoinChannel(t *testing.T) {
 
 func TestSendMessage(t *testing.T) {
 	srv, wsURL := mockServer(t, func(conn *websocket.Conn) {
-		sendHello(t, conn)
 		readReqAndReply(t, conn, map[string]any{"id": 42})
 		for {
 			if _, _, err := conn.ReadMessage(); err != nil {
@@ -386,7 +319,6 @@ func TestSendMessage(t *testing.T) {
 
 func TestHistory(t *testing.T) {
 	srv, wsURL := mockServer(t, func(conn *websocket.Conn) {
-		sendHello(t, conn)
 		readReqAndReply(t, conn, map[string]any{
 			"channel": "general",
 			"messages": []map[string]any{
@@ -417,7 +349,6 @@ func TestHistory(t *testing.T) {
 
 func TestDMOpen(t *testing.T) {
 	srv, wsURL := mockServer(t, func(conn *websocket.Conn) {
-		sendHello(t, conn)
 		readReqAndReply(t, conn, map[string]any{
 			"channel": "dm_alice_bob", "participant": "bob", "created": true,
 		})
@@ -441,7 +372,6 @@ func TestDMOpen(t *testing.T) {
 
 func TestDMList(t *testing.T) {
 	srv, wsURL := mockServer(t, func(conn *websocket.Conn) {
-		sendHello(t, conn)
 		readReqAndReply(t, conn, map[string]any{
 			"dms": []map[string]any{
 				{"channel": "dm_alice_bob", "participants": []string{"alice", "bob"}},
@@ -467,7 +397,6 @@ func TestDMList(t *testing.T) {
 
 func TestUnreadCounts(t *testing.T) {
 	srv, wsURL := mockServer(t, func(conn *websocket.Conn) {
-		sendHello(t, conn)
 		readReqAndReply(t, conn, map[string]any{
 			"counts": []map[string]any{
 				{"channel": "general", "type": "channel", "unread_count": 5, "mention_count": 1},
@@ -493,7 +422,6 @@ func TestUnreadCounts(t *testing.T) {
 
 func TestVersion(t *testing.T) {
 	srv, wsURL := mockServer(t, func(conn *websocket.Conn) {
-		sendHello(t, conn)
 		readReqAndReply(t, conn, map[string]any{"version": "v1.2.3"})
 		for {
 			if _, _, err := conn.ReadMessage(); err != nil {
@@ -515,7 +443,6 @@ func TestVersion(t *testing.T) {
 
 func TestCapabilities(t *testing.T) {
 	srv, wsURL := mockServer(t, func(conn *websocket.Conn) {
-		sendHello(t, conn)
 		readReqAndReply(t, conn, map[string]any{
 			"permissions": []string{"send_message", "history"},
 		})
@@ -539,7 +466,6 @@ func TestCapabilities(t *testing.T) {
 
 func TestSetState(t *testing.T) {
 	srv, wsURL := mockServer(t, func(conn *websocket.Conn) {
-		sendHello(t, conn)
 		readReqAndReply(t, conn, nil)
 		for {
 			if _, _, err := conn.ReadMessage(); err != nil {
@@ -557,7 +483,6 @@ func TestSetState(t *testing.T) {
 
 func TestGetSettings(t *testing.T) {
 	srv, wsURL := mockServer(t, func(conn *websocket.Conn) {
-		sendHello(t, conn)
 		readReqAndReply(t, conn, map[string]any{
 			"settings": map[string]string{"theme": "dark"},
 		})
@@ -581,7 +506,6 @@ func TestGetSettings(t *testing.T) {
 
 func TestCreateMentionGroup(t *testing.T) {
 	srv, wsURL := mockServer(t, func(conn *websocket.Conn) {
-		sendHello(t, conn)
 		readReqAndReply(t, conn, map[string]any{"id": 7, "slug": "backend"})
 		for {
 			if _, _, err := conn.ReadMessage(); err != nil {
@@ -603,7 +527,6 @@ func TestCreateMentionGroup(t *testing.T) {
 
 func TestPing(t *testing.T) {
 	srv, wsURL := mockServer(t, func(conn *websocket.Conn) {
-		sendHello(t, conn)
 		// Ping gets a pong reply (type=pong, ok=true, with matching ref).
 		_, msg, _ := conn.ReadMessage()
 		var req struct {
@@ -631,7 +554,6 @@ func TestPing(t *testing.T) {
 
 func TestRequestInterleaveWithBroadcasts(t *testing.T) {
 	srv, wsURL := mockServer(t, func(conn *websocket.Conn) {
-		sendHello(t, conn)
 		_, msg, _ := conn.ReadMessage()
 		var req struct {
 			Ref string `json:"ref"`
@@ -661,8 +583,8 @@ func TestRequestInterleaveWithBroadcasts(t *testing.T) {
 	c, _ := Dial(context.Background(), wsURL)
 	defer c.Close()
 
-	if err := c.Register(context.Background(), "alice", nil); err != nil {
-		t.Fatalf("Register: %v", err)
+	if err := c.Ping(context.Background()); err != nil {
+		t.Fatalf("Ping: %v", err)
 	}
 
 	select {
@@ -677,7 +599,6 @@ func TestRequestInterleaveWithBroadcasts(t *testing.T) {
 
 func TestContextCancellation(t *testing.T) {
 	srv, wsURL := mockServer(t, func(conn *websocket.Conn) {
-		sendHello(t, conn)
 		for {
 			if _, _, err := conn.ReadMessage(); err != nil {
 				return
@@ -689,7 +610,7 @@ func TestContextCancellation(t *testing.T) {
 	defer c.Close()
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	err := c.Register(ctx, "alice", nil)
+	err := c.Ping(ctx)
 	if !errors.Is(err, context.Canceled) {
 		t.Errorf("err = %v, want context.Canceled", err)
 	}
@@ -697,7 +618,6 @@ func TestContextCancellation(t *testing.T) {
 
 func TestDisconnectMidRequest(t *testing.T) {
 	srv, wsURL := mockServer(t, func(conn *websocket.Conn) {
-		sendHello(t, conn)
 		conn.ReadMessage()
 		conn.Close()
 	})
@@ -715,7 +635,6 @@ func TestDisconnectMidRequest(t *testing.T) {
 
 func TestPresenceEvent(t *testing.T) {
 	srv, wsURL := mockServer(t, func(conn *websocket.Conn) {
-		sendHello(t, conn)
 		time.Sleep(50 * time.Millisecond)
 		broadcast, _ := json.Marshal(map[string]any{
 			"type": "presence",
@@ -749,7 +668,6 @@ func TestReconnect(t *testing.T) {
 	var connCount atomic.Int32
 	srv, wsURL := mockServer(t, func(conn *websocket.Conn) {
 		n := connCount.Add(1)
-		sendHello(t, conn)
 		if n == 1 {
 			// First connection: close after reading one message.
 			conn.ReadMessage()
@@ -783,7 +701,7 @@ func TestReconnect(t *testing.T) {
 	defer c.Close()
 
 	// Trigger disconnect by sending a message (server closes after first read).
-	c.Register(context.Background(), "alice", nil) // will fail
+	c.Ping(context.Background()) // will fail
 
 	// Wait for reconnect event.
 	deadline := time.After(2 * time.Second)
@@ -792,13 +710,71 @@ func TestReconnect(t *testing.T) {
 		case ev := <-c.Events():
 			if ev.Type == "reconnect" {
 				// After reconnect, requests should work.
-				if err := c.Register(context.Background(), "alice", nil); err != nil {
-					t.Fatalf("Register after reconnect: %v", err)
+				if err := c.Ping(context.Background()); err != nil {
+					t.Fatalf("Ping after reconnect: %v", err)
 				}
 				return
 			}
 		case <-deadline:
 			t.Fatal("timeout waiting for reconnect")
 		}
+	}
+}
+
+func TestAuthHeaders(t *testing.T) {
+	var gotAuth string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			t.Fatalf("upgrade: %v", err)
+		}
+		defer conn.Close()
+		for {
+			if _, _, err := conn.ReadMessage(); err != nil {
+				return
+			}
+		}
+	}))
+	defer srv.Close()
+	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http")
+
+	c, err := Dial(context.Background(), wsURL, WithToken("my-jwt-token"))
+	if err != nil {
+		t.Fatalf("Dial: %v", err)
+	}
+	defer c.Close()
+
+	if gotAuth != "Bearer my-jwt-token" {
+		t.Errorf("Authorization = %q, want %q", gotAuth, "Bearer my-jwt-token")
+	}
+}
+
+func TestAPIKeyHeader(t *testing.T) {
+	var gotAuth string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			t.Fatalf("upgrade: %v", err)
+		}
+		defer conn.Close()
+		for {
+			if _, _, err := conn.ReadMessage(); err != nil {
+				return
+			}
+		}
+	}))
+	defer srv.Close()
+	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http")
+
+	c, err := Dial(context.Background(), wsURL, WithAPIKey("sk-test-key"))
+	if err != nil {
+		t.Fatalf("Dial: %v", err)
+	}
+	defer c.Close()
+
+	if gotAuth != "Bearer sk-test-key" {
+		t.Errorf("Authorization = %q, want %q", gotAuth, "Bearer sk-test-key")
 	}
 }

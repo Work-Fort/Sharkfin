@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -21,9 +22,6 @@ const (
 type Client struct {
 	conn *websocket.Conn
 	url  string
-
-	serverVersion     string
-	heartbeatInterval int
 
 	events chan Event
 	done   chan struct{}
@@ -41,6 +39,8 @@ type clientOpts struct {
 	dialer    *websocket.Dialer
 	reconnect BackoffFunc
 	logger    *slog.Logger
+	token     string
+	apiKey    string
 }
 
 // BackoffFunc returns the delay before reconnection attempt N (0-indexed).
@@ -65,6 +65,16 @@ func WithLogger(l *slog.Logger) Option {
 	return func(o *clientOpts) { o.logger = l }
 }
 
+// WithToken sets a Passport JWT token for authentication.
+func WithToken(t string) Option {
+	return func(o *clientOpts) { o.token = t }
+}
+
+// WithAPIKey sets an API key for authentication.
+func WithAPIKey(k string) Option {
+	return func(o *clientOpts) { o.apiKey = k }
+}
+
 type envelope struct {
 	Type string          `json:"type"`
 	D    json.RawMessage `json:"d,omitempty"`
@@ -72,14 +82,9 @@ type envelope struct {
 	OK   *bool           `json:"ok,omitempty"`
 }
 
-type helloData struct {
-	HeartbeatInterval int    `json:"heartbeat_interval"`
-	Version           string `json:"version"`
-}
-
 // Dial connects to a Sharkfin server at the given WebSocket URL (e.g.
-// "ws://localhost:16000/ws"), reads the hello handshake, and starts
-// the background read pump.
+// "ws://localhost:16000/ws") and starts the background read pump.
+// Authentication is provided via WithToken or WithAPIKey options.
 func Dial(ctx context.Context, url string, opts ...Option) (*Client, error) {
 	o := clientOpts{
 		dialer: websocket.DefaultDialer,
@@ -88,53 +93,31 @@ func Dial(ctx context.Context, url string, opts ...Option) (*Client, error) {
 		opt(&o)
 	}
 
-	conn, _, err := o.dialer.DialContext(ctx, url, nil)
+	header := http.Header{}
+	if o.token != "" {
+		header.Set("Authorization", "Bearer "+o.token)
+	} else if o.apiKey != "" {
+		header.Set("Authorization", "Bearer "+o.apiKey)
+	}
+
+	conn, _, err := o.dialer.DialContext(ctx, url, header)
 	if err != nil {
 		return nil, fmt.Errorf("client: dial: %w", err)
 	}
 
-	// Read hello envelope.
-	conn.SetReadDeadline(time.Now().Add(5 * time.Second))
-	var env envelope
-	if err := conn.ReadJSON(&env); err != nil {
-		conn.Close()
-		return nil, fmt.Errorf("client: read hello: %w", err)
-	}
-	if env.Type != "hello" {
-		conn.Close()
-		return nil, fmt.Errorf("client: expected hello, got %q", env.Type)
-	}
-
-	var hello helloData
-	if err := json.Unmarshal(env.D, &hello); err != nil {
-		conn.Close()
-		return nil, fmt.Errorf("client: decode hello: %w", err)
-	}
-
-	// Clear deadline for normal operation.
-	conn.SetReadDeadline(time.Time{})
-
 	c := &Client{
-		conn:              conn,
-		url:               url,
-		serverVersion:     hello.Version,
-		heartbeatInterval: hello.HeartbeatInterval,
-		events:            make(chan Event, eventBufSize),
-		done:              make(chan struct{}),
-		pending:           make(map[string]chan envelope),
-		opts:              o,
+		conn:    conn,
+		url:     url,
+		events:  make(chan Event, eventBufSize),
+		done:    make(chan struct{}),
+		pending: make(map[string]chan envelope),
+		opts:    o,
 	}
 
 	go c.readPump()
 
 	return c, nil
 }
-
-// ServerVersion returns the server version from the hello handshake.
-func (c *Client) ServerVersion() string { return c.serverVersion }
-
-// HeartbeatInterval returns the heartbeat interval (seconds) from the hello.
-func (c *Client) HeartbeatInterval() int { return c.heartbeatInterval }
 
 // Events returns a channel that receives server-pushed broadcasts
 // (message.new, presence, etc.). The channel is closed when the
@@ -216,6 +199,13 @@ func (c *Client) cleanupPending() {
 }
 
 func (c *Client) reconnectLoop() {
+	header := http.Header{}
+	if c.opts.token != "" {
+		header.Set("Authorization", "Bearer "+c.opts.token)
+	} else if c.opts.apiKey != "" {
+		header.Set("Authorization", "Bearer "+c.opts.apiKey)
+	}
+
 	for attempt := 0; ; attempt++ {
 		if c.closed.Load() {
 			close(c.events)
@@ -237,32 +227,16 @@ func (c *Client) reconnectLoop() {
 			return
 		}
 
-		conn, _, err := c.opts.dialer.Dial(c.url, nil)
+		conn, _, err := c.opts.dialer.Dial(c.url, header)
 		if err != nil {
 			continue
 		}
 
-		// Read hello.
-		conn.SetReadDeadline(time.Now().Add(5 * time.Second))
-		var env envelope
-		if err := conn.ReadJSON(&env); err != nil || env.Type != "hello" {
-			conn.Close()
-			continue
-		}
-		var hello helloData
-		if err := json.Unmarshal(env.D, &hello); err != nil {
-			conn.Close()
-			continue
-		}
-		conn.SetReadDeadline(time.Time{})
-
 		// Swap connection.
 		c.conn = conn
-		c.serverVersion = hello.Version
-		c.heartbeatInterval = hello.HeartbeatInterval
 		c.done = make(chan struct{})
 
-		// Emit reconnect event. Consumer must re-identify.
+		// Emit reconnect event.
 		c.emitEvent(Event{Type: "reconnect"})
 
 		// Restart read pump.
