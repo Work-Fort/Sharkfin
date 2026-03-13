@@ -10,7 +10,7 @@ import (
 
 	"github.com/gorilla/websocket"
 
-	"github.com/Work-Fort/sharkfin/pkg/infra/sqlite"
+	auth "github.com/Work-Fort/Passport/go/service-auth"
 )
 
 // wsURL converts an httptest.Server URL to a WebSocket URL with path.
@@ -18,42 +18,19 @@ func wsURL(server *httptest.Server) string {
 	return "ws" + strings.TrimPrefix(server.URL, "http")
 }
 
-func TestPresenceTokenDelivery(t *testing.T) {
-	d, _ := sqlite.Open(":memory:")
-	defer d.Close()
-	sm := NewSessionManager(d)
-	ph := NewPresenceHandler(sm, NewHub(nil), 20*time.Second)
-
-	server := httptest.NewServer(ph)
-	defer server.Close()
-
-	conn, _, err := websocket.DefaultDialer.Dial(wsURL(server), nil)
-	if err != nil {
-		t.Fatalf("dial: %v", err)
-	}
-	defer conn.Close()
-
-	_, msg, err := conn.ReadMessage()
-	if err != nil {
-		t.Fatalf("read: %v", err)
-	}
-
-	token := string(msg)
-	if token == "" {
-		t.Fatal("expected non-empty token")
-	}
-	if len(token) != 64 { // 32 bytes hex-encoded
-		t.Errorf("token length = %d, want 64", len(token))
-	}
+// wrapWithIdentity wraps a handler to inject a Passport identity into the request context.
+func wrapWithIdentity(h http.Handler, username string) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		identity := auth.Identity{ID: "uuid-" + username, Username: username, DisplayName: username, Type: "user"}
+		ctx := auth.ContextWithIdentity(r.Context(), identity)
+		h.ServeHTTP(w, r.WithContext(ctx))
+	})
 }
 
 func TestPresenceHoldsConnection(t *testing.T) {
-	d, _ := sqlite.Open(":memory:")
-	defer d.Close()
-	sm := NewSessionManager(d)
-	ph := NewPresenceHandler(sm, NewHub(nil), 20*time.Second)
+	ph := NewPresenceHandler(20 * time.Second)
 
-	server := httptest.NewServer(ph)
+	server := httptest.NewServer(wrapWithIdentity(ph, "alice"))
 	defer server.Close()
 
 	conn, _, err := websocket.DefaultDialer.Dial(wsURL(server), nil)
@@ -62,29 +39,17 @@ func TestPresenceHoldsConnection(t *testing.T) {
 	}
 	defer conn.Close()
 
-	// Read token
-	_, _, err = conn.ReadMessage()
-	if err != nil {
-		t.Fatalf("read: %v", err)
-	}
-
 	// Verify presence is attached
 	time.Sleep(50 * time.Millisecond)
-	sm.mu.RLock()
-	tokenCount := len(sm.tokens)
-	sm.mu.RUnlock()
-	if tokenCount == 0 {
-		t.Error("expected token to exist in session manager")
+	if !ph.IsOnline("alice") {
+		t.Error("alice should be online")
 	}
 }
 
-func TestPresenceDisconnectNotifiesSession(t *testing.T) {
-	d, _ := sqlite.Open(":memory:")
-	defer d.Close()
-	sm := NewSessionManager(d)
-	ph := NewPresenceHandler(sm, NewHub(nil), 20*time.Second)
+func TestPresenceDisconnectGoesOffline(t *testing.T) {
+	ph := NewPresenceHandler(20 * time.Second)
 
-	server := httptest.NewServer(ph)
+	server := httptest.NewServer(wrapWithIdentity(ph, "alice"))
 	defer server.Close()
 
 	conn, _, err := websocket.DefaultDialer.Dial(wsURL(server), nil)
@@ -92,23 +57,9 @@ func TestPresenceDisconnectNotifiesSession(t *testing.T) {
 		t.Fatalf("dial: %v", err)
 	}
 
-	// Read token
-	_, msg, err := conn.ReadMessage()
-	if err != nil {
-		t.Fatalf("read: %v", err)
-	}
-	token := string(msg)
-
-	// Register a user on this token
-	d.CreateUser("alice", "")
-	sm.mu.Lock()
-	it := sm.tokens[token]
-	it.Identified = true
-	it.Username = "alice"
-	sm.onlineUsers["alice"] = token
-	sm.mu.Unlock()
-
-	if !sm.IsUserOnline("alice") {
+	// Wait for connection to be established
+	time.Sleep(50 * time.Millisecond)
+	if !ph.IsOnline("alice") {
 		t.Error("alice should be online")
 	}
 
@@ -116,18 +67,15 @@ func TestPresenceDisconnectNotifiesSession(t *testing.T) {
 	conn.Close()
 	time.Sleep(100 * time.Millisecond)
 
-	if sm.IsUserOnline("alice") {
+	if ph.IsOnline("alice") {
 		t.Error("alice should be offline after disconnect")
 	}
 }
 
 func TestPresenceRejectsNonWebSocket(t *testing.T) {
-	d, _ := sqlite.Open(":memory:")
-	defer d.Close()
-	sm := NewSessionManager(d)
-	ph := NewPresenceHandler(sm, NewHub(nil), 20*time.Second)
+	ph := NewPresenceHandler(20 * time.Second)
 
-	server := httptest.NewServer(ph)
+	server := httptest.NewServer(wrapWithIdentity(ph, "alice"))
 	defer server.Close()
 
 	// Plain HTTP POST — not a WebSocket upgrade
@@ -139,5 +87,23 @@ func TestPresenceRejectsNonWebSocket(t *testing.T) {
 
 	if resp.StatusCode == http.StatusOK || resp.StatusCode == http.StatusSwitchingProtocols {
 		t.Errorf("expected non-WebSocket request to be rejected, got %d", resp.StatusCode)
+	}
+}
+
+func TestPresenceRejectsUnauthenticated(t *testing.T) {
+	ph := NewPresenceHandler(20 * time.Second)
+
+	// No identity wrapper — should get 401
+	server := httptest.NewServer(ph)
+	defer server.Close()
+
+	resp, err := http.Get(server.URL)
+	if err != nil {
+		t.Fatalf("request: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Errorf("expected 401, got %d", resp.StatusCode)
 	}
 }

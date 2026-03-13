@@ -3,22 +3,29 @@ package daemon
 
 import (
 	"encoding/json"
+	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/gorilla/websocket"
 
+	auth "github.com/Work-Fort/Passport/go/service-auth"
 	"github.com/Work-Fort/sharkfin/pkg/domain"
 	"github.com/Work-Fort/sharkfin/pkg/infra/sqlite"
 )
 
-// wsTestEnv bundles a test server, session manager, store, and hub.
+// wsTestEnv bundles a test server, store, hub, and presence handler.
+// It supports per-user identity injection via a mux keyed on URL path.
 type wsTestEnv struct {
-	server *httptest.Server
-	sm     *SessionManager
-	store  domain.Store
-	hub    *Hub
+	store    domain.Store
+	hub      *Hub
+	presence *PresenceHandler
+	// Per-user servers, keyed by username
+	mu      sync.Mutex
+	servers map[string]*httptest.Server
+	wh      *WSHandler
 }
 
 func newWSTestEnv(t *testing.T) *wsTestEnv {
@@ -29,32 +36,54 @@ func newWSTestEnv(t *testing.T) *wsTestEnv {
 	}
 	t.Cleanup(func() { store.Close() })
 
-	sm := NewSessionManager(store)
 	hub := NewHub(nil)
-	wh := NewWSHandler(sm, store, hub, 20*time.Second, "test")
-	server := httptest.NewServer(wh)
-	t.Cleanup(func() { server.Close() })
+	presence := NewPresenceHandler(20 * time.Second)
+	wh := NewWSHandler(store, hub, presence, 20*time.Second, "test")
 
-	return &wsTestEnv{server: server, sm: sm, store: store, hub: hub}
+	return &wsTestEnv{
+		store:    store,
+		hub:      hub,
+		presence: presence,
+		servers:  make(map[string]*httptest.Server),
+		wh:       wh,
+	}
 }
 
-// dialWS opens a WebSocket connection to the test server and reads the hello message.
-func dialWS(t *testing.T, env *wsTestEnv) *websocket.Conn {
+// serverForUser returns a per-user httptest.Server that injects the given identity.
+func (env *wsTestEnv) serverForUser(t *testing.T, username string) *httptest.Server {
 	t.Helper()
-	conn, _, err := websocket.DefaultDialer.Dial(wsURL(env.server), nil)
+	env.mu.Lock()
+	defer env.mu.Unlock()
+	if s, ok := env.servers[username]; ok {
+		return s
+	}
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		identity := auth.Identity{ID: "uuid-" + username, Username: username, DisplayName: username, Type: "user"}
+		ctx := auth.ContextWithIdentity(r.Context(), identity)
+		env.wh.ServeHTTP(w, r.WithContext(ctx))
+	})
+	server := httptest.NewServer(handler)
+	t.Cleanup(func() { server.Close() })
+	env.servers[username] = server
+	return server
+}
+
+// connectUser opens a WS connection as the given user (upserts identity + connects).
+func connectUser(t *testing.T, env *wsTestEnv, username string) *websocket.Conn {
+	t.Helper()
+	server := env.serverForUser(t, username)
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL(server), nil)
 	if err != nil {
-		t.Fatalf("dial: %v", err)
+		t.Fatalf("dial as %s: %v", username, err)
 	}
 	t.Cleanup(func() { conn.Close() })
-
-	// Read and discard hello
-	readWSEnvelope(t, conn)
+	// Give the server a moment to register the client
+	time.Sleep(30 * time.Millisecond)
 	return conn
 }
 
 // wsReq sends a request and reads the response envelope matching the ref.
-// Skips interleaved broadcast messages (presence, message.new) that may arrive
-// between request and response.
+// Skips interleaved broadcast messages that may arrive between request and response.
 func wsReq(t *testing.T, conn *websocket.Conn, typ string, d interface{}, ref string) wsEnvelope {
 	t.Helper()
 	raw, _ := json.Marshal(d)
@@ -86,18 +115,7 @@ func readWSEnvelope(t *testing.T, conn *websocket.Conn) wsEnvelope {
 	return env
 }
 
-// registerWSUser registers a user on a WS connection and returns the conn.
-func registerWSUser(t *testing.T, env *wsTestEnv, username string) *websocket.Conn {
-	t.Helper()
-	conn := dialWS(t, env)
-	resp := wsReq(t, conn, "register", map[string]string{"username": username}, "r1")
-	if resp.OK == nil || !*resp.OK {
-		t.Fatalf("register %s failed: %+v", username, resp)
-	}
-	return conn
-}
-
-// grantAdmin promotes a WS-registered user to admin role for tests that need elevated permissions.
+// grantAdmin promotes a user to admin role for tests that need elevated permissions.
 func grantAdmin(t *testing.T, env *wsTestEnv, username string) {
 	t.Helper()
 	if err := env.store.SetUserRole(username, "admin"); err != nil {
@@ -107,62 +125,9 @@ func grantAdmin(t *testing.T, env *wsTestEnv, username string) {
 
 // --- Tests ---
 
-func TestWSHello(t *testing.T) {
+func TestWSPing(t *testing.T) {
 	env := newWSTestEnv(t)
-	conn, _, err := websocket.DefaultDialer.Dial(wsURL(env.server), nil)
-	if err != nil {
-		t.Fatalf("dial: %v", err)
-	}
-	defer conn.Close()
-
-	env_ := readWSEnvelope(t, conn)
-	if env_.Type != "hello" {
-		t.Errorf("type = %q, want hello", env_.Type)
-	}
-}
-
-func TestWSRegister(t *testing.T) {
-	env := newWSTestEnv(t)
-	conn := dialWS(t, env)
-
-	resp := wsReq(t, conn, "register", map[string]string{"username": "alice"}, "r1")
-	if resp.OK == nil || !*resp.OK {
-		t.Error("expected ok: true")
-	}
-	if resp.Ref != "r1" {
-		t.Errorf("ref = %q, want r1", resp.Ref)
-	}
-}
-
-func TestWSIdentify(t *testing.T) {
-	env := newWSTestEnv(t)
-
-	// First register a user and disconnect
-	conn1 := registerWSUser(t, env, "bob")
-	conn1.Close()
-	time.Sleep(50 * time.Millisecond) // let disconnect propagate
-
-	// Now identify as bob from a new connection
-	conn2 := dialWS(t, env)
-	resp := wsReq(t, conn2, "identify", map[string]string{"username": "bob"}, "i1")
-	if resp.OK == nil || !*resp.OK {
-		t.Errorf("expected ok: true, got %+v", resp)
-	}
-}
-
-func TestWSRegisterEmptyUsername(t *testing.T) {
-	env := newWSTestEnv(t)
-	conn := dialWS(t, env)
-
-	resp := wsReq(t, conn, "register", map[string]string{"username": ""}, "r1")
-	if resp.OK != nil && *resp.OK {
-		t.Error("expected ok: false for empty username")
-	}
-}
-
-func TestWSPingBeforeAuth(t *testing.T) {
-	env := newWSTestEnv(t)
-	conn := dialWS(t, env)
+	conn := connectUser(t, env, "alice")
 
 	resp := wsReq(t, conn, "ping", nil, "p1")
 	if resp.Type != "pong" {
@@ -170,52 +135,9 @@ func TestWSPingBeforeAuth(t *testing.T) {
 	}
 }
 
-func TestWSPingAfterAuth(t *testing.T) {
-	env := newWSTestEnv(t)
-	conn := registerWSUser(t, env, "alice")
-
-	resp := wsReq(t, conn, "ping", nil, "p2")
-	if resp.Type != "pong" {
-		t.Errorf("type = %q, want pong", resp.Type)
-	}
-}
-
-func TestWSProtectedToolBeforeAuth(t *testing.T) {
-	env := newWSTestEnv(t)
-	conn := dialWS(t, env)
-
-	tools := []string{"user_list", "channel_list", "channel_create", "channel_invite", "send_message", "history", "unread_messages", "set_setting", "get_settings"}
-	for _, tool := range tools {
-		resp := wsReq(t, conn, tool, map[string]interface{}{}, tool)
-		if resp.OK != nil && *resp.OK {
-			t.Errorf("%s: expected error before auth", tool)
-		}
-	}
-}
-
-func TestWSDoubleRegister(t *testing.T) {
-	env := newWSTestEnv(t)
-	conn := registerWSUser(t, env, "alice")
-
-	resp := wsReq(t, conn, "register", map[string]string{"username": "bob"}, "r2")
-	if resp.OK != nil && *resp.OK {
-		t.Error("expected error: already identified")
-	}
-}
-
-func TestWSIdentifyAfterRegister(t *testing.T) {
-	env := newWSTestEnv(t)
-	conn := registerWSUser(t, env, "alice")
-
-	resp := wsReq(t, conn, "identify", map[string]string{"username": "alice"}, "i2")
-	if resp.OK != nil && *resp.OK {
-		t.Error("expected error: already identified")
-	}
-}
-
 func TestWSUserList(t *testing.T) {
 	env := newWSTestEnv(t)
-	conn := registerWSUser(t, env, "alice")
+	conn := connectUser(t, env, "alice")
 
 	resp := wsReq(t, conn, "user_list", map[string]interface{}{}, "u1")
 	if resp.OK == nil || !*resp.OK {
@@ -226,7 +148,6 @@ func TestWSUserList(t *testing.T) {
 	var result struct {
 		Users []struct {
 			Username string `json:"username"`
-			Online   bool   `json:"online"`
 		} `json:"users"`
 	}
 	json.Unmarshal(d, &result)
@@ -235,18 +156,18 @@ func TestWSUserList(t *testing.T) {
 	}
 	found := false
 	for _, u := range result.Users {
-		if u.Username == "alice" && u.Online {
+		if u.Username == "alice" {
 			found = true
 		}
 	}
 	if !found {
-		t.Error("expected alice to be online in user list")
+		t.Error("expected alice in user list")
 	}
 }
 
 func TestWSChannelCreate(t *testing.T) {
 	env := newWSTestEnv(t)
-	conn := registerWSUser(t, env, "alice")
+	conn := connectUser(t, env, "alice")
 	grantAdmin(t, env, "alice")
 
 	resp := wsReq(t, conn, "channel_create", map[string]interface{}{
@@ -260,7 +181,7 @@ func TestWSChannelCreate(t *testing.T) {
 
 func TestWSChannelCreatePermissionDenied(t *testing.T) {
 	env := newWSTestEnv(t)
-	conn := registerWSUser(t, env, "alice") // "user" role lacks create_channel
+	conn := connectUser(t, env, "alice") // "user" role lacks create_channel
 
 	resp := wsReq(t, conn, "channel_create", map[string]interface{}{
 		"name":   "secret",
@@ -282,7 +203,7 @@ func TestWSChannelCreatePermissionDenied(t *testing.T) {
 
 func TestWSChannelList(t *testing.T) {
 	env := newWSTestEnv(t)
-	conn := registerWSUser(t, env, "alice")
+	conn := connectUser(t, env, "alice")
 	grantAdmin(t, env, "alice")
 
 	// Create a channel first
@@ -312,9 +233,9 @@ func TestWSChannelList(t *testing.T) {
 
 func TestWSChannelInvite(t *testing.T) {
 	env := newWSTestEnv(t)
-	aliceConn := registerWSUser(t, env, "alice")
+	aliceConn := connectUser(t, env, "alice")
 	grantAdmin(t, env, "alice")
-	registerWSUser(t, env, "bob")
+	connectUser(t, env, "bob")
 
 	wsReq(t, aliceConn, "channel_create", map[string]interface{}{
 		"name": "project", "public": false,
@@ -330,10 +251,10 @@ func TestWSChannelInvite(t *testing.T) {
 
 func TestWSChannelInviteNonParticipant(t *testing.T) {
 	env := newWSTestEnv(t)
-	aliceConn := registerWSUser(t, env, "alice")
+	aliceConn := connectUser(t, env, "alice")
 	grantAdmin(t, env, "alice")
-	bobConn := registerWSUser(t, env, "bob")
-	registerWSUser(t, env, "charlie")
+	bobConn := connectUser(t, env, "bob")
+	connectUser(t, env, "charlie")
 
 	wsReq(t, aliceConn, "channel_create", map[string]interface{}{
 		"name": "secret", "public": false,
@@ -350,7 +271,7 @@ func TestWSChannelInviteNonParticipant(t *testing.T) {
 
 func TestWSSendMessage(t *testing.T) {
 	env := newWSTestEnv(t)
-	conn := registerWSUser(t, env, "alice")
+	conn := connectUser(t, env, "alice")
 	grantAdmin(t, env, "alice")
 
 	wsReq(t, conn, "channel_create", map[string]interface{}{
@@ -377,9 +298,9 @@ func TestWSSendMessage(t *testing.T) {
 
 func TestWSSendMessageNonParticipant(t *testing.T) {
 	env := newWSTestEnv(t)
-	aliceConn := registerWSUser(t, env, "alice")
+	aliceConn := connectUser(t, env, "alice")
 	grantAdmin(t, env, "alice")
-	bobConn := registerWSUser(t, env, "bob")
+	bobConn := connectUser(t, env, "bob")
 
 	wsReq(t, aliceConn, "channel_create", map[string]interface{}{
 		"name": "secret", "public": false,
@@ -395,7 +316,7 @@ func TestWSSendMessageNonParticipant(t *testing.T) {
 
 func TestWSHistory(t *testing.T) {
 	env := newWSTestEnv(t)
-	conn := registerWSUser(t, env, "alice")
+	conn := connectUser(t, env, "alice")
 	grantAdmin(t, env, "alice")
 
 	wsReq(t, conn, "channel_create", map[string]interface{}{
@@ -435,9 +356,9 @@ func TestWSHistory(t *testing.T) {
 
 func TestWSHistoryNonParticipant(t *testing.T) {
 	env := newWSTestEnv(t)
-	aliceConn := registerWSUser(t, env, "alice")
+	aliceConn := connectUser(t, env, "alice")
 	grantAdmin(t, env, "alice")
-	bobConn := registerWSUser(t, env, "bob")
+	bobConn := connectUser(t, env, "bob")
 
 	wsReq(t, aliceConn, "channel_create", map[string]interface{}{
 		"name": "secret", "public": false,
@@ -454,7 +375,7 @@ func TestWSHistoryNonParticipant(t *testing.T) {
 
 func TestWSSetAndGetSettings(t *testing.T) {
 	env := newWSTestEnv(t)
-	conn := registerWSUser(t, env, "alice")
+	conn := connectUser(t, env, "alice")
 	grantAdmin(t, env, "alice")
 
 	// Set a setting
@@ -482,7 +403,7 @@ func TestWSSetAndGetSettings(t *testing.T) {
 
 func TestWSUnknownType(t *testing.T) {
 	env := newWSTestEnv(t)
-	conn := registerWSUser(t, env, "alice")
+	conn := connectUser(t, env, "alice")
 
 	resp := wsReq(t, conn, "nonexistent", map[string]interface{}{}, "x1")
 	if resp.OK != nil && *resp.OK {
@@ -490,46 +411,11 @@ func TestWSUnknownType(t *testing.T) {
 	}
 }
 
-func TestWSPresenceOnDisconnect(t *testing.T) {
-	env := newWSTestEnv(t)
-	conn := registerWSUser(t, env, "alice")
-	_ = conn // keep reference
-
-	if !env.sm.IsUserOnline("alice") {
-		t.Error("alice should be online")
-	}
-
-	conn.Close()
-	time.Sleep(100 * time.Millisecond) // let disconnect propagate
-
-	if env.sm.IsUserOnline("alice") {
-		t.Error("alice should be offline after disconnect")
-	}
-}
-
-func TestWSIdentifyAlreadyOnline(t *testing.T) {
-	env := newWSTestEnv(t)
-	registerWSUser(t, env, "alice")
-
-	// Try to identify as alice from another connection — should fail
-	conn2, _, err := websocket.DefaultDialer.Dial(wsURL(env.server), nil)
-	if err != nil {
-		t.Fatalf("dial: %v", err)
-	}
-	defer conn2.Close()
-	readWSEnvelope(t, conn2) // hello
-
-	resp := wsReq(t, conn2, "identify", map[string]string{"username": "alice"}, "i1")
-	if resp.OK != nil && *resp.OK {
-		t.Error("expected error: user already online")
-	}
-}
-
 func TestWSSendMessageWithMentions(t *testing.T) {
 	env := newWSTestEnv(t)
-	aliceConn := registerWSUser(t, env, "alice")
+	aliceConn := connectUser(t, env, "alice")
 	grantAdmin(t, env, "alice")
-	bobConn := registerWSUser(t, env, "bob")
+	bobConn := connectUser(t, env, "bob")
 
 	wsReq(t, aliceConn, "channel_create", map[string]interface{}{
 		"name": "general", "public": true,
@@ -563,9 +449,9 @@ func TestWSSendMessageWithMentions(t *testing.T) {
 
 func TestWSSendMessageAutoMention(t *testing.T) {
 	env := newWSTestEnv(t)
-	aliceConn := registerWSUser(t, env, "alice")
+	aliceConn := connectUser(t, env, "alice")
 	grantAdmin(t, env, "alice")
-	bobConn := registerWSUser(t, env, "bob")
+	bobConn := connectUser(t, env, "bob")
 
 	wsReq(t, aliceConn, "channel_create", map[string]interface{}{
 		"name": "general", "public": true,
@@ -600,9 +486,9 @@ func TestWSSendMessageAutoMention(t *testing.T) {
 
 func TestWSSendMessageWithThread(t *testing.T) {
 	env := newWSTestEnv(t)
-	aliceConn := registerWSUser(t, env, "alice")
+	aliceConn := connectUser(t, env, "alice")
 	grantAdmin(t, env, "alice")
-	bobConn := registerWSUser(t, env, "bob")
+	bobConn := connectUser(t, env, "bob")
 
 	wsReq(t, aliceConn, "channel_create", map[string]interface{}{
 		"name": "general", "public": true,
@@ -648,7 +534,7 @@ func TestWSSendMessageWithThread(t *testing.T) {
 
 func TestWSSendMessageRejectNestedReply(t *testing.T) {
 	env := newWSTestEnv(t)
-	conn := registerWSUser(t, env, "alice")
+	conn := connectUser(t, env, "alice")
 	grantAdmin(t, env, "alice")
 
 	wsReq(t, conn, "channel_create", map[string]interface{}{
@@ -684,7 +570,7 @@ func TestWSSendMessageRejectNestedReply(t *testing.T) {
 
 func TestWSHistoryWithThreadFilter(t *testing.T) {
 	env := newWSTestEnv(t)
-	conn := registerWSUser(t, env, "alice")
+	conn := connectUser(t, env, "alice")
 	grantAdmin(t, env, "alice")
 
 	wsReq(t, conn, "channel_create", map[string]interface{}{
@@ -731,7 +617,7 @@ func TestWSHistoryWithThreadFilter(t *testing.T) {
 
 func TestWSSendMessageMentionInvalidUser(t *testing.T) {
 	env := newWSTestEnv(t)
-	conn := registerWSUser(t, env, "alice")
+	conn := connectUser(t, env, "alice")
 	grantAdmin(t, env, "alice")
 
 	wsReq(t, conn, "channel_create", map[string]interface{}{
@@ -750,9 +636,9 @@ func TestWSSendMessageMentionInvalidUser(t *testing.T) {
 
 func TestWSUnreadMessages(t *testing.T) {
 	env := newWSTestEnv(t)
-	aliceConn := registerWSUser(t, env, "alice")
+	aliceConn := connectUser(t, env, "alice")
 	grantAdmin(t, env, "alice")
-	bobConn := registerWSUser(t, env, "bob")
+	bobConn := connectUser(t, env, "bob")
 
 	wsReq(t, aliceConn, "channel_create", map[string]interface{}{
 		"name": "general", "public": true,
@@ -792,9 +678,9 @@ func TestWSUnreadMessages(t *testing.T) {
 
 func TestWSSendMessageWithMentionGroup(t *testing.T) {
 	env := newWSTestEnv(t)
-	aliceConn := registerWSUser(t, env, "alice")
+	aliceConn := connectUser(t, env, "alice")
 	grantAdmin(t, env, "alice")
-	bobConn := registerWSUser(t, env, "bob")
+	bobConn := connectUser(t, env, "bob")
 
 	// Create a mention group.
 	resp := wsReq(t, aliceConn, "mention_group_create", map[string]interface{}{

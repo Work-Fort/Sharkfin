@@ -21,25 +21,25 @@ func newTestStore(t *testing.T) *sqlite.Store {
 func TestExportData(t *testing.T) {
 	s := newTestStore(t)
 
-	// --- Seed users ---
-	aliceID, _ := s.CreateUser("alice", "pass1")
-	bobID, _ := s.CreateUser("bob", "pass2")
+	// --- Seed identities ---
+	s.UpsertIdentity("uuid-alice", "alice", "Alice", "user", "user")
+	s.UpsertIdentity("uuid-bob", "bob", "Bob", "user", "user")
 	s.SetUserRole("alice", "admin")
 	s.SetUserType("bob", "agent")
 
 	// --- Seed channels ---
-	genID, _ := s.CreateChannel("general", true, []int64{aliceID, bobID}, "channel")
-	secretID, _ := s.CreateChannel("secret", false, []int64{aliceID}, "channel")
+	genID, _ := s.CreateChannel("general", true, []string{"uuid-alice", "uuid-bob"}, "channel")
+	secretID, _ := s.CreateChannel("secret", false, []string{"uuid-alice"}, "channel")
 
 	// --- Seed messages ---
-	parentID, _ := s.SendMessage(genID, aliceID, "hello @bob", nil, []int64{bobID})
-	s.SendMessage(genID, bobID, "reply", &parentID, nil)
-	s.SendMessage(secretID, aliceID, "secret msg", nil, nil)
+	parentID, _ := s.SendMessage(genID, "uuid-alice", "hello @bob", nil, []string{"uuid-bob"})
+	s.SendMessage(genID, "uuid-bob", "reply", &parentID, nil)
+	s.SendMessage(secretID, "uuid-alice", "secret msg", nil, nil)
 
 	// --- Seed DM ---
-	s.OpenDM(aliceID, bobID, "bob")
+	s.OpenDM("uuid-alice", "uuid-bob", "bob")
 	dm, _ := s.GetChannelByName("dm-alice-bob")
-	s.SendMessage(dm.ID, aliceID, "dm msg", nil, nil)
+	s.SendMessage(dm.ID, "uuid-alice", "dm msg", nil, nil)
 
 	// --- Seed settings ---
 	s.SetSetting("motd", "Welcome!")
@@ -72,9 +72,6 @@ func TestExportData(t *testing.T) {
 	}
 	if userMap["bob"].Type != "agent" {
 		t.Errorf("bob type = %q, want agent", userMap["bob"].Type)
-	}
-	if userMap["alice"].Password != "pass1" {
-		t.Errorf("alice password = %q, want pass1", userMap["alice"].Password)
 	}
 
 	// Channels

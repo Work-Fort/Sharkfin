@@ -13,20 +13,20 @@ import (
 func populateSource(t *testing.T, s *sqlite.Store) {
 	t.Helper()
 
-	aliceID, _ := s.CreateUser("alice", "pass1")
-	bobID, _ := s.CreateUser("bob", "pass2")
+	s.UpsertIdentity("uuid-alice", "alice", "Alice", "user", "user")
+	s.UpsertIdentity("uuid-bob", "bob", "Bob", "user", "user")
 	s.SetUserRole("alice", "admin")
 	s.SetUserType("bob", "agent")
 
-	genID, _ := s.CreateChannel("general", true, []int64{aliceID, bobID}, "channel")
-	s.CreateChannel("secret", false, []int64{aliceID}, "channel")
+	genID, _ := s.CreateChannel("general", true, []string{"uuid-alice", "uuid-bob"}, "channel")
+	s.CreateChannel("secret", false, []string{"uuid-alice"}, "channel")
 
-	parentID, _ := s.SendMessage(genID, aliceID, "hello @bob", nil, []int64{bobID})
-	s.SendMessage(genID, bobID, "reply to alice", &parentID, nil)
+	parentID, _ := s.SendMessage(genID, "uuid-alice", "hello @bob", nil, []string{"uuid-bob"})
+	s.SendMessage(genID, "uuid-bob", "reply to alice", &parentID, nil)
 
-	s.OpenDM(aliceID, bobID, "bob")
+	s.OpenDM("uuid-alice", "uuid-bob", "bob")
 	dm, _ := s.GetChannelByName("dm-alice-bob")
-	s.SendMessage(dm.ID, aliceID, "dm message", nil, nil)
+	s.SendMessage(dm.ID, "uuid-alice", "dm message", nil, nil)
 
 	s.SetSetting("motd", "Welcome!")
 
@@ -68,9 +68,6 @@ func TestImportDataRoundtrip(t *testing.T) {
 	}
 	for _, u := range reimported.Users {
 		src := srcUserMap[u.Username]
-		if u.Password != src.Password {
-			t.Errorf("user %q password: got %q, want %q", u.Username, u.Password, src.Password)
-		}
 		if u.Role != src.Role {
 			t.Errorf("user %q role: got %q, want %q", u.Username, u.Role, src.Role)
 		}
@@ -171,7 +168,7 @@ func TestImportDataRoundtrip(t *testing.T) {
 
 func TestImportDataNonEmptyStoreRefused(t *testing.T) {
 	s := newTestStore(t)
-	s.CreateUser("existing", "")
+	s.UpsertIdentity("uuid-existing", "existing", "Existing", "user", "user")
 
 	b := &backup.Backup{
 		Version: 1,
@@ -192,12 +189,12 @@ func TestImportDataNonEmptyStoreRefused(t *testing.T) {
 func TestImportDataForceOverride(t *testing.T) {
 	s := newTestStore(t)
 	// Pre-populate with a user that will CONFLICT with the backup data.
-	s.CreateUser("alice", "old-password")
+	s.UpsertIdentity("uuid-alice-old", "alice", "Alice Old", "user", "user")
 
 	b := &backup.Backup{
 		Version: 1,
 		Users: []backup.BackupUser{
-			{Username: "alice", Password: "new-password", Role: "admin", Type: "user"},
+			{Username: "alice", Password: "", Role: "admin", Type: "user"},
 			{Username: "bob", Password: "", Role: "user", Type: "user"},
 		},
 	}
@@ -209,19 +206,16 @@ func TestImportDataForceOverride(t *testing.T) {
 	}
 
 	// Verify alice was recreated with backup data (not old data).
-	alice, err := s.GetUserByUsername("alice")
+	alice, err := s.GetIdentityByUsername("alice")
 	if err != nil {
 		t.Fatalf("get alice: %v", err)
-	}
-	if alice.Password != "new-password" {
-		t.Errorf("alice password = %q, want new-password", alice.Password)
 	}
 	if alice.Role != "admin" {
 		t.Errorf("alice role = %q, want admin", alice.Role)
 	}
 
 	// Verify bob was also created.
-	bob, err := s.GetUserByUsername("bob")
+	bob, err := s.GetIdentityByUsername("bob")
 	if err != nil {
 		t.Fatalf("get bob: %v", err)
 	}
