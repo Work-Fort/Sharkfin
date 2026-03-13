@@ -45,9 +45,14 @@ func NewDaemonCmd(version string) *cobra.Command {
 				return fmt.Errorf("invalid presence-timeout %q: %w", timeoutStr, err)
 			}
 
+			passportURL := viper.GetString("passport-url")
+			if passportURL == "" {
+				return fmt.Errorf("--passport-url is required")
+			}
+
 			webhookURL := viper.GetString("webhook-url")
 			bus := domain.NewEventBus()
-			srv, err := pkgdaemon.NewServer(addr, store, pongTimeout, webhookURL, bus, version)
+			srv, err := pkgdaemon.NewServer(cmd.Context(), addr, store, pongTimeout, webhookURL, bus, version, passportURL)
 			if err != nil {
 				return fmt.Errorf("create server: %w", err)
 			}
@@ -81,6 +86,9 @@ func NewDaemonCmd(version string) *cobra.Command {
 
 	cmd.Flags().String("webhook-url", "", "URL to POST webhook notifications to on mentions and DMs")
 	_ = viper.BindPFlag("webhook-url", cmd.Flags().Lookup("webhook-url"))
+
+	cmd.Flags().String("passport-url", "", "Passport identity provider URL (required)")
+	_ = viper.BindPFlag("passport-url", cmd.Flags().Lookup("passport-url"))
 
 	return cmd
 }

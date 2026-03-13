@@ -12,50 +12,59 @@ import (
 	"github.com/charmbracelet/log"
 	mcpserver "github.com/mark3labs/mcp-go/server"
 
+	auth "github.com/Work-Fort/Passport/go/service-auth"
+	authapikey "github.com/Work-Fort/Passport/go/service-auth/apikey"
+	authjwt "github.com/Work-Fort/Passport/go/service-auth/jwt"
 	"github.com/Work-Fort/sharkfin/pkg/domain"
 )
 
-// Server is the sharkfind HTTP server.
 type Server struct {
 	addr       string
 	store      domain.Store
-	sessions   *SessionManager
 	httpServer *http.Server
 	closers    []interface{ Close() }
 }
 
-// NewServer creates a new sharkfind server.
-func NewServer(addr string, store domain.Store, pongTimeout time.Duration, webhookURL string, bus domain.EventBus, version string) (*Server, error) {
-	// Set webhook_url if provided via flag (always overwrite).
+func NewServer(ctx context.Context, addr string, store domain.Store, pongTimeout time.Duration, webhookURL string, bus domain.EventBus, version string, passportURL string) (*Server, error) {
 	if webhookURL != "" {
 		store.SetSetting("webhook_url", webhookURL)
 	}
 
-	sm := NewSessionManager(store)
+	// Initialize Passport auth middleware.
+	opts := auth.DefaultOptions(passportURL)
+	jwtV, err := authjwt.New(ctx, opts.JWKSURL, opts.JWKSRefreshInterval)
+	if err != nil {
+		return nil, fmt.Errorf("init JWT validator: %w", err)
+	}
+	akV := authapikey.New(opts.VerifyAPIKeyURL, opts.APIKeyCacheTTL)
+	mw := auth.NewFromValidators(jwtV, akV)
+
 	hub := NewHub(bus)
+	presenceHandler := NewPresenceHandler(pongTimeout)
+
 	var closers []interface{ Close() }
+	closers = append(closers, jwtV)
 	if bus != nil {
 		closers = append(closers, NewWebhookSubscriber(bus, store))
-		closers = append(closers, NewPresenceNotifier(bus, sm, store))
+		closers = append(closers, NewPresenceNotifier(bus, presenceHandler, store))
 	}
-	presenceHandler := NewPresenceHandler(sm, hub, pongTimeout)
-	wsHandler := NewWSHandler(sm, store, hub, pongTimeout, version)
 
-	sharkfinMCP := NewSharkfinMCP(sm, store, hub, version)
+	wsHandler := NewWSHandler(store, hub, presenceHandler, pongTimeout, version)
+
+	sharkfinMCP := NewSharkfinMCP(store, hub, presenceHandler, version)
 	mcpTransport := mcpserver.NewStreamableHTTPServer(sharkfinMCP.Server(),
 		mcpserver.WithStateful(true),
 	)
 
 	mux := http.NewServeMux()
-	mux.Handle("/mcp", mcpTransport)
-	mux.Handle("GET /presence", presenceHandler)
-	mux.Handle("GET /ws", wsHandler)
+	mux.Handle("/mcp", mw(mcpTransport))
+	mux.Handle("GET /presence", mw(presenceHandler))
+	mux.Handle("GET /ws", mw(wsHandler))
 
 	return &Server{
-		addr:     addr,
-		store:    store,
-		sessions: sm,
-		closers:  closers,
+		addr:    addr,
+		store:   store,
+		closers: closers,
 		httpServer: &http.Server{
 			Addr:    addr,
 			Handler: mux,
@@ -63,12 +72,9 @@ func NewServer(addr string, store domain.Store, pongTimeout time.Duration, webho
 	}, nil
 }
 
-// Store returns the server's store. Intended for test access.
 func (s *Server) Store() domain.Store { return s.store }
 
-// Start begins listening for connections.
 func (s *Server) Start() error {
-	// TODO: change back to "tcp" when Nexus supports IPv6
 	ln, err := net.Listen("tcp4", s.addr)
 	if err != nil {
 		return fmt.Errorf("listen: %w", err)
@@ -77,7 +83,6 @@ func (s *Server) Start() error {
 	return s.httpServer.Serve(ln)
 }
 
-// Shutdown gracefully stops the server.
 func (s *Server) Shutdown(ctx context.Context) error {
 	log.Info("shutting down sharkfind")
 	for _, c := range s.closers {
