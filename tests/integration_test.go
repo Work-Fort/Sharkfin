@@ -4,6 +4,8 @@ package tests
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
+	"crypto/rsa"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -13,6 +15,9 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+	"github.com/lestrrat-go/jwx/v2/jwa"
+	"github.com/lestrrat-go/jwx/v2/jwk"
+	"github.com/lestrrat-go/jwx/v2/jwt"
 
 	pkgdaemon "github.com/Work-Fort/sharkfin/pkg/daemon"
 	"github.com/Work-Fort/sharkfin/pkg/infra/sqlite"
@@ -31,18 +36,117 @@ type jsonrpcError struct {
 	Message string `json:"message"`
 }
 
+// jwksStub holds a test JWKS server and JWT signing function.
+type jwksStub struct {
+	addr    string
+	stop    func()
+	privJWK jwk.Key
+}
+
+func startJWKSStub(t *testing.T) *jwksStub {
+	t.Helper()
+
+	rawKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatalf("generate RSA key: %v", err)
+	}
+
+	privJWK, err := jwk.FromRaw(rawKey)
+	if err != nil {
+		t.Fatalf("create JWK: %v", err)
+	}
+	_ = privJWK.Set(jwk.KeyIDKey, "test-key-1")
+	_ = privJWK.Set(jwk.AlgorithmKey, jwa.RS256)
+
+	privSet := jwk.NewSet()
+	_ = privSet.AddKey(privJWK)
+
+	pubSet, err := jwk.PublicSetOf(privSet)
+	if err != nil {
+		t.Fatalf("derive public JWKS: %v", err)
+	}
+
+	jwksBytes, err := json.Marshal(pubSet)
+	if err != nil {
+		t.Fatalf("marshal JWKS: %v", err)
+	}
+
+	bridgeIdentity := map[string]any{
+		"valid": true,
+		"key": map[string]any{
+			"userId": "00000000-0000-0000-0000-000000000001",
+			"metadata": map[string]any{
+				"username":     "bridge",
+				"name":         "MCP Bridge",
+				"display_name": "Bridge",
+				"type":         "service",
+			},
+		},
+	}
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /v1/jwks", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write(jwksBytes)
+	})
+	mux.HandleFunc("POST /v1/verify-api-key", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(bridgeIdentity)
+	})
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("jwks listen: %v", err)
+	}
+	srv := &http.Server{Handler: mux}
+	go srv.Serve(ln)
+
+	stub := &jwksStub{addr: ln.Addr().String(), privJWK: privJWK}
+	stub.stop = func() { srv.Close() }
+	t.Cleanup(stub.stop)
+	return stub
+}
+
+func (s *jwksStub) signJWT(id, username, displayName, userType string) string {
+	now := time.Now()
+	tok, err := jwt.NewBuilder().
+		Subject(id).
+		Issuer("passport-stub").
+		Audience([]string{"sharkfin"}).
+		IssuedAt(now).
+		Expiration(now.Add(1*time.Hour)).
+		Claim("username", username).
+		Claim("name", displayName).
+		Claim("display_name", displayName).
+		Claim("type", userType).
+		Build()
+	if err != nil {
+		panic(fmt.Sprintf("build JWT: %v", err))
+	}
+	signed, err := jwt.Sign(tok, jwt.WithKey(jwa.RS256, s.privJWK))
+	if err != nil {
+		panic(fmt.Sprintf("sign JWT: %v", err))
+	}
+	return string(signed)
+}
+
+func (s *jwksStub) passportURL() string {
+	return "http://" + s.addr
+}
+
 // testEnv holds a running server and helpers for integration tests.
 type testEnv struct {
-	t      *testing.T
-	srv    *pkgdaemon.Server
-	addr   string
-	cancel context.CancelFunc
+	t    *testing.T
+	srv  *pkgdaemon.Server
+	addr string
+	jwks *jwksStub
 }
 
 func startTestServer(t *testing.T) *testEnv {
 	t.Helper()
 
-	// Find a free port
+	jwks := startJWKSStub(t)
+
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatalf("find free port: %v", err)
@@ -55,12 +159,12 @@ func startTestServer(t *testing.T) *testEnv {
 		t.Fatalf("open db: %v", err)
 	}
 
-	srv, err := pkgdaemon.NewServer(addr, store, 20*time.Second, "", nil, "test")
+	ctx := context.Background()
+	srv, err := pkgdaemon.NewServer(ctx, addr, store, 20*time.Second, "", nil, "test", jwks.passportURL())
 	if err != nil {
 		t.Fatalf("create server: %v", err)
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
 	errCh := make(chan error, 1)
 	go func() {
 		if err := srv.Start(); err != nil && err != http.ErrServerClosed {
@@ -68,7 +172,6 @@ func startTestServer(t *testing.T) *testEnv {
 		}
 	}()
 
-	// Wait for server to be ready
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
 		conn, err := net.DialTimeout("tcp", addr, 100*time.Millisecond)
@@ -85,18 +188,16 @@ func startTestServer(t *testing.T) *testEnv {
 	}
 
 	t.Cleanup(func() {
-		cancel()
 		shutCtx, shutCancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer shutCancel()
 		srv.Shutdown(shutCtx)
 	})
 
-	_ = ctx
-	return &testEnv{t: t, srv: srv, addr: addr, cancel: cancel}
+	return &testEnv{t: t, srv: srv, addr: addr, jwks: jwks}
 }
 
-// mcpRequest sends a JSON-RPC request to /mcp and returns the HTTP response and parsed JSON-RPC response.
-func (e *testEnv) mcpRequest(sessionID string, method string, id int, params interface{}) (*http.Response, jsonrpcResponse) {
+// mcpRequest sends a JSON-RPC request to /mcp with the given auth token.
+func (e *testEnv) mcpRequest(sessionID, token, method string, id int, params interface{}) (*http.Response, jsonrpcResponse) {
 	e.t.Helper()
 
 	req := map[string]interface{}{
@@ -114,6 +215,9 @@ func (e *testEnv) mcpRequest(sessionID string, method string, id int, params int
 		e.t.Fatalf("create request: %v", err)
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
+	if token != "" {
+		httpReq.Header.Set("Authorization", "Bearer "+token)
+	}
 	if sessionID != "" {
 		httpReq.Header.Set("Mcp-Session-Id", sessionID)
 	}
@@ -136,9 +240,9 @@ func (e *testEnv) mcpRequest(sessionID string, method string, id int, params int
 }
 
 // toolCall is a convenience for calling tools/call.
-func (e *testEnv) toolCall(sessionID string, id int, name string, args interface{}) (*http.Response, jsonrpcResponse) {
+func (e *testEnv) toolCall(sessionID, token string, id int, name string, args interface{}) (*http.Response, jsonrpcResponse) {
 	e.t.Helper()
-	return e.mcpRequest(sessionID, "tools/call", id, map[string]interface{}{
+	return e.mcpRequest(sessionID, token, "tools/call", id, map[string]interface{}{
 		"name":      name,
 		"arguments": args,
 	})
@@ -193,26 +297,50 @@ func toolResultIsError(t *testing.T, resp jsonrpcResponse) (bool, string) {
 	return result.IsError, ""
 }
 
-// connectPresence establishes a WebSocket presence connection and returns the identity token.
-// The cancel function closes the connection (marks user offline).
-func (e *testEnv) connectPresence() (token string, cancelPresence func()) {
+// userSession holds the MCP session ID and JWT for a test user.
+type userSession struct {
+	sessionID string
+	token     string
+}
+
+// initUser initializes an MCP session for a user with a signed JWT.
+// The first tool call auto-provisions the identity.
+func (e *testEnv) initUser(id, username, displayName string) userSession {
+	e.t.Helper()
+
+	token := e.jwks.signJWT(id, username, displayName, "user")
+
+	httpResp, _ := e.mcpRequest("", token, "initialize", 1, map[string]interface{}{
+		"protocolVersion": "2025-03-26",
+		"capabilities":    map[string]interface{}{},
+		"clientInfo":      map[string]string{"name": "test", "version": "0.1"},
+	})
+	sessionID := httpResp.Header.Get("Mcp-Session-Id")
+	if sessionID == "" {
+		e.t.Fatal("no Mcp-Session-Id in initialize response")
+	}
+
+	// First tool call triggers auto-provisioning.
+	_, ulResp := e.toolCall(sessionID, token, 2, "user_list", map[string]interface{}{})
+	if ulResp.Error != nil {
+		e.t.Fatalf("auto-provision tool call failed: %s", ulResp.Error.Message)
+	}
+
+	return userSession{sessionID: sessionID, token: token}
+}
+
+// connectPresence establishes a WebSocket presence connection with auth.
+func (e *testEnv) connectPresence(token string) func() {
 	e.t.Helper()
 
 	wsURL := fmt.Sprintf("ws://%s/presence", e.addr)
-	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	header := http.Header{}
+	header.Set("Authorization", "Bearer "+token)
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL, header)
 	if err != nil {
 		e.t.Fatalf("dial presence: %v", err)
 	}
 
-	// Read token (first message from server)
-	_, msg, err := conn.ReadMessage()
-	if err != nil {
-		conn.Close()
-		e.t.Fatalf("read presence token: %v", err)
-	}
-	token = string(msg)
-
-	// Read loop: processes server pings (gorilla auto-responds with pong)
 	readDone := make(chan struct{})
 	go func() {
 		defer close(readDone)
@@ -223,75 +351,15 @@ func (e *testEnv) connectPresence() (token string, cancelPresence func()) {
 		}
 	}()
 
-	cancelPresence = func() {
+	return func() {
 		conn.WriteMessage(websocket.CloseMessage,
 			websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""))
 		conn.Close()
 		<-readDone
 	}
-	return token, cancelPresence
 }
 
-// registerUser performs the full identity handshake: presence → initialize → register.
-// Returns the MCP session ID and a cancel function to disconnect presence.
-func (e *testEnv) registerUser(username string, id int) (sessionID string, cancelPresence func()) {
-	e.t.Helper()
-
-	// 1. Connect to presence (gets token)
-	token, cancelPresence := e.connectPresence()
-
-	// 2. Initialize — mcp-go returns the session ID here
-	httpResp, _ := e.mcpRequest("", "initialize", id, map[string]interface{}{
-		"protocolVersion": "2025-03-26",
-		"capabilities":    map[string]interface{}{},
-		"clientInfo":      map[string]string{"name": "test", "version": "0.1"},
-	})
-	sessionID = httpResp.Header.Get("Mcp-Session-Id")
-	if sessionID == "" {
-		e.t.Fatal("no Mcp-Session-Id in initialize response")
-	}
-
-	// 3. Register (pass session ID so the server can map it to the user)
-	_, regResp := e.toolCall(sessionID, id+2, "register", map[string]interface{}{
-		"token": token, "username": username, "password": "",
-	})
-	if isErr, msg := toolResultIsError(e.t, regResp); isErr {
-		e.t.Fatalf("register %s failed: %s", username, msg)
-	}
-
-	return sessionID, cancelPresence
-}
-
-// identifyUser performs the full identity handshake for an existing user: presence → initialize → identify.
-func (e *testEnv) identifyUser(username string, id int) (sessionID string, cancelPresence func()) {
-	e.t.Helper()
-
-	// 1. Connect to presence (gets token)
-	token, cancelPresence := e.connectPresence()
-
-	// 2. Initialize — mcp-go returns the session ID here
-	httpResp, _ := e.mcpRequest("", "initialize", id, map[string]interface{}{
-		"protocolVersion": "2025-03-26",
-		"capabilities":    map[string]interface{}{},
-		"clientInfo":      map[string]string{"name": "test", "version": "0.1"},
-	})
-	sessionID = httpResp.Header.Get("Mcp-Session-Id")
-	if sessionID == "" {
-		e.t.Fatal("no Mcp-Session-Id in initialize response")
-	}
-
-	// 3. Identify (pass session ID so the server can map it to the user)
-	_, identResp := e.toolCall(sessionID, id+2, "identify", map[string]interface{}{
-		"token": token, "username": username, "password": "",
-	})
-	if isErr, msg := toolResultIsError(e.t, identResp); isErr {
-		e.t.Fatalf("identify %s failed: %s", username, msg)
-	}
-
-	return sessionID, cancelPresence
-}
-
-// grantAdmin promotes a user to admin role via the server's Store handle.
+// grantAdmin promotes a user to admin role via the server's Store.
 func (e *testEnv) grantAdmin(username string) {
 	e.t.Helper()
 	if err := e.srv.Store().SetUserRole(username, "admin"); err != nil {
@@ -301,13 +369,14 @@ func (e *testEnv) grantAdmin(username string) {
 
 // --- Test Scenarios ---
 
-func TestScenario1_IdentityHandshakeAndPresence(t *testing.T) {
+func TestScenario1_IdentityAndPresence(t *testing.T) {
 	env := startTestServer(t)
 
-	sessionID, cancelPresence := env.registerUser("alice", 1)
+	alice := env.initUser("alice-uuid", "alice", "Alice")
+	cancelPresence := env.connectPresence(alice.token)
 
-	// Verify user is online
-	_, ulResp := env.toolCall(sessionID, 10, "user_list", map[string]interface{}{})
+	// Verify alice is online.
+	_, ulResp := env.toolCall(alice.sessionID, alice.token, 10, "user_list", map[string]interface{}{})
 	users := toolResultText(t, ulResp)
 
 	var userList []struct {
@@ -321,71 +390,48 @@ func TestScenario1_IdentityHandshakeAndPresence(t *testing.T) {
 		t.Fatalf("expected alice online, got: %v", userList)
 	}
 
-	// Disconnect presence
+	// Disconnect presence.
 	cancelPresence()
 	time.Sleep(100 * time.Millisecond)
 
-	// The mcp-go session survives presence disconnect (it's managed independently).
-	// The SharkfinMCP username mapping also persists. Only the SessionManager's
-	// onlineUsers is cleaned up, so alice should appear offline.
-	_, ulResp2 := env.toolCall(sessionID, 11, "user_list", map[string]interface{}{})
-	isErr, _ := toolResultIsError(t, ulResp2)
-	if isErr {
-		// Auth mapping was cleaned up — re-identify to check user list.
-		sessionID2, cancelPresence2 := env.identifyUser("alice", 20)
-		defer cancelPresence2()
-
-		_, ulResp3 := env.toolCall(sessionID2, 30, "user_list", map[string]interface{}{})
-		users2 := toolResultText(t, ulResp3)
-		var ul2 []struct {
-			Username string `json:"username"`
-			Online   bool   `json:"online"`
-		}
-		json.Unmarshal([]byte(users2), &ul2)
-		if len(ul2) != 1 || ul2[0].Username != "alice" {
-			t.Fatalf("expected alice in user list, got: %v", ul2)
-		}
-	} else {
-		// Session survived — check that alice is offline
-		users2 := toolResultText(t, ulResp2)
-		var ul2 []struct {
-			Username string `json:"username"`
-			Online   bool   `json:"online"`
-		}
-		json.Unmarshal([]byte(users2), &ul2)
-		if len(ul2) != 1 || ul2[0].Username != "alice" || ul2[0].Online {
-			t.Fatalf("expected alice offline, got: %v", ul2)
-		}
+	// Alice should appear offline (MCP session survives).
+	_, ulResp2 := env.toolCall(alice.sessionID, alice.token, 11, "user_list", map[string]interface{}{})
+	users2 := toolResultText(t, ulResp2)
+	var ul2 []struct {
+		Username string `json:"username"`
+		Online   bool   `json:"online"`
+	}
+	json.Unmarshal([]byte(users2), &ul2)
+	if len(ul2) != 1 || ul2[0].Username != "alice" || ul2[0].Online {
+		t.Fatalf("expected alice offline, got: %v", ul2)
 	}
 }
 
 func TestScenario2_MessagingBetweenTwoUsers(t *testing.T) {
 	env := startTestServer(t)
 
-	sessionA, cancelA := env.registerUser("alice", 1)
-	defer cancelA()
+	alice := env.initUser("alice-uuid", "alice", "Alice")
 	env.grantAdmin("alice")
-	sessionB, cancelB := env.registerUser("bob", 10)
-	defer cancelB()
+	bob := env.initUser("bob-uuid", "bob", "Bob")
 
-	// Alice creates a private channel with Bob
-	_, chResp := env.toolCall(sessionA, 20, "channel_create", map[string]interface{}{
+	// Alice creates a private channel with Bob.
+	_, chResp := env.toolCall(alice.sessionID, alice.token, 20, "channel_create", map[string]interface{}{
 		"name": "alice-bob", "public": false, "members": []string{"bob"},
 	})
 	if chResp.Error != nil {
 		t.Fatalf("channel_create: %s", chResp.Error.Message)
 	}
 
-	// Alice sends a message
-	_, sendResp := env.toolCall(sessionA, 21, "send_message", map[string]interface{}{
+	// Alice sends a message.
+	_, sendResp := env.toolCall(alice.sessionID, alice.token, 21, "send_message", map[string]interface{}{
 		"channel": "alice-bob", "message": "hello bob!",
 	})
 	if sendResp.Error != nil {
 		t.Fatalf("send_message: %s", sendResp.Error.Message)
 	}
 
-	// Bob reads unread messages
-	_, unreadResp := env.toolCall(sessionB, 22, "unread_messages", map[string]interface{}{})
+	// Bob reads unread messages.
+	_, unreadResp := env.toolCall(bob.sessionID, bob.token, 22, "unread_messages", map[string]interface{}{})
 	unreadText := toolResultText(t, unreadResp)
 
 	var msgs []struct {
@@ -400,8 +446,8 @@ func TestScenario2_MessagingBetweenTwoUsers(t *testing.T) {
 		t.Fatalf("expected 1 message from alice, got: %v", msgs)
 	}
 
-	// Bob reads again — no new messages
-	_, unreadResp2 := env.toolCall(sessionB, 23, "unread_messages", map[string]interface{}{})
+	// Bob reads again — no new messages.
+	_, unreadResp2 := env.toolCall(bob.sessionID, bob.token, 23, "unread_messages", map[string]interface{}{})
 	unreadText2 := toolResultText(t, unreadResp2)
 	if unreadText2 != "null" && unreadText2 != "[]" {
 		var msgs2 []interface{}
@@ -411,13 +457,13 @@ func TestScenario2_MessagingBetweenTwoUsers(t *testing.T) {
 		}
 	}
 
-	// Alice sends another message
-	_, _ = env.toolCall(sessionA, 24, "send_message", map[string]interface{}{
+	// Alice sends another message.
+	_, _ = env.toolCall(alice.sessionID, alice.token, 24, "send_message", map[string]interface{}{
 		"channel": "alice-bob", "message": "are you there?",
 	})
 
-	// Bob reads — gets only the new message
-	_, unreadResp3 := env.toolCall(sessionB, 25, "unread_messages", map[string]interface{}{})
+	// Bob reads — gets only the new message.
+	_, unreadResp3 := env.toolCall(bob.sessionID, bob.token, 25, "unread_messages", map[string]interface{}{})
 	unreadText3 := toolResultText(t, unreadResp3)
 	var msgs3 []struct {
 		Body string `json:"body"`
@@ -431,21 +477,18 @@ func TestScenario2_MessagingBetweenTwoUsers(t *testing.T) {
 func TestScenario3_ChannelVisibility(t *testing.T) {
 	env := startTestServer(t)
 
-	sessionA, cancelA := env.registerUser("alice", 1)
-	defer cancelA()
+	alice := env.initUser("alice-uuid", "alice", "Alice")
 	env.grantAdmin("alice")
-	sessionB, cancelB := env.registerUser("bob", 10)
-	defer cancelB()
-	sessionC, cancelC := env.registerUser("charlie", 20)
-	defer cancelC()
+	bob := env.initUser("bob-uuid", "bob", "Bob")
+	charlie := env.initUser("charlie-uuid", "charlie", "Charlie")
 
-	// Alice creates public channel, adds Bob
-	_, _ = env.toolCall(sessionA, 30, "channel_create", map[string]interface{}{
+	// Alice creates public channel, adds Bob.
+	_, _ = env.toolCall(alice.sessionID, alice.token, 30, "channel_create", map[string]interface{}{
 		"name": "general", "public": true, "members": []string{"bob"},
 	})
 
-	// Charlie sees the public channel
-	_, clResp := env.toolCall(sessionC, 31, "channel_list", map[string]interface{}{})
+	// Charlie sees the public channel.
+	_, clResp := env.toolCall(charlie.sessionID, charlie.token, 31, "channel_list", map[string]interface{}{})
 	clText := toolResultText(t, clResp)
 	var channels []struct {
 		Name   string `json:"name"`
@@ -462,13 +505,13 @@ func TestScenario3_ChannelVisibility(t *testing.T) {
 		t.Fatalf("charlie should see public channel 'general', got: %v", channels)
 	}
 
-	// Alice creates private channel with Bob
-	_, _ = env.toolCall(sessionA, 32, "channel_create", map[string]interface{}{
+	// Alice creates private channel with Bob.
+	_, _ = env.toolCall(alice.sessionID, alice.token, 32, "channel_create", map[string]interface{}{
 		"name": "secret", "public": false, "members": []string{"bob"},
 	})
 
-	// Charlie should NOT see the private channel
-	_, clResp2 := env.toolCall(sessionC, 33, "channel_list", map[string]interface{}{})
+	// Charlie should NOT see the private channel.
+	_, clResp2 := env.toolCall(charlie.sessionID, charlie.token, 33, "channel_list", map[string]interface{}{})
 	clText2 := toolResultText(t, clResp2)
 	var channels2 []struct {
 		Name string `json:"name"`
@@ -480,8 +523,8 @@ func TestScenario3_ChannelVisibility(t *testing.T) {
 		}
 	}
 
-	// Bob sees both channels
-	_, clResp3 := env.toolCall(sessionB, 34, "channel_list", map[string]interface{}{})
+	// Bob sees both channels.
+	_, clResp3 := env.toolCall(bob.sessionID, bob.token, 34, "channel_list", map[string]interface{}{})
 	clText3 := toolResultText(t, clResp3)
 	var channels3 []struct {
 		Name string `json:"name"`
@@ -505,11 +548,10 @@ func TestScenario3_ChannelVisibility(t *testing.T) {
 func TestScenario4_ChannelCreatePermissionDenied(t *testing.T) {
 	env := startTestServer(t)
 
-	sessionA, cancelA := env.registerUser("alice", 1)
-	defer cancelA()
-	// alice has "user" role which lacks create_channel permission
+	alice := env.initUser("alice-uuid", "alice", "Alice")
+	// alice has "user" role which lacks create_channel permission.
 
-	_, chResp := env.toolCall(sessionA, 10, "channel_create", map[string]interface{}{
+	_, chResp := env.toolCall(alice.sessionID, alice.token, 10, "channel_create", map[string]interface{}{
 		"name": "test-channel", "public": true,
 	})
 	isErr, msg := toolResultIsError(t, chResp)
@@ -521,86 +563,45 @@ func TestScenario4_ChannelCreatePermissionDenied(t *testing.T) {
 	}
 }
 
-func TestScenario5_SessionStateConstraints(t *testing.T) {
+func TestScenario5_UnauthenticatedRequest(t *testing.T) {
 	env := startTestServer(t)
 
-	sessionA, cancelA := env.registerUser("alice", 1)
-	defer cancelA()
-
-	// Try register again — should fail
-	_, regResp := env.toolCall(sessionA, 10, "register", map[string]interface{}{
-		"token": "fake-token", "username": "alice2", "password": "",
-	})
-	if isErr, _ := toolResultIsError(t, regResp); !isErr {
-		t.Fatal("expected error on second register")
+	// Request without auth token should fail.
+	httpReq, _ := http.NewRequest("POST", fmt.Sprintf("http://%s/mcp", env.addr), bytes.NewReader([]byte(`{"jsonrpc":"2.0","method":"initialize","id":1}`)))
+	httpReq.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(httpReq)
+	if err != nil {
+		t.Fatalf("do request: %v", err)
 	}
-
-	// Try identify — should also fail
-	_, identResp := env.toolCall(sessionA, 11, "identify", map[string]interface{}{
-		"token": "fake-token", "username": "alice", "password": "",
-	})
-	if isErr, _ := toolResultIsError(t, identResp); !isErr {
-		t.Fatal("expected error on identify after register")
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("expected 401, got %d", resp.StatusCode)
 	}
 }
 
-func TestScenario6_DoubleLoginPrevention(t *testing.T) {
+func TestScenario6_ChannelInvite(t *testing.T) {
 	env := startTestServer(t)
 
-	_, cancelA := env.registerUser("alice", 1)
-	defer cancelA()
-
-	// Get a second presence connection (simulates a second bridge)
-	token2, cancelPresence2 := env.connectPresence()
-	defer cancelPresence2()
-
-	// Initialize a second session
-	httpResp2, _ := env.mcpRequest("", "initialize", 20, map[string]interface{}{
-		"protocolVersion": "2025-03-26",
-		"capabilities":    map[string]interface{}{},
-		"clientInfo":      map[string]string{"name": "test2", "version": "0.1"},
-	})
-	sessionID2 := httpResp2.Header.Get("Mcp-Session-Id")
-
-	// Try to identify as alice — should fail because alice is already online
-	_, identResp := env.toolCall(sessionID2, 22, "identify", map[string]interface{}{
-		"token": token2, "username": "alice", "password": "",
-	})
-	isErr, msg := toolResultIsError(t, identResp)
-	if !isErr {
-		t.Fatal("expected error: alice is already online")
-	}
-	if msg != "user already online: alice" {
-		t.Fatalf("unexpected error: %s", msg)
-	}
-}
-
-func TestScenario7_ChannelInvite(t *testing.T) {
-	env := startTestServer(t)
-
-	sessionA, cancelA := env.registerUser("alice", 1)
-	defer cancelA()
+	alice := env.initUser("alice-uuid", "alice", "Alice")
 	env.grantAdmin("alice")
-	sessionB, cancelB := env.registerUser("bob", 10)
-	defer cancelB()
-	sessionC, cancelC := env.registerUser("charlie", 20)
-	defer cancelC()
+	bob := env.initUser("bob-uuid", "bob", "Bob")
+	charlie := env.initUser("charlie-uuid", "charlie", "Charlie")
 
-	// Alice creates private channel with Bob
-	_, _ = env.toolCall(sessionA, 30, "channel_create", map[string]interface{}{
+	// Alice creates private channel with Bob.
+	_, _ = env.toolCall(alice.sessionID, alice.token, 30, "channel_create", map[string]interface{}{
 		"name": "project-x", "public": false, "members": []string{"bob"},
 	})
 
-	// Bob invites Charlie
-	_, invResp := env.toolCall(sessionB, 31, "channel_invite", map[string]interface{}{
+	// Bob invites Charlie.
+	_, invResp := env.toolCall(bob.sessionID, bob.token, 31, "channel_invite", map[string]interface{}{
 		"channel": "project-x", "username": "charlie",
 	})
 	if invResp.Error != nil {
 		t.Fatalf("invite failed: %s", invResp.Error.Message)
 	}
 
-	// Charlie can now see the channel
-	_, clResp := env.toolCall(sessionC, 32, "channel_list", map[string]interface{}{})
+	// Charlie can now see the channel.
+	_, clResp := env.toolCall(charlie.sessionID, charlie.token, 32, "channel_list", map[string]interface{}{})
 	clText := toolResultText(t, clResp)
 	var channels []struct {
 		Name string `json:"name"`
@@ -616,8 +617,8 @@ func TestScenario7_ChannelInvite(t *testing.T) {
 		t.Fatalf("charlie should see 'project-x' after invite, got: %v", channels)
 	}
 
-	// Charlie can send a message
-	_, sendResp := env.toolCall(sessionC, 33, "send_message", map[string]interface{}{
+	// Charlie can send a message.
+	_, sendResp := env.toolCall(charlie.sessionID, charlie.token, 33, "send_message", map[string]interface{}{
 		"channel": "project-x", "message": "hey everyone!",
 	})
 	if sendResp.Error != nil {
@@ -625,25 +626,21 @@ func TestScenario7_ChannelInvite(t *testing.T) {
 	}
 }
 
-func TestScenario8_NonParticipantRejection(t *testing.T) {
+func TestScenario7_NonParticipantRejection(t *testing.T) {
 	env := startTestServer(t)
 
-	sessionA, cancelA := env.registerUser("alice", 1)
-	defer cancelA()
+	alice := env.initUser("alice-uuid", "alice", "Alice")
 	env.grantAdmin("alice")
-	_, cancelB := env.registerUser("bob", 10)
-	defer cancelB()
+	env.initUser("bob-uuid", "bob", "Bob")
 
-	// Alice creates a private channel (alone)
-	_, _ = env.toolCall(sessionA, 20, "channel_create", map[string]interface{}{
+	// Alice creates a private channel (alone).
+	_, _ = env.toolCall(alice.sessionID, alice.token, 20, "channel_create", map[string]interface{}{
 		"name": "private-notes", "public": false,
 	})
 
-	// Bob tries to send a message to alice's channel — should fail
-	sessionB, cancelB2 := env.registerUser("charlie", 30) // register charlie to use as the outsider
-	defer cancelB2()
-
-	_, sendResp := env.toolCall(sessionB, 40, "send_message", map[string]interface{}{
+	// Charlie (outsider) tries to send a message.
+	charlie := env.initUser("charlie-uuid", "charlie", "Charlie")
+	_, sendResp := env.toolCall(charlie.sessionID, charlie.token, 40, "send_message", map[string]interface{}{
 		"channel": "private-notes", "message": "sneaky!",
 	})
 	isErr, msg := toolResultIsError(t, sendResp)

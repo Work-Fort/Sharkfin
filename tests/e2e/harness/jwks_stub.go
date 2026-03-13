@@ -107,7 +107,7 @@ func StartJWKSStub() (addr string, stop func(), signJWT func(id, username, displ
 			Issuer("passport-stub").
 			Audience([]string{"sharkfin"}).
 			IssuedAt(now).
-			Expiration(now.Add(1 * time.Hour)).
+			Expiration(now.Add(1*time.Hour)).
 			Claim("username", username).
 			Claim("name", displayName).
 			Claim("display_name", displayName).
