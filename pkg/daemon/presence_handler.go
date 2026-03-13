@@ -3,64 +3,88 @@ package daemon
 
 import (
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/gorilla/websocket"
+
+	auth "github.com/Work-Fort/Passport/go/service-auth"
 )
 
-var upgrader = websocket.Upgrader{
-	CheckOrigin: func(r *http.Request) bool { return true },
-}
-
-// PresenceHandler handles WebSocket presence connections.
-// On connect: creates an identity token and sends it as the first message.
-// Keeps the connection alive with ping/pong. When the client disconnects
-// (or pong times out), the user is marked offline.
 type PresenceHandler struct {
-	sessions     *SessionManager
-	hub          *Hub
 	pongTimeout  time.Duration
 	pingInterval time.Duration
+
+	mu    sync.RWMutex
+	conns map[string]*presenceConn // username → connection
 }
 
-// NewPresenceHandler creates a new presence handler.
-func NewPresenceHandler(sessions *SessionManager, hub *Hub, pongTimeout time.Duration) *PresenceHandler {
+type presenceConn struct {
+	conn *websocket.Conn
+	mu   sync.Mutex // serializes writes
+}
+
+func NewPresenceHandler(pongTimeout time.Duration) *PresenceHandler {
 	return &PresenceHandler{
-		sessions:     sessions,
-		hub:          hub,
 		pongTimeout:  pongTimeout,
 		pingInterval: pongTimeout / 2,
+		conns:        make(map[string]*presenceConn),
 	}
 }
 
+func (h *PresenceHandler) SendNotification(username string, data []byte) error {
+	h.mu.RLock()
+	pc, ok := h.conns[username]
+	h.mu.RUnlock()
+	if !ok {
+		return nil
+	}
+	pc.mu.Lock()
+	defer pc.mu.Unlock()
+	pc.conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
+	return pc.conn.WriteMessage(websocket.TextMessage, data)
+}
+
+func (h *PresenceHandler) IsOnline(username string) bool {
+	h.mu.RLock()
+	_, ok := h.conns[username]
+	h.mu.RUnlock()
+	return ok
+}
+
 func (h *PresenceHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	identity, ok := auth.IdentityFromContext(r.Context())
+	if !ok {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		return
 	}
 	defer conn.Close()
 
-	token := h.sessions.CreateIdentityToken()
+	username := identity.Username
+	pc := &presenceConn{conn: conn}
 
-	done, err := h.sessions.AttachPresence(token, conn)
-	if err != nil {
-		return
-	}
-	defer h.sessions.DisconnectPresence(token)
+	h.mu.Lock()
+	h.conns[username] = pc
+	h.mu.Unlock()
+	defer func() {
+		h.mu.Lock()
+		if h.conns[username] == pc {
+			delete(h.conns, username)
+		}
+		h.mu.Unlock()
+	}()
 
-	if err := h.sessions.PresenceWrite(token, websocket.TextMessage, []byte(token)); err != nil {
-		return
-	}
-
-	// Pong handler resets read deadline (keepalive timeout)
 	conn.SetReadDeadline(time.Now().Add(h.pongTimeout))
 	conn.SetPongHandler(func(string) error {
 		conn.SetReadDeadline(time.Now().Add(h.pongTimeout))
 		return nil
 	})
 
-	// Read loop in goroutine — processes pong frames and detects disconnect.
-	// gorilla/websocket: one concurrent reader + one concurrent writer is safe.
 	readDone := make(chan struct{})
 	go func() {
 		defer close(readDone)
@@ -71,19 +95,20 @@ func (h *PresenceHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 
-	// Write loop: send pings periodically
 	ticker := time.NewTicker(h.pingInterval)
 	defer ticker.Stop()
 
 	for {
 		select {
 		case <-ticker.C:
-			if err := h.sessions.PresenceWrite(token, websocket.PingMessage, nil); err != nil {
+			pc.mu.Lock()
+			pc.conn.SetWriteDeadline(time.Now().Add(h.pingInterval))
+			err := pc.conn.WriteMessage(websocket.PingMessage, nil)
+			pc.mu.Unlock()
+			if err != nil {
 				return
 			}
 		case <-readDone:
-			return
-		case <-done:
 			return
 		}
 	}

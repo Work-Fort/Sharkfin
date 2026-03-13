@@ -13,6 +13,10 @@ import (
 	"github.com/Work-Fort/sharkfin/pkg/domain"
 )
 
+var upgrader = websocket.Upgrader{
+	CheckOrigin: func(r *http.Request) bool { return true },
+}
+
 // WSHandler handles WebSocket connections for non-MCP clients.
 type WSHandler struct {
 	sessions    *SessionManager
