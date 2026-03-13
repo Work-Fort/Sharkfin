@@ -3,13 +3,13 @@ package domain
 
 import "time"
 
-type User struct {
-	ID        int64
-	Username  string
-	Password  string
-	Role      string
-	Type      string
-	CreatedAt time.Time
+type Identity struct {
+	ID          string // Passport UUID
+	Username    string
+	DisplayName string
+	Type        string // "user", "agent", "service"
+	Role        string
+	CreatedAt   time.Time
 }
 
 type Channel struct {
@@ -26,14 +26,14 @@ type ChannelWithMembership struct {
 }
 
 type Message struct {
-	ID        int64
-	ChannelID int64
-	UserID    int64
-	From      string // username
-	Body      string
-	ThreadID  *int64
-	Mentions  []string
-	CreatedAt time.Time
+	ID         int64
+	ChannelID  int64
+	IdentityID string // was UserID int64
+	From       string
+	Body       string
+	ThreadID   *int64
+	Mentions   []string
+	CreatedAt  time.Time
 }
 
 type UnreadCount struct {
@@ -47,16 +47,13 @@ type UnreadCount struct {
 type DMInfo struct {
 	ChannelID     int64
 	ChannelName   string
-	OtherUserID   int64
-	OtherUsername string
+	OtherUsername string // removed OtherUserID — not needed
 }
 
 type AllDMInfo struct {
 	ChannelID     int64
 	ChannelName   string
-	User1ID       int64
-	User1Username string
-	User2ID       int64
+	User1Username string // removed User1ID, User2ID — not needed
 	User2Username string
 }
 
