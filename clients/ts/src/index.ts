@@ -14,6 +14,5 @@ export type {
   SendOptions,
   HistoryOptions,
   UnreadOptions,
-  AuthOptions,
   ClientOptions,
 } from "./types.js";

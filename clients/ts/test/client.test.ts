@@ -17,15 +17,6 @@ function startServer(handler: (ws: WSType) => void): Promise<string> {
   });
 }
 
-function sendHello(ws: WSType) {
-  ws.send(
-    JSON.stringify({
-      type: "hello",
-      d: { heartbeat_interval: 10, version: "v0.1.0" },
-    }),
-  );
-}
-
 function readReqAndReply(ws: WSType, response: unknown) {
   return new Promise<void>((resolve) => {
     ws.once("message", (data) => {
@@ -66,50 +57,34 @@ afterEach(() => {
 });
 
 describe("SharkfinClient", () => {
-  it("connects and reads hello", async () => {
-    const url = await startServer((ws) => {
-      sendHello(ws);
+  it("connects without hello handshake", async () => {
+    const url = await startServer(() => {
+      // No hello sent — connection is ready immediately.
     });
 
     client = new SharkfinClient(url, { WebSocket: (await import("ws")).WebSocket as unknown as typeof globalThis.WebSocket });
     await client.connect();
-
-    expect(client.serverVersion).toBe("v0.1.0");
-    expect(client.heartbeatInterval).toBe(10);
-  });
-
-  it("register succeeds", async () => {
-    const url = await startServer((ws) => {
-      sendHello(ws);
-      readReqAndReply(ws, null);
-    });
-
-    client = new SharkfinClient(url, { WebSocket: (await import("ws")).WebSocket as unknown as typeof globalThis.WebSocket });
-    await client.connect();
-    await client.register("alice");
   });
 
   it("server error throws SharkfinError", async () => {
     const url = await startServer((ws) => {
-      sendHello(ws);
-      readReqAndError(ws, "user not found");
+      readReqAndError(ws, "not authorized");
     });
 
     client = new SharkfinClient(url, { WebSocket: (await import("ws")).WebSocket as unknown as typeof globalThis.WebSocket });
     await client.connect();
 
     try {
-      await client.identify("nonexistent");
+      await client.ping();
       expect.unreachable("should have thrown");
     } catch (err) {
       expect(err).toBeInstanceOf(SharkfinError);
-      expect((err as SharkfinError).serverMessage).toBe("user not found");
+      expect((err as SharkfinError).serverMessage).toBe("not authorized");
     }
   });
 
   it("receives message.new event", async () => {
     const url = await startServer((ws) => {
-      sendHello(ws);
       setTimeout(() => {
         ws.send(
           JSON.stringify({
@@ -141,7 +116,6 @@ describe("SharkfinClient", () => {
 
   it("receives presence event", async () => {
     const url = await startServer((ws) => {
-      sendHello(ws);
       setTimeout(() => {
         ws.send(
           JSON.stringify({
@@ -165,7 +139,6 @@ describe("SharkfinClient", () => {
 
   it("users returns user list", async () => {
     const url = await startServer((ws) => {
-      sendHello(ws);
       readReqAndReply(ws, {
         users: [
           { username: "alice", online: true, type: "human", state: "active" },
@@ -185,7 +158,6 @@ describe("SharkfinClient", () => {
 
   it("sendMessage returns id", async () => {
     const url = await startServer((ws) => {
-      sendHello(ws);
       readReqAndReply(ws, { id: 42 });
     });
 
@@ -198,7 +170,6 @@ describe("SharkfinClient", () => {
 
   it("history returns messages with camelCase keys", async () => {
     const url = await startServer((ws) => {
-      sendHello(ws);
       readReqAndReply(ws, {
         channel: "general",
         messages: [
@@ -218,7 +189,6 @@ describe("SharkfinClient", () => {
 
   it("channels returns channel list", async () => {
     const url = await startServer((ws) => {
-      sendHello(ws);
       readReqAndReply(ws, {
         channels: [{ name: "general", public: true, member: true }],
       });
@@ -235,7 +205,6 @@ describe("SharkfinClient", () => {
 
   it("dmOpen returns result", async () => {
     const url = await startServer((ws) => {
-      sendHello(ws);
       readReqAndReply(ws, {
         channel: "dm_alice_bob",
         participant: "bob",
@@ -253,7 +222,6 @@ describe("SharkfinClient", () => {
 
   it("unreadCounts returns counts with camelCase keys", async () => {
     const url = await startServer((ws) => {
-      sendHello(ws);
       readReqAndReply(ws, {
         counts: [
           { channel: "general", type: "channel", unread_count: 5, mention_count: 1 },
@@ -272,7 +240,6 @@ describe("SharkfinClient", () => {
 
   it("interleaved broadcasts don't break requests", async () => {
     const url = await startServer((ws) => {
-      sendHello(ws);
       ws.once("message", (data) => {
         const req = JSON.parse(data.toString());
         // Send broadcast before reply.
@@ -290,7 +257,7 @@ describe("SharkfinClient", () => {
     client = new SharkfinClient(url, { WebSocket: (await import("ws")).WebSocket as unknown as typeof globalThis.WebSocket });
     await client.connect();
 
-    await client.register("alice");
+    await client.ping();
     // Should not throw despite interleaved broadcast.
   });
 });

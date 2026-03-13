@@ -93,13 +93,10 @@ export interface UnreadOptions {
   threadId?: number;
 }
 
-/** Options for register/identify. */
-export interface AuthOptions {
-  notificationsOnly?: boolean;
-}
-
 /** Client constructor options. */
 export interface ClientOptions {
+  token?: string;
+  apiKey?: string;
   reconnect?: boolean | ((attempt: number) => number);
   logger?: Pick<Console, "log" | "warn" | "error">;
   WebSocket?: typeof WebSocket;

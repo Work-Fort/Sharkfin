@@ -14,7 +14,6 @@ import type {
   SendOptions,
   HistoryOptions,
   UnreadOptions,
-  AuthOptions,
   ClientOptions,
   Envelope,
 } from "./types.js";
@@ -49,19 +48,7 @@ export class SharkfinClient extends Emitter {
   private refSeq = 0;
   private url: string;
   private opts: ClientOptions;
-  private _serverVersion = "";
-  private _heartbeatInterval = 0;
   private _closed = false;
-
-  /** Server version from the hello handshake. */
-  get serverVersion(): string {
-    return this._serverVersion;
-  }
-
-  /** Heartbeat interval (seconds) from the hello handshake. */
-  get heartbeatInterval(): number {
-    return this._heartbeatInterval;
-  }
 
   constructor(url: string, opts: ClientOptions = {}) {
     super();
@@ -69,34 +56,34 @@ export class SharkfinClient extends Emitter {
     this.opts = opts;
   }
 
-  /** Connect to the server and wait for the hello handshake. */
+  /** Connect to the server. Authentication is provided via token or apiKey options. */
   async connect(): Promise<void> {
     this._closed = false;
+    const headers: Record<string, string> = {};
+    if (this.opts.token) {
+      headers["Authorization"] = `Bearer ${this.opts.token}`;
+    } else if (this.opts.apiKey) {
+      headers["Authorization"] = `Bearer ${this.opts.apiKey}`;
+    }
+
     const WS = this.opts.WebSocket ?? WebSocket;
-    const ws = new WS(this.url);
+    const ws = new WS(this.url, { headers });
     this.ws = ws;
 
     await new Promise<void>((resolve, reject) => {
-      const onMessage = (event: MessageEvent | { data: string }) => {
-        const data = typeof event === "object" && "data" in event ? event.data : event;
-        const env: Envelope = JSON.parse(typeof data === "string" ? data : data.toString());
-        if (env.type === "hello") {
-          const d = env.d as { heartbeat_interval: number; version: string };
-          this._heartbeatInterval = d.heartbeat_interval;
-          this._serverVersion = d.version;
-          ws.removeEventListener("message", onMessage as EventListener);
-          ws.removeEventListener("error", onError);
-          this.setupMessageHandler(ws);
-          resolve();
-        }
+      const onOpen = () => {
+        ws.removeEventListener("open", onOpen as EventListener);
+        ws.removeEventListener("error", onError);
+        this.setupMessageHandler(ws);
+        resolve();
       };
 
       const onError = () => {
-        ws.removeEventListener("message", onMessage as EventListener);
+        ws.removeEventListener("open", onOpen as EventListener);
         reject(new Error("Failed to connect"));
       };
 
-      ws.addEventListener("message", onMessage as EventListener);
+      ws.addEventListener("open", onOpen as EventListener);
       ws.addEventListener("error", onError);
     });
   }
@@ -203,19 +190,7 @@ export class SharkfinClient extends Emitter {
     });
   }
 
-  // --- Identity ---
-
-  async register(username: string, opts?: AuthOptions): Promise<void> {
-    const d: Record<string, unknown> = { username };
-    if (opts?.notificationsOnly) d.notifications_only = true;
-    await this.request("register", d);
-  }
-
-  async identify(username: string, opts?: AuthOptions): Promise<void> {
-    const d: Record<string, unknown> = { username };
-    if (opts?.notificationsOnly) d.notifications_only = true;
-    await this.request("identify", d);
-  }
+  // --- Users ---
 
   async users(): Promise<User[]> {
     const data = (await this.request("user_list")) as { users: unknown[] };
