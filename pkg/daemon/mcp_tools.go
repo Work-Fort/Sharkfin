@@ -3,30 +3,6 @@ package daemon
 
 import "github.com/mark3labs/mcp-go/mcp"
 
-func newGetIdentityTokenTool() mcp.Tool {
-	return mcp.NewTool("get_identity_token",
-		mcp.WithDescription("Get the identity token for this session. Must be called first, then pass the token to register or identify."),
-	)
-}
-
-func newRegisterTool() mcp.Tool {
-	return mcp.NewTool("register",
-		mcp.WithDescription("Create a new user and associate with identity token. Can only be called before identify."),
-		mcp.WithString("token", mcp.Required(), mcp.Description("Identity token from get_identity_token")),
-		mcp.WithString("username", mcp.Required(), mcp.Description("Username to register")),
-		mcp.WithString("password", mcp.Required(), mcp.Description("Password (reserved for future use)")),
-	)
-}
-
-func newIdentifyTool() mcp.Tool {
-	return mcp.NewTool("identify",
-		mcp.WithDescription("Identify as an existing user and associate with identity token. Can only be called before register."),
-		mcp.WithString("token", mcp.Required(), mcp.Description("Identity token from get_identity_token")),
-		mcp.WithString("username", mcp.Required(), mcp.Description("Username to identify as")),
-		mcp.WithString("password", mcp.Required(), mcp.Description("Password (reserved for future use)")),
-	)
-}
-
 func newUserListTool() mcp.Tool {
 	return mcp.NewTool("user_list",
 		mcp.WithDescription("List all registered users with their online/offline presence status"),

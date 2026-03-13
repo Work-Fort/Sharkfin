@@ -6,13 +6,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"regexp"
-	"sync"
 	"time"
 
 	"github.com/charmbracelet/log"
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 
+	auth "github.com/Work-Fort/Passport/go/service-auth"
 	"github.com/Work-Fort/sharkfin/pkg/domain"
 )
 
@@ -23,8 +23,8 @@ type contextKey int
 const usernameKey contextKey = iota
 
 // toolPermissions maps tool names to the permission required to invoke them.
-// Tools not in this map (e.g. get_identity_token, register, identify,
-// capabilities, set_state) pass through without permission checks.
+// Tools not in this map (e.g. capabilities, set_state) pass through
+// without permission checks.
 var toolPermissions = map[string]string{
 	"user_list":         "user_list",
 	"channel_list":      "channel_list",
@@ -49,39 +49,24 @@ var toolPermissions = map[string]string{
 // SharkfinMCP wraps an mcp-go MCPServer with Sharkfin's business logic.
 type SharkfinMCP struct {
 	mcpServer *server.MCPServer
-	sessions  *SessionManager
 	store     domain.Store
 	hub       *Hub
-
-	mu             sync.RWMutex
-	mcpGoUsernames map[string]string // mcp-go session ID → username
+	presence  *PresenceHandler
 }
 
 // NewSharkfinMCP creates the MCP server and registers all tools.
-func NewSharkfinMCP(sm *SessionManager, store domain.Store, hub *Hub, version string) *SharkfinMCP {
+func NewSharkfinMCP(store domain.Store, hub *Hub, presence *PresenceHandler, version string) *SharkfinMCP {
 	s := &SharkfinMCP{
-		sessions:       sm,
-		store:          store,
-		hub:            hub,
-		mcpGoUsernames: make(map[string]string),
+		store:    store,
+		hub:      hub,
+		presence: presence,
 	}
 
-	hooks := &server.Hooks{}
-	hooks.AddOnUnregisterSession(func(ctx context.Context, sess server.ClientSession) {
-		s.mu.Lock()
-		delete(s.mcpGoUsernames, sess.SessionID())
-		s.mu.Unlock()
-	})
-
 	s.mcpServer = server.NewMCPServer("sharkfin", version,
-		server.WithHooks(hooks),
 		server.WithToolHandlerMiddleware(s.authMiddleware),
 	)
 
 	s.mcpServer.AddTools(
-		server.ServerTool{Tool: newGetIdentityTokenTool(), Handler: s.handleGetIdentityToken},
-		server.ServerTool{Tool: newRegisterTool(), Handler: s.handleRegister},
-		server.ServerTool{Tool: newIdentifyTool(), Handler: s.handleIdentify},
 		server.ServerTool{Tool: newUserListTool(), Handler: s.handleUserList},
 		server.ServerTool{Tool: newChannelListTool(), Handler: s.handleChannelList},
 		server.ServerTool{Tool: newChannelCreateTool(), Handler: s.handleChannelCreate},
@@ -119,37 +104,22 @@ func (s *SharkfinMCP) Server() *server.MCPServer {
 	return s.mcpServer
 }
 
-// setUsername associates a mcp-go session ID with a username.
-func (s *SharkfinMCP) setUsername(mcpGoSessionID, username string) {
-	s.mu.Lock()
-	s.mcpGoUsernames[mcpGoSessionID] = username
-	s.mu.Unlock()
-}
-
-// getUsername looks up the username for a mcp-go session ID.
-func (s *SharkfinMCP) getUsername(mcpGoSessionID string) (string, bool) {
-	s.mu.RLock()
-	u, ok := s.mcpGoUsernames[mcpGoSessionID]
-	s.mu.RUnlock()
-	return u, ok
-}
-
-// authMiddleware enforces identification for all tools except public ones.
+// authMiddleware uses Passport context to authenticate and auto-provision identities.
 func (s *SharkfinMCP) authMiddleware(next server.ToolHandlerFunc) server.ToolHandlerFunc {
 	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		switch req.Params.Name {
-		case "get_identity_token", "register", "identify":
-			return next(ctx, req)
+		identity, ok := auth.IdentityFromContext(ctx)
+		if !ok {
+			return mcp.NewToolResultError("unauthorized: no valid token"), nil
 		}
 
-		sess := server.ClientSessionFromContext(ctx)
-		if sess == nil {
-			return mcp.NewToolResultError("not identified: call register or identify first"), nil
+		// Auto-provision
+		role := identity.Type
+		if role == "" {
+			role = "user"
 		}
-		username, ok := s.getUsername(sess.SessionID())
-		if !ok {
-			return mcp.NewToolResultError("not identified: call register or identify first"), nil
-		}
+		_ = s.store.UpsertIdentity(identity.ID, identity.Username, identity.DisplayName, identity.Type, role)
+
+		username := identity.Username
 
 		if perm, ok := toolPermissions[req.Params.Name]; ok {
 			hasPerm, err := s.store.HasPermission(username, perm)
@@ -174,63 +144,10 @@ func usernameFromCtx(ctx context.Context) string {
 
 // --- Tool handlers ---
 
-func (s *SharkfinMCP) handleGetIdentityToken(_ context.Context, _ mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	// The bridge intercepts this call and returns the token directly.
-	// This handler exists only so the tool appears in tools/list.
-	return mcp.NewToolResultError("get_identity_token must be called through the MCP bridge"), nil
-}
-
-func (s *SharkfinMCP) handleRegister(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	token := req.GetString("token", "")
-	username := req.GetString("username", "")
-	password := req.GetString("password", "")
-
-	sess := server.ClientSessionFromContext(ctx)
-	if sess == nil {
-		return mcp.NewToolResultError("no session"), nil
-	}
-
-	// Check if this mcp-go session is already identified.
-	if _, ok := s.getUsername(sess.SessionID()); ok {
-		return mcp.NewToolResultError("session already identified"), nil
-	}
-
-	if _, err := s.sessions.Register(token, username, password); err != nil {
-		return mcp.NewToolResultError(err.Error()), nil
-	}
-
-	s.setUsername(sess.SessionID(), username)
-	s.store.SetUserType(username, "agent")
-	return mcp.NewToolResultText(fmt.Sprintf("registered as %s", username)), nil
-}
-
-func (s *SharkfinMCP) handleIdentify(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	token := req.GetString("token", "")
-	username := req.GetString("username", "")
-	password := req.GetString("password", "")
-
-	sess := server.ClientSessionFromContext(ctx)
-	if sess == nil {
-		return mcp.NewToolResultError("no session"), nil
-	}
-
-	// Check if this mcp-go session is already identified.
-	if _, ok := s.getUsername(sess.SessionID()); ok {
-		return mcp.NewToolResultError("session already identified"), nil
-	}
-
-	if _, err := s.sessions.Identify(token, username, password); err != nil {
-		return mcp.NewToolResultError(err.Error()), nil
-	}
-
-	s.setUsername(sess.SessionID(), username)
-	return mcp.NewToolResultText(fmt.Sprintf("identified as %s", username)), nil
-}
-
 func (s *SharkfinMCP) handleUserList(_ context.Context, _ mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	users, err := s.store.ListUsers()
+	identities, err := s.store.ListIdentities()
 	if err != nil {
-		return nil, fmt.Errorf("list users: %w", err)
+		return nil, fmt.Errorf("list identities: %w", err)
 	}
 
 	type userInfo struct {
@@ -240,15 +157,15 @@ func (s *SharkfinMCP) handleUserList(_ context.Context, _ mcp.CallToolRequest) (
 		State    string `json:"state,omitempty"`
 	}
 	var list []userInfo
-	for _, u := range users {
-		online := s.sessions.IsUserOnline(u.Username)
+	for _, id := range identities {
+		online := s.presence.IsOnline(id.Username)
 		info := userInfo{
-			Username: u.Username,
+			Username: id.Username,
 			Online:   online,
-			Type:     u.Type,
+			Type:     id.Type,
 		}
 		if online {
-			info.State = s.hub.GetState(u.Username)
+			info.State = s.hub.GetState(id.Username)
 		}
 		list = append(list, info)
 	}
@@ -258,12 +175,12 @@ func (s *SharkfinMCP) handleUserList(_ context.Context, _ mcp.CallToolRequest) (
 }
 
 func (s *SharkfinMCP) handleChannelList(ctx context.Context, _ mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	user, err := s.store.GetUserByUsername(usernameFromCtx(ctx))
+	identity, err := s.store.GetIdentityByUsername(usernameFromCtx(ctx))
 	if err != nil {
-		return nil, fmt.Errorf("get user: %w", err)
+		return nil, fmt.Errorf("get identity: %w", err)
 	}
 
-	channels, err := s.store.ListChannelsForUser(user.ID)
+	channels, err := s.store.ListChannelsForUser(identity.ID)
 	if err != nil {
 		return nil, fmt.Errorf("list channels: %w", err)
 	}
@@ -286,14 +203,14 @@ func (s *SharkfinMCP) handleChannelCreate(ctx context.Context, req mcp.CallToolR
 	public := req.GetBool("public", false)
 	members := req.GetStringSlice("members", nil)
 
-	creator, err := s.store.GetUserByUsername(usernameFromCtx(ctx))
+	creator, err := s.store.GetIdentityByUsername(usernameFromCtx(ctx))
 	if err != nil {
-		return nil, fmt.Errorf("get user: %w", err)
+		return nil, fmt.Errorf("get identity: %w", err)
 	}
 
-	memberIDs := []int64{creator.ID}
+	memberIDs := []string{creator.ID}
 	for _, username := range members {
-		u, err := s.store.GetUserByUsername(username)
+		u, err := s.store.GetIdentityByUsername(username)
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("user not found: %s", username)), nil
 		}
@@ -314,9 +231,9 @@ func (s *SharkfinMCP) handleChannelInvite(ctx context.Context, req mcp.CallToolR
 	channel := req.GetString("channel", "")
 	username := req.GetString("username", "")
 
-	caller, err := s.store.GetUserByUsername(usernameFromCtx(ctx))
+	caller, err := s.store.GetIdentityByUsername(usernameFromCtx(ctx))
 	if err != nil {
-		return nil, fmt.Errorf("get user: %w", err)
+		return nil, fmt.Errorf("get identity: %w", err)
 	}
 
 	ch, err := s.store.GetChannelByName(channel)
@@ -332,7 +249,7 @@ func (s *SharkfinMCP) handleChannelInvite(ctx context.Context, req mcp.CallToolR
 		return mcp.NewToolResultError("you are not a participant of this channel"), nil
 	}
 
-	invitee, err := s.store.GetUserByUsername(username)
+	invitee, err := s.store.GetIdentityByUsername(username)
 	if err != nil {
 		return mcp.NewToolResultError(fmt.Sprintf("user not found: %s", username)), nil
 	}
@@ -347,9 +264,9 @@ func (s *SharkfinMCP) handleChannelInvite(ctx context.Context, req mcp.CallToolR
 func (s *SharkfinMCP) handleChannelJoin(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	channel := req.GetString("channel", "")
 
-	caller, err := s.store.GetUserByUsername(usernameFromCtx(ctx))
+	caller, err := s.store.GetIdentityByUsername(usernameFromCtx(ctx))
 	if err != nil {
-		return nil, fmt.Errorf("get user: %w", err)
+		return nil, fmt.Errorf("get identity: %w", err)
 	}
 
 	ch, err := s.store.GetChannelByName(channel)
@@ -381,9 +298,9 @@ func (s *SharkfinMCP) handleSendMessage(ctx context.Context, req mcp.CallToolReq
 	message := req.GetString("message", "")
 	threadID := optionalInt64(req, "thread_id")
 
-	sender, err := s.store.GetUserByUsername(usernameFromCtx(ctx))
+	sender, err := s.store.GetIdentityByUsername(usernameFromCtx(ctx))
 	if err != nil {
-		return nil, fmt.Errorf("get user: %w", err)
+		return nil, fmt.Errorf("get identity: %w", err)
 	}
 
 	ch, err := s.store.GetChannelByName(channel)
@@ -399,21 +316,21 @@ func (s *SharkfinMCP) handleSendMessage(ctx context.Context, req mcp.CallToolReq
 		return mcp.NewToolResultError("you are not a participant of this channel"), nil
 	}
 
-	mentionUserIDs, mentionUsernames := resolveMentions(s.store, message)
+	mentionIdentityIDs, mentionUsernames := resolveMentions(s.store, message)
 
-	msgID, err := s.store.SendMessage(ch.ID, sender.ID, message, threadID, mentionUserIDs)
+	msgID, err := s.store.SendMessage(ch.ID, sender.ID, message, threadID, mentionIdentityIDs)
 	if err != nil {
 		return nil, fmt.Errorf("send message: %w", err)
 	}
 
 	// Broadcast to WebSocket clients.
 	msg := domain.Message{
-		ID:        msgID,
-		ChannelID: ch.ID,
-		UserID:    sender.ID,
-		Body:      message,
-		CreatedAt: time.Now(),
-		From:      usernameFromCtx(ctx),
+		ID:         msgID,
+		ChannelID:  ch.ID,
+		IdentityID: sender.ID,
+		Body:       message,
+		CreatedAt:  time.Now(),
+		From:       usernameFromCtx(ctx),
 	}
 	s.hub.BroadcastMessage(ch.ID, channel, ch.Type, msg, mentionUsernames, threadID, s.store)
 
@@ -425,9 +342,9 @@ func (s *SharkfinMCP) handleUnreadMessages(ctx context.Context, req mcp.CallTool
 	mentionsOnly := req.GetBool("mentions_only", false)
 	threadID := optionalInt64(req, "thread_id")
 
-	user, err := s.store.GetUserByUsername(usernameFromCtx(ctx))
+	identity, err := s.store.GetIdentityByUsername(usernameFromCtx(ctx))
 	if err != nil {
-		return nil, fmt.Errorf("get user: %w", err)
+		return nil, fmt.Errorf("get identity: %w", err)
 	}
 
 	var channelID *int64
@@ -439,7 +356,7 @@ func (s *SharkfinMCP) handleUnreadMessages(ctx context.Context, req mcp.CallTool
 		channelID = &ch.ID
 	}
 
-	messages, err := s.store.GetUnreadMessages(user.ID, channelID, mentionsOnly, threadID)
+	messages, err := s.store.GetUnreadMessages(identity.ID, channelID, mentionsOnly, threadID)
 	if err != nil {
 		return nil, fmt.Errorf("get unreads: %w", err)
 	}
@@ -477,12 +394,12 @@ func (s *SharkfinMCP) handleUnreadMessages(ctx context.Context, req mcp.CallTool
 }
 
 func (s *SharkfinMCP) handleUnreadCounts(ctx context.Context, _ mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	user, err := s.store.GetUserByUsername(usernameFromCtx(ctx))
+	identity, err := s.store.GetIdentityByUsername(usernameFromCtx(ctx))
 	if err != nil {
-		return nil, fmt.Errorf("get user: %w", err)
+		return nil, fmt.Errorf("get identity: %w", err)
 	}
 
-	counts, err := s.store.GetUnreadCounts(user.ID)
+	counts, err := s.store.GetUnreadCounts(identity.ID)
 	if err != nil {
 		return nil, fmt.Errorf("get counts: %w", err)
 	}
@@ -511,9 +428,9 @@ func (s *SharkfinMCP) handleMarkRead(ctx context.Context, req mcp.CallToolReques
 	channel := req.GetString("channel", "")
 	messageID := optionalInt64(req, "message_id")
 
-	user, err := s.store.GetUserByUsername(usernameFromCtx(ctx))
+	identity, err := s.store.GetIdentityByUsername(usernameFromCtx(ctx))
 	if err != nil {
-		return nil, fmt.Errorf("get user: %w", err)
+		return nil, fmt.Errorf("get identity: %w", err)
 	}
 
 	ch, err := s.store.GetChannelByName(channel)
@@ -521,7 +438,7 @@ func (s *SharkfinMCP) handleMarkRead(ctx context.Context, req mcp.CallToolReques
 		return mcp.NewToolResultError(fmt.Sprintf("channel not found: %s", channel)), nil
 	}
 
-	isMember, err := s.store.IsChannelMember(ch.ID, user.ID)
+	isMember, err := s.store.IsChannelMember(ch.ID, identity.ID)
 	if err != nil {
 		return nil, fmt.Errorf("check membership: %w", err)
 	}
@@ -529,7 +446,7 @@ func (s *SharkfinMCP) handleMarkRead(ctx context.Context, req mcp.CallToolReques
 		return mcp.NewToolResultError("you are not a participant of this channel"), nil
 	}
 
-	if err := s.store.MarkRead(user.ID, ch.ID, messageID); err != nil {
+	if err := s.store.MarkRead(identity.ID, ch.ID, messageID); err != nil {
 		return nil, fmt.Errorf("mark read: %w", err)
 	}
 
@@ -543,9 +460,9 @@ func (s *SharkfinMCP) handleHistory(ctx context.Context, req mcp.CallToolRequest
 	limit := req.GetInt("limit", 50)
 	threadID := optionalInt64(req, "thread_id")
 
-	user, err := s.store.GetUserByUsername(usernameFromCtx(ctx))
+	identity, err := s.store.GetIdentityByUsername(usernameFromCtx(ctx))
 	if err != nil {
-		return nil, fmt.Errorf("get user: %w", err)
+		return nil, fmt.Errorf("get identity: %w", err)
 	}
 
 	ch, err := s.store.GetChannelByName(channel)
@@ -553,7 +470,7 @@ func (s *SharkfinMCP) handleHistory(ctx context.Context, req mcp.CallToolRequest
 		return mcp.NewToolResultError(fmt.Sprintf("channel not found: %s", channel)), nil
 	}
 
-	isMember, err := s.store.IsChannelMember(ch.ID, user.ID)
+	isMember, err := s.store.IsChannelMember(ch.ID, identity.ID)
 	if err != nil {
 		return nil, fmt.Errorf("check membership: %w", err)
 	}
@@ -597,12 +514,12 @@ func (s *SharkfinMCP) handleHistory(ctx context.Context, req mcp.CallToolRequest
 }
 
 func (s *SharkfinMCP) handleDMList(ctx context.Context, _ mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	user, err := s.store.GetUserByUsername(usernameFromCtx(ctx))
+	identity, err := s.store.GetIdentityByUsername(usernameFromCtx(ctx))
 	if err != nil {
-		return nil, fmt.Errorf("get user: %w", err)
+		return nil, fmt.Errorf("get identity: %w", err)
 	}
 
-	dms, err := s.store.ListDMsForUser(user.ID)
+	dms, err := s.store.ListDMsForUser(identity.ID)
 	if err != nil {
 		return nil, fmt.Errorf("list dms: %w", err)
 	}
@@ -628,12 +545,12 @@ func (s *SharkfinMCP) handleDMOpen(ctx context.Context, req mcp.CallToolRequest)
 		return mcp.NewToolResultError("cannot open DM with yourself"), nil
 	}
 
-	caller, err := s.store.GetUserByUsername(callerUsername)
+	caller, err := s.store.GetIdentityByUsername(callerUsername)
 	if err != nil {
-		return nil, fmt.Errorf("get user: %w", err)
+		return nil, fmt.Errorf("get identity: %w", err)
 	}
 
-	other, err := s.store.GetUserByUsername(targetUsername)
+	other, err := s.store.GetIdentityByUsername(targetUsername)
 	if err != nil {
 		return mcp.NewToolResultError(fmt.Sprintf("user not found: %s", targetUsername)), nil
 	}
@@ -801,12 +718,12 @@ func (s *SharkfinMCP) handleMentionGroupCreate(ctx context.Context, req mcp.Call
 		return mcp.NewToolResultError("invalid slug: must match [a-zA-Z0-9_-]+"), nil
 	}
 	// Reject if slug collides with an existing username.
-	if _, err := s.store.GetUserByUsername(slug); err == nil {
+	if _, err := s.store.GetIdentityByUsername(slug); err == nil {
 		return mcp.NewToolResultError(fmt.Sprintf("slug conflicts with existing username: %s", slug)), nil
 	}
-	sender, err := s.store.GetUserByUsername(usernameFromCtx(ctx))
+	sender, err := s.store.GetIdentityByUsername(usernameFromCtx(ctx))
 	if err != nil {
-		return nil, fmt.Errorf("get user: %w", err)
+		return nil, fmt.Errorf("get identity: %w", err)
 	}
 	id, err := s.store.CreateMentionGroup(slug, sender.ID)
 	if err != nil {
@@ -859,11 +776,11 @@ func (s *SharkfinMCP) handleMentionGroupAddMember(ctx context.Context, req mcp.C
 	if g.CreatedBy != usernameFromCtx(ctx) {
 		return mcp.NewToolResultError("only the group creator can manage members"), nil
 	}
-	user, err := s.store.GetUserByUsername(username)
+	identity, err := s.store.GetIdentityByUsername(username)
 	if err != nil {
 		return mcp.NewToolResultError(fmt.Sprintf("user not found: %s", username)), nil
 	}
-	if err := s.store.AddMentionGroupMember(g.ID, user.ID); err != nil {
+	if err := s.store.AddMentionGroupMember(g.ID, identity.ID); err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
 	return mcp.NewToolResultText(fmt.Sprintf("added %s to @%s", username, slug)), nil
@@ -879,11 +796,11 @@ func (s *SharkfinMCP) handleMentionGroupRemoveMember(ctx context.Context, req mc
 	if g.CreatedBy != usernameFromCtx(ctx) {
 		return mcp.NewToolResultError("only the group creator can manage members"), nil
 	}
-	user, err := s.store.GetUserByUsername(username)
+	identity, err := s.store.GetIdentityByUsername(username)
 	if err != nil {
 		return mcp.NewToolResultError(fmt.Sprintf("user not found: %s", username)), nil
 	}
-	if err := s.store.RemoveMentionGroupMember(g.ID, user.ID); err != nil {
+	if err := s.store.RemoveMentionGroupMember(g.ID, identity.ID); err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
 	return mcp.NewToolResultText(fmt.Sprintf("removed %s from @%s", username, slug)), nil
