@@ -73,7 +73,7 @@ Node + browser). Independently versioned via tag prefixes.
 
 ## 10. Passport Authentication
 
-[Design](2026-03-13-passport-auth-design.md)
+[Design](2026-03-13-passport-auth-design.md) · [Plan](plans/2026-03-13-passport-auth.md)
 
 Replace trust-based register/identify with Passport (WorkFort's identity
 provider). JWT auth at WS upgrade via JWKS, API key auth for bridge.
