@@ -1,32 +1,33 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 package domain
 
-type UserStore interface {
-	CreateUser(username, password string) (int64, error)
-	GetUserByUsername(username string) (*User, error)
-	ListUsers() ([]User, error)
+type IdentityStore interface {
+	UpsertIdentity(id, username, displayName, identityType, role string) error
+	GetIdentityByID(id string) (*Identity, error)
+	GetIdentityByUsername(username string) (*Identity, error)
+	ListIdentities() ([]Identity, error)
 }
 
 type ChannelStore interface {
-	CreateChannel(name string, public bool, memberIDs []int64, channelType string) (int64, error)
+	CreateChannel(name string, public bool, memberIDs []string, channelType string) (int64, error)
 	GetChannelByID(id int64) (*Channel, error)
 	GetChannelByName(name string) (*Channel, error)
-	ListChannelsForUser(userID int64) ([]ChannelWithMembership, error)
-	ListAllChannelsWithMembership(userID int64) ([]ChannelWithMembership, error)
-	AddChannelMember(channelID, userID int64) error
+	ListChannelsForUser(identityID string) ([]ChannelWithMembership, error)
+	ListAllChannelsWithMembership(identityID string) ([]ChannelWithMembership, error)
+	AddChannelMember(channelID int64, identityID string) error
 	ChannelMemberUsernames(channelID int64) ([]string, error)
-	IsChannelMember(channelID, userID int64) (bool, error)
-	ListDMsForUser(userID int64) ([]DMInfo, error)
+	IsChannelMember(channelID int64, identityID string) (bool, error)
+	ListDMsForUser(identityID string) ([]DMInfo, error)
 	ListAllDMs() ([]AllDMInfo, error)
-	OpenDM(userID, otherUserID int64, otherUsername string) (string, bool, error)
+	OpenDM(identityID string, otherIdentityID string, otherUsername string) (string, bool, error)
 }
 
 type MessageStore interface {
-	SendMessage(channelID, userID int64, body string, threadID *int64, mentionUserIDs []int64) (int64, error)
+	SendMessage(channelID int64, identityID string, body string, threadID *int64, mentionIdentityIDs []string) (int64, error)
 	GetMessages(channelID int64, before *int64, after *int64, limit int, threadID *int64) ([]Message, error)
-	GetUnreadMessages(userID int64, channelID *int64, mentionsOnly bool, threadID *int64) ([]Message, error)
-	GetUnreadCounts(userID int64) ([]UnreadCount, error)
-	MarkRead(userID, channelID int64, messageID *int64) error
+	GetUnreadMessages(identityID string, channelID *int64, mentionsOnly bool, threadID *int64) ([]Message, error)
+	GetUnreadCounts(identityID string) ([]UnreadCount, error)
+	MarkRead(identityID string, channelID int64, messageID *int64) error
 }
 
 type RoleStore interface {
@@ -43,14 +44,14 @@ type RoleStore interface {
 }
 
 type MentionGroupStore interface {
-	CreateMentionGroup(slug string, createdBy int64) (int64, error)
+	CreateMentionGroup(slug string, createdByID string) (int64, error)
 	DeleteMentionGroup(id int64) error
 	GetMentionGroup(slug string) (*MentionGroup, error)
 	ListMentionGroups() ([]MentionGroup, error)
-	AddMentionGroupMember(groupID, userID int64) error
-	RemoveMentionGroupMember(groupID, userID int64) error
+	AddMentionGroupMember(groupID int64, identityID string) error
+	RemoveMentionGroupMember(groupID int64, identityID string) error
 	GetMentionGroupMembers(groupID int64) ([]string, error)
-	ExpandMentionGroups(slugs []string) (map[string][]int64, error)
+	ExpandMentionGroups(slugs []string) (map[string][]string, error)
 }
 
 type SettingsStore interface {
@@ -61,7 +62,7 @@ type SettingsStore interface {
 
 // Store is the composite interface for convenient wiring.
 type Store interface {
-	UserStore
+	IdentityStore
 	ChannelStore
 	MessageStore
 	RoleStore
