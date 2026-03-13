@@ -7,19 +7,15 @@ import (
 	"github.com/Work-Fort/sharkfin/pkg/domain"
 )
 
-// PresenceNotifier subscribes to message events and pushes notifications
-// to users' presence WebSocket connections.
 type PresenceNotifier struct {
-	sessions *SessionManager
+	presence *PresenceHandler
 	store    domain.Store
 	sub      domain.Subscription
 }
 
-// NewPresenceNotifier creates a notifier that sends message notifications
-// to connected presence WebSocket clients.
-func NewPresenceNotifier(bus domain.EventBus, sessions *SessionManager, store domain.Store) *PresenceNotifier {
+func NewPresenceNotifier(bus domain.EventBus, presence *PresenceHandler, store domain.Store) *PresenceNotifier {
 	pn := &PresenceNotifier{
-		sessions: sessions,
+		presence: presence,
 		store:    store,
 		sub:      bus.Subscribe(domain.EventMessageNew),
 	}
@@ -48,11 +44,10 @@ func (pn *PresenceNotifier) handleMessage(msg domain.MessageEvent) {
 	})
 
 	for _, username := range recipients {
-		pn.sessions.SendNotification(username, envelope)
+		pn.presence.SendNotification(username, envelope)
 	}
 }
 
-// Close stops the presence notifier.
 func (pn *PresenceNotifier) Close() {
 	pn.sub.Close()
 }
