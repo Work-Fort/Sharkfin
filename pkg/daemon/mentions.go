@@ -12,10 +12,10 @@ var mentionRe = regexp.MustCompile(`@([a-zA-Z0-9_-]+)`)
 // resolveMentions extracts @-patterns from the message body, resolves
 // usernames directly and expands mention groups to their members.
 // Invalid usernames and unknown groups are silently ignored.
-func resolveMentions(store domain.Store, body string) ([]int64, []string) {
+func resolveMentions(store domain.Store, body string) ([]string, []string) {
 	seen := make(map[string]bool)
-	seenIDs := make(map[int64]bool)
-	var userIDs []int64
+	seenIDs := make(map[string]bool)
+	var identityIDs []string
 	var usernames []string
 	var unresolved []string
 
@@ -27,14 +27,14 @@ func resolveMentions(store domain.Store, body string) ([]int64, []string) {
 		}
 		seen[u] = true
 
-		user, err := store.GetUserByUsername(u)
+		identity, err := store.GetIdentityByUsername(u)
 		if err != nil {
 			unresolved = append(unresolved, u)
 			continue
 		}
-		seenIDs[user.ID] = true
-		userIDs = append(userIDs, user.ID)
-		usernames = append(usernames, user.Username)
+		seenIDs[identity.ID] = true
+		identityIDs = append(identityIDs, identity.ID)
+		usernames = append(usernames, identity.Username)
 	}
 
 	// Expand unresolved candidates as group slugs.
@@ -46,12 +46,12 @@ func resolveMentions(store domain.Store, body string) ([]int64, []string) {
 				for _, id := range memberIDs {
 					if !seenIDs[id] {
 						seenIDs[id] = true
-						userIDs = append(userIDs, id)
+						identityIDs = append(identityIDs, id)
 					}
 				}
 			}
 		}
 	}
 
-	return userIDs, usernames
+	return identityIDs, usernames
 }
