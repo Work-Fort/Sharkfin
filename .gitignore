@@ -3,3 +3,4 @@
 tests/e2e/testbin/
 clients/ts/node_modules/
 clients/ts/dist/
+.worktrees/
