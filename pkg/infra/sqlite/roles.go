@@ -97,13 +97,13 @@ func (s *Store) GetRolePermissions(role string) ([]string, error) {
 	return perms, rows.Err()
 }
 
-// GetUserPermissions returns all permissions for a user based on their role.
+// GetUserPermissions returns all permissions for an identity based on their role.
 func (s *Store) GetUserPermissions(username string) ([]string, error) {
 	rows, err := s.db.Query(`
 		SELECT rp.permission
-		FROM users u
-		JOIN role_permissions rp ON u.role = rp.role
-		WHERE u.username = ?
+		FROM identities i
+		JOIN role_permissions rp ON i.role = rp.role
+		WHERE i.username = ?
 		ORDER BY rp.permission
 	`, username)
 	if err != nil {
@@ -122,14 +122,14 @@ func (s *Store) GetUserPermissions(username string) ([]string, error) {
 	return perms, rows.Err()
 }
 
-// HasPermission reports whether a user has the given permission via their role.
+// HasPermission reports whether an identity has the given permission via their role.
 func (s *Store) HasPermission(username, permission string) (bool, error) {
 	var count int
 	err := s.db.QueryRow(`
 		SELECT COUNT(*)
-		FROM users u
-		JOIN role_permissions rp ON u.role = rp.role
-		WHERE u.username = ? AND rp.permission = ?
+		FROM identities i
+		JOIN role_permissions rp ON i.role = rp.role
+		WHERE i.username = ? AND rp.permission = ?
 	`, username, permission).Scan(&count)
 	if err != nil {
 		return false, fmt.Errorf("has permission: %w", err)
@@ -137,9 +137,9 @@ func (s *Store) HasPermission(username, permission string) (bool, error) {
 	return count > 0, nil
 }
 
-// SetUserRole updates a user's role. Returns an error if the user does not exist.
+// SetUserRole updates an identity's role. Returns an error if the identity does not exist.
 func (s *Store) SetUserRole(username, role string) error {
-	res, err := s.db.Exec("UPDATE users SET role = ? WHERE username = ?", role, username)
+	res, err := s.db.Exec("UPDATE identities SET role = ? WHERE username = ?", role, username)
 	if err != nil {
 		return fmt.Errorf("set user role: %w", err)
 	}
@@ -153,9 +153,9 @@ func (s *Store) SetUserRole(username, role string) error {
 	return nil
 }
 
-// SetUserType updates a user's type. Returns an error if the user does not exist.
+// SetUserType updates an identity's type. Returns an error if the identity does not exist.
 func (s *Store) SetUserType(username, userType string) error {
-	res, err := s.db.Exec("UPDATE users SET type = ? WHERE username = ?", userType, username)
+	res, err := s.db.Exec("UPDATE identities SET type = ? WHERE username = ?", userType, username)
 	if err != nil {
 		return fmt.Errorf("set user type: %w", err)
 	}

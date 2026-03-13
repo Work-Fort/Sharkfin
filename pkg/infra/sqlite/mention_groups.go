@@ -9,8 +9,8 @@ import (
 	"github.com/Work-Fort/sharkfin/pkg/domain"
 )
 
-func (s *Store) CreateMentionGroup(slug string, createdBy int64) (int64, error) {
-	res, err := s.db.Exec("INSERT INTO mention_groups (slug, created_by) VALUES (?, ?)", slug, createdBy)
+func (s *Store) CreateMentionGroup(slug string, createdByID string) (int64, error) {
+	res, err := s.db.Exec("INSERT INTO mention_groups (slug, created_by) VALUES (?, ?)", slug, createdByID)
 	if err != nil {
 		return 0, fmt.Errorf("create mention group: %w", err)
 	}
@@ -32,7 +32,7 @@ func (s *Store) DeleteMentionGroup(id int64) error {
 func (s *Store) GetMentionGroup(slug string) (*domain.MentionGroup, error) {
 	var g domain.MentionGroup
 	err := s.db.QueryRow(
-		"SELECT mg.id, mg.slug, u.username, mg.created_at FROM mention_groups mg JOIN users u ON mg.created_by = u.id WHERE mg.slug = ?",
+		"SELECT mg.id, mg.slug, i.username, mg.created_at FROM mention_groups mg JOIN identities i ON mg.created_by = i.id WHERE mg.slug = ?",
 		slug,
 	).Scan(&g.ID, &g.Slug, &g.CreatedBy, &g.CreatedAt)
 	if err == sql.ErrNoRows {
@@ -52,7 +52,7 @@ func (s *Store) GetMentionGroup(slug string) (*domain.MentionGroup, error) {
 
 func (s *Store) ListMentionGroups() ([]domain.MentionGroup, error) {
 	rows, err := s.db.Query(
-		"SELECT mg.id, mg.slug, u.username, mg.created_at FROM mention_groups mg JOIN users u ON mg.created_by = u.id ORDER BY mg.slug",
+		"SELECT mg.id, mg.slug, i.username, mg.created_at FROM mention_groups mg JOIN identities i ON mg.created_by = i.id ORDER BY mg.slug",
 	)
 	if err != nil {
 		return nil, fmt.Errorf("list mention groups: %w", err)
@@ -86,10 +86,10 @@ func (s *Store) ListMentionGroups() ([]domain.MentionGroup, error) {
 	return groups, nil
 }
 
-func (s *Store) AddMentionGroupMember(groupID, userID int64) error {
+func (s *Store) AddMentionGroupMember(groupID int64, identityID string) error {
 	_, err := s.db.Exec(
-		"INSERT OR IGNORE INTO mention_group_members (group_id, user_id) VALUES (?, ?)",
-		groupID, userID,
+		"INSERT OR IGNORE INTO mention_group_members (group_id, identity_id) VALUES (?, ?)",
+		groupID, identityID,
 	)
 	if err != nil {
 		return fmt.Errorf("add mention group member: %w", err)
@@ -97,10 +97,10 @@ func (s *Store) AddMentionGroupMember(groupID, userID int64) error {
 	return nil
 }
 
-func (s *Store) RemoveMentionGroupMember(groupID, userID int64) error {
+func (s *Store) RemoveMentionGroupMember(groupID int64, identityID string) error {
 	_, err := s.db.Exec(
-		"DELETE FROM mention_group_members WHERE group_id = ? AND user_id = ?",
-		groupID, userID,
+		"DELETE FROM mention_group_members WHERE group_id = ? AND identity_id = ?",
+		groupID, identityID,
 	)
 	if err != nil {
 		return fmt.Errorf("remove mention group member: %w", err)
@@ -110,7 +110,7 @@ func (s *Store) RemoveMentionGroupMember(groupID, userID int64) error {
 
 func (s *Store) GetMentionGroupMembers(groupID int64) ([]string, error) {
 	rows, err := s.db.Query(
-		"SELECT u.username FROM mention_group_members mgm JOIN users u ON mgm.user_id = u.id WHERE mgm.group_id = ? ORDER BY u.username",
+		"SELECT i.username FROM mention_group_members mgm JOIN identities i ON mgm.identity_id = i.id WHERE mgm.group_id = ? ORDER BY i.username",
 		groupID,
 	)
 	if err != nil {
@@ -129,7 +129,7 @@ func (s *Store) GetMentionGroupMembers(groupID int64) ([]string, error) {
 	return members, rows.Err()
 }
 
-func (s *Store) ExpandMentionGroups(slugs []string) (map[string][]int64, error) {
+func (s *Store) ExpandMentionGroups(slugs []string) (map[string][]string, error) {
 	if len(slugs) == 0 {
 		return nil, nil
 	}
@@ -143,7 +143,7 @@ func (s *Store) ExpandMentionGroups(slugs []string) (map[string][]int64, error) 
 
 	rows, err := s.db.Query(
 		fmt.Sprintf(
-			"SELECT mg.slug, mgm.user_id FROM mention_groups mg JOIN mention_group_members mgm ON mg.id = mgm.group_id WHERE mg.slug IN (%s)",
+			"SELECT mg.slug, mgm.identity_id FROM mention_groups mg JOIN mention_group_members mgm ON mg.id = mgm.group_id WHERE mg.slug IN (%s)",
 			strings.Join(placeholders, ","),
 		),
 		args...,
@@ -153,14 +153,14 @@ func (s *Store) ExpandMentionGroups(slugs []string) (map[string][]int64, error) 
 	}
 	defer rows.Close()
 
-	result := make(map[string][]int64)
+	result := make(map[string][]string)
 	for rows.Next() {
 		var slug string
-		var userID int64
-		if err := rows.Scan(&slug, &userID); err != nil {
+		var identityID string
+		if err := rows.Scan(&slug, &identityID); err != nil {
 			return nil, fmt.Errorf("scan expansion: %w", err)
 		}
-		result[slug] = append(result[slug], userID)
+		result[slug] = append(result[slug], identityID)
 	}
 	return result, rows.Err()
 }
