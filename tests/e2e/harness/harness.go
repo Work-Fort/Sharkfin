@@ -46,10 +46,12 @@ func WithDB(dsn string) DaemonOption {
 }
 
 type Daemon struct {
-	cmd    *exec.Cmd
-	addr   string
-	xdgDir string
-	stderr *bytes.Buffer
+	cmd      *exec.Cmd
+	addr     string
+	xdgDir   string
+	stderr   *bytes.Buffer
+	stubStop func()
+	signJWT  func(id, username, displayName, userType string) string
 }
 
 func StartDaemon(binary, addr string, opts ...DaemonOption) (*Daemon, error) {
@@ -60,8 +62,12 @@ func StartDaemon(binary, addr string, opts ...DaemonOption) (*Daemon, error) {
 		o(cfg)
 	}
 
+	// Start JWKS stub server before the daemon so the initial JWKS fetch succeeds.
+	stubAddr, stubStop, signJWT := StartJWKSStub()
+
 	xdgDir, err := os.MkdirTemp("", "sharkfin-e2e-*")
 	if err != nil {
+		stubStop()
 		return nil, fmt.Errorf("create temp dir: %w", err)
 	}
 
@@ -69,6 +75,7 @@ func StartDaemon(binary, addr string, opts ...DaemonOption) (*Daemon, error) {
 		"daemon",
 		"--daemon", addr,
 		"--log-level", "disabled",
+		"--passport-url", "http://" + stubAddr,
 	}
 	if cfg.webhookURL != "" {
 		args = append(args, "--webhook-url", cfg.webhookURL)
@@ -81,6 +88,7 @@ func StartDaemon(binary, addr string, opts ...DaemonOption) (*Daemon, error) {
 		if strings.HasPrefix(dbDSN, "postgres://") || strings.HasPrefix(dbDSN, "postgresql://") {
 			if err := resetPostgres(dbDSN); err != nil {
 				os.RemoveAll(xdgDir)
+				stubStop()
 				return nil, fmt.Errorf("reset postgres: %w", err)
 			}
 		}
@@ -99,6 +107,7 @@ func StartDaemon(binary, addr string, opts ...DaemonOption) (*Daemon, error) {
 
 	if err := cmd.Start(); err != nil {
 		os.RemoveAll(xdgDir)
+		stubStop()
 		return nil, fmt.Errorf("start daemon: %w", err)
 	}
 
@@ -107,7 +116,14 @@ func StartDaemon(binary, addr string, opts ...DaemonOption) (*Daemon, error) {
 		conn, err := net.DialTimeout("tcp", addr, 100*time.Millisecond)
 		if err == nil {
 			conn.Close()
-			return &Daemon{cmd: cmd, addr: addr, xdgDir: xdgDir, stderr: &stderrBuf}, nil
+			return &Daemon{
+				cmd:      cmd,
+				addr:     addr,
+				xdgDir:   xdgDir,
+				stderr:   &stderrBuf,
+				stubStop: stubStop,
+				signJWT:  signJWT,
+			}, nil
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
@@ -115,11 +131,18 @@ func StartDaemon(binary, addr string, opts ...DaemonOption) (*Daemon, error) {
 	cmd.Process.Kill()
 	cmd.Wait()
 	os.RemoveAll(xdgDir)
+	stubStop()
 	return nil, fmt.Errorf("daemon did not become ready on %s", addr)
 }
 
 func (d *Daemon) Addr() string   { return d.addr }
 func (d *Daemon) XDGDir() string { return d.xdgDir }
+
+// SignJWT creates a signed JWT with the given identity claims.
+// The token is valid for 1 hour and signed with the JWKS stub's private key.
+func (d *Daemon) SignJWT(id, username, displayName, userType string) string {
+	return d.signJWT(id, username, displayName, userType)
+}
 
 // DBPath returns the path to the daemon's SQLite database file.
 // Only valid when SHARKFIN_DB is not set (i.e., using default SQLite).
@@ -127,10 +150,13 @@ func (d *Daemon) DBPath() string {
 	return filepath.Join(d.xdgDir, "state", "sharkfin", "sharkfin.db")
 }
 
-// StopNoClean stops the daemon without removing the xdg directory.
+// StopNoClean stops the daemon and JWKS stub without removing the xdg directory.
 // Use Cleanup() later to remove it.
 func (d *Daemon) StopNoClean(t testing.TB) {
 	t.Helper()
+	if d.stubStop != nil {
+		d.stubStop()
+	}
 	if d.cmd.Process == nil {
 		return
 	}
@@ -185,6 +211,9 @@ func (d *Daemon) StopFatal(t testing.TB) {
 }
 
 func (d *Daemon) Stop() error {
+	if d.stubStop != nil {
+		d.stubStop()
+	}
 	if d.cmd.Process == nil {
 		return nil
 	}
@@ -218,57 +247,15 @@ type RPCError struct {
 type Client struct {
 	addr      string
 	sessionID string
-	token     string
-	wsConn    *websocket.Conn
-	wsDone    chan struct{}
-	mu        sync.Mutex
+	authToken string // JWT for this client
 	nextID    int
+	mu        sync.Mutex
 }
 
-func NewClient(daemonAddr string) *Client {
-	return &Client{addr: daemonAddr, nextID: 1}
+func NewClient(daemonAddr string, authToken string) *Client {
+	return &Client{addr: daemonAddr, authToken: authToken, nextID: 1}
 }
 
-func (c *Client) ConnectPresence() error {
-	wsURL := fmt.Sprintf("ws://%s/presence", c.addr)
-	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
-	if err != nil {
-		return fmt.Errorf("dial presence: %w", err)
-	}
-
-	_, msg, err := conn.ReadMessage()
-	if err != nil {
-		conn.Close()
-		return fmt.Errorf("read token: %w", err)
-	}
-	c.token = string(msg)
-	c.wsConn = conn
-	c.wsDone = make(chan struct{})
-
-	go func() {
-		defer close(c.wsDone)
-		for {
-			if _, _, err := conn.ReadMessage(); err != nil {
-				return
-			}
-		}
-	}()
-
-	return nil
-}
-
-func (c *Client) DisconnectPresence() {
-	if c.wsConn == nil {
-		return
-	}
-	c.wsConn.WriteMessage(websocket.CloseMessage,
-		websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""))
-	c.wsConn.Close()
-	<-c.wsDone
-	c.wsConn = nil
-}
-
-func (c *Client) Token() string     { return c.token }
 func (c *Client) SessionID() string { return c.sessionID }
 
 func (c *Client) allocID() int {
@@ -296,6 +283,7 @@ func (c *Client) RawMCPRequest(method string, id int, params any) (json.RawMessa
 		return nil, nil, nil, err
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("Authorization", "Bearer "+c.authToken)
 	if c.sessionID != "" {
 		httpReq.Header.Set("Mcp-Session-Id", c.sessionID)
 	}
@@ -391,50 +379,19 @@ func (c *Client) ToolCall(name string, args any) (ToolResult, error) {
 	return ToolResult{Text: parsed.Content[0].Text}, nil
 }
 
-func (c *Client) Register(username, password string) error {
-	r, err := c.ToolCall("register", map[string]any{
-		"token": c.token, "username": username, "password": password,
-	})
-	if err != nil {
-		return err
-	}
-	if r.Error != nil {
-		return fmt.Errorf("register: %s", r.Error.Message)
-	}
-	return nil
+// Capabilities calls the capabilities MCP tool and returns the result.
+func (c *Client) Capabilities() (ToolResult, error) {
+	return c.ToolCall("capabilities", map[string]any{})
 }
 
-func (c *Client) Identify(username, password string) error {
-	r, err := c.ToolCall("identify", map[string]any{
-		"token": c.token, "username": username, "password": password,
-	})
-	if err != nil {
-		return err
-	}
-	if r.Error != nil {
-		return fmt.Errorf("identify: %s", r.Error.Message)
-	}
-	return nil
+// SetState calls the set_state MCP tool and returns the result.
+func (c *Client) SetState(state string) (ToolResult, error) {
+	return c.ToolCall("set_state", map[string]any{"state": state})
 }
 
-func (c *Client) RegisterFlow(username string) error {
-	if err := c.ConnectPresence(); err != nil {
-		return err
-	}
-	if err := c.Initialize(); err != nil {
-		return err
-	}
-	return c.Register(username, "")
-}
-
-func (c *Client) IdentifyFlow(username string) error {
-	if err := c.ConnectPresence(); err != nil {
-		return err
-	}
-	if err := c.Initialize(); err != nil {
-		return err
-	}
-	return c.Identify(username, "")
+// SetRole calls the set_role MCP tool and returns the result.
+func (c *Client) SetRole(username, role string) (ToolResult, error) {
+	return c.ToolCall("set_role", map[string]any{"username": username, "role": role})
 }
 
 // --- Bridge ---
@@ -445,10 +402,11 @@ type Bridge struct {
 	stdout *bufio.Scanner
 }
 
-func StartBridge(binary, daemonAddr, xdgDir string) (*Bridge, error) {
+func StartBridge(binary, daemonAddr, xdgDir, apiKey string) (*Bridge, error) {
 	cmd := exec.Command(binary,
 		"mcp-bridge",
 		"--daemon", daemonAddr,
+		"--api-key", apiKey,
 		"--log-level", "disabled",
 	)
 	cmd.Env = append(os.Environ(),
@@ -528,20 +486,15 @@ type WSClient struct {
 	conn *websocket.Conn
 }
 
-// NewWSClient dials the daemon's /ws endpoint and reads the hello message.
-func NewWSClient(daemonAddr string) (*WSClient, error) {
+// NewWSClient dials the daemon's /ws endpoint with JWT auth.
+// The connection is authenticated at upgrade time — no hello handshake.
+func NewWSClient(daemonAddr string, authToken string) (*WSClient, error) {
 	url := fmt.Sprintf("ws://%s/ws", daemonAddr)
-	conn, _, err := websocket.DefaultDialer.Dial(url, nil)
+	header := http.Header{}
+	header.Set("Authorization", "Bearer "+authToken)
+	conn, _, err := websocket.DefaultDialer.Dial(url, header)
 	if err != nil {
 		return nil, fmt.Errorf("dial ws: %w", err)
-	}
-
-	// Read and discard hello
-	conn.SetReadDeadline(time.Now().Add(2 * time.Second))
-	_, _, err = conn.ReadMessage()
-	if err != nil {
-		conn.Close()
-		return nil, fmt.Errorf("read hello: %w", err)
 	}
 
 	return &WSClient{conn: conn}, nil
@@ -593,30 +546,6 @@ func (w *WSClient) Req(typ string, d any, ref string) (WSEnvelope, error) {
 	}
 }
 
-// WSRegister registers a user on the WS connection.
-func (w *WSClient) WSRegister(username string) error {
-	env, err := w.Req("register", map[string]string{"username": username}, "reg")
-	if err != nil {
-		return err
-	}
-	if env.OK == nil || !*env.OK {
-		return fmt.Errorf("ws register failed: %s", string(env.D))
-	}
-	return nil
-}
-
-// WSIdentify identifies as an existing user on the WS connection.
-func (w *WSClient) WSIdentify(username string) error {
-	env, err := w.Req("identify", map[string]string{"username": username}, "id")
-	if err != nil {
-		return err
-	}
-	if env.OK == nil || !*env.OK {
-		return fmt.Errorf("ws identify failed: %s", string(env.D))
-	}
-	return nil
-}
-
 // SetState sends a set_state message via WS and returns the response.
 func (w *WSClient) SetState(state string) (WSEnvelope, error) {
 	return w.Req("set_state", map[string]string{"state": state}, "ss")
@@ -641,21 +570,6 @@ func (w *WSClient) ReadWithTimeout(d time.Duration) (WSEnvelope, error) {
 	return env, nil
 }
 
-// Capabilities calls the capabilities MCP tool and returns the result.
-func (c *Client) Capabilities() (ToolResult, error) {
-	return c.ToolCall("capabilities", map[string]any{})
-}
-
-// SetState calls the set_state MCP tool and returns the result.
-func (c *Client) SetState(state string) (ToolResult, error) {
-	return c.ToolCall("set_state", map[string]any{"state": state})
-}
-
-// SetRole calls the set_role MCP tool and returns the result.
-func (c *Client) SetRole(username, role string) (ToolResult, error) {
-	return c.ToolCall("set_role", map[string]any{"username": username, "role": role})
-}
-
 // --- PresenceClient ---
 
 // PresenceNotification is the JSON envelope sent over the presence WebSocket.
@@ -665,35 +579,27 @@ type PresenceNotification struct {
 }
 
 // PresenceClient connects to /presence and buffers incoming notifications.
-// Unlike Client.ConnectPresence(), notifications are not drained — they
-// accumulate so that tests can read and assert on them.
+// Notifications accumulate so that tests can read and assert on them.
 type PresenceClient struct {
 	conn    *websocket.Conn
-	token   string
 	notifCh chan PresenceNotification
 	done    chan struct{}
 }
 
-// NewPresenceClient dials the /presence WebSocket, reads the identity token,
-// and starts a goroutine that buffers incoming notifications.
-func NewPresenceClient(daemonAddr string) (*PresenceClient, error) {
+// NewPresenceClient dials the /presence WebSocket with JWT auth and starts a
+// goroutine that buffers incoming notifications. The connection is authenticated
+// at upgrade time — no token to read.
+func NewPresenceClient(daemonAddr string, authToken string) (*PresenceClient, error) {
 	wsURL := fmt.Sprintf("ws://%s/presence", daemonAddr)
-	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	header := http.Header{}
+	header.Set("Authorization", "Bearer "+authToken)
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL, header)
 	if err != nil {
 		return nil, fmt.Errorf("dial presence: %w", err)
 	}
 
-	// First message is the identity token.
-	conn.SetReadDeadline(time.Now().Add(2 * time.Second))
-	_, msg, err := conn.ReadMessage()
-	if err != nil {
-		conn.Close()
-		return nil, fmt.Errorf("read token: %w", err)
-	}
-
 	pc := &PresenceClient{
 		conn:    conn,
-		token:   string(msg),
 		notifCh: make(chan PresenceNotification, 64),
 		done:    make(chan struct{}),
 	}
@@ -717,9 +623,6 @@ func (pc *PresenceClient) readLoop() {
 		pc.notifCh <- notif
 	}
 }
-
-// Token returns the identity token received on connect.
-func (pc *PresenceClient) Token() string { return pc.token }
 
 // ReadNotification reads a single notification with a timeout.
 func (pc *PresenceClient) ReadNotification(timeout time.Duration) (PresenceNotification, error) {
