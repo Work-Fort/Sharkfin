@@ -11,7 +11,7 @@ import (
 )
 
 // SendMessage inserts a message into a channel with optional thread and mentions.
-func (s *Store) SendMessage(channelID, userID int64, body string, threadID *int64, mentionUserIDs []int64) (int64, error) {
+func (s *Store) SendMessage(channelID int64, identityID string, body string, threadID *int64, mentionIdentityIDs []string) (int64, error) {
 	tx, err := s.db.Begin()
 	if err != nil {
 		return 0, fmt.Errorf("begin tx: %w", err)
@@ -36,8 +36,8 @@ func (s *Store) SendMessage(channelID, userID int64, body string, threadID *int6
 	}
 
 	res, err := tx.Exec(
-		"INSERT INTO messages (channel_id, user_id, body, thread_id) VALUES (?, ?, ?, ?)",
-		channelID, userID, body, threadID,
+		"INSERT INTO messages (channel_id, identity_id, body, thread_id) VALUES (?, ?, ?, ?)",
+		channelID, identityID, body, threadID,
 	)
 	if err != nil {
 		return 0, fmt.Errorf("send message: %w", err)
@@ -48,10 +48,10 @@ func (s *Store) SendMessage(channelID, userID int64, body string, threadID *int6
 		return 0, fmt.Errorf("last insert id: %w", err)
 	}
 
-	for _, uid := range mentionUserIDs {
+	for _, id := range mentionIdentityIDs {
 		if _, err := tx.Exec(
-			"INSERT OR IGNORE INTO message_mentions (message_id, user_id) VALUES (?, ?)",
-			msgID, uid,
+			"INSERT OR IGNORE INTO message_mentions (message_id, identity_id) VALUES (?, ?)",
+			msgID, id,
 		); err != nil {
 			return 0, fmt.Errorf("insert mention: %w", err)
 		}
@@ -65,7 +65,7 @@ func (s *Store) SendMessage(channelID, userID int64, body string, threadID *int6
 
 // ImportMessage inserts a message with an explicit created_at timestamp.
 // Used by the backup import to preserve original message timestamps.
-func (s *Store) ImportMessage(channelID, userID int64, body string, threadID *int64, mentionUserIDs []int64, createdAt time.Time) (int64, error) {
+func (s *Store) ImportMessage(channelID int64, identityID string, body string, threadID *int64, mentionIdentityIDs []string, createdAt time.Time) (int64, error) {
 	tx, err := s.db.Begin()
 	if err != nil {
 		return 0, fmt.Errorf("begin tx: %w", err)
@@ -73,8 +73,8 @@ func (s *Store) ImportMessage(channelID, userID int64, body string, threadID *in
 	defer tx.Rollback()
 
 	res, err := tx.Exec(
-		"INSERT INTO messages (channel_id, user_id, body, thread_id, created_at) VALUES (?, ?, ?, ?, ?)",
-		channelID, userID, body, threadID, createdAt,
+		"INSERT INTO messages (channel_id, identity_id, body, thread_id, created_at) VALUES (?, ?, ?, ?, ?)",
+		channelID, identityID, body, threadID, createdAt,
 	)
 	if err != nil {
 		return 0, fmt.Errorf("import message: %w", err)
@@ -84,8 +84,8 @@ func (s *Store) ImportMessage(channelID, userID int64, body string, threadID *in
 		return 0, fmt.Errorf("last insert id: %w", err)
 	}
 
-	for _, uid := range mentionUserIDs {
-		if _, err := tx.Exec("INSERT OR IGNORE INTO message_mentions (message_id, user_id) VALUES (?, ?)", msgID, uid); err != nil {
+	for _, id := range mentionIdentityIDs {
+		if _, err := tx.Exec("INSERT OR IGNORE INTO message_mentions (message_id, identity_id) VALUES (?, ?)", msgID, id); err != nil {
 			return 0, fmt.Errorf("insert mention: %w", err)
 		}
 	}
@@ -119,9 +119,9 @@ func (s *Store) GetMessages(channelID int64, before *int64, after *int64, limit 
 	case before != nil:
 		query = fmt.Sprintf(`
 			SELECT * FROM (
-				SELECT m.id, m.channel_id, m.user_id, m.body, m.created_at, u.username, m.thread_id
+				SELECT m.id, m.channel_id, m.identity_id, m.body, m.created_at, i.username, m.thread_id
 				FROM messages m
-				JOIN users u ON m.user_id = u.id
+				JOIN identities i ON m.identity_id = i.id
 				WHERE m.channel_id = ? AND m.id < ?%s
 				ORDER BY m.id DESC
 				LIMIT ?
@@ -130,9 +130,9 @@ func (s *Store) GetMessages(channelID int64, before *int64, after *int64, limit 
 		args = append(args, limit)
 	case after != nil:
 		query = fmt.Sprintf(`
-			SELECT m.id, m.channel_id, m.user_id, m.body, m.created_at, u.username, m.thread_id
+			SELECT m.id, m.channel_id, m.identity_id, m.body, m.created_at, i.username, m.thread_id
 			FROM messages m
-			JOIN users u ON m.user_id = u.id
+			JOIN identities i ON m.identity_id = i.id
 			WHERE m.channel_id = ? AND m.id > ?%s
 			ORDER BY m.id ASC
 			LIMIT ?`, threadFilter)
@@ -141,9 +141,9 @@ func (s *Store) GetMessages(channelID int64, before *int64, after *int64, limit 
 	default:
 		query = fmt.Sprintf(`
 			SELECT * FROM (
-				SELECT m.id, m.channel_id, m.user_id, m.body, m.created_at, u.username, m.thread_id
+				SELECT m.id, m.channel_id, m.identity_id, m.body, m.created_at, i.username, m.thread_id
 				FROM messages m
-				JOIN users u ON m.user_id = u.id
+				JOIN identities i ON m.identity_id = i.id
 				WHERE m.channel_id = ?%s
 				ORDER BY m.id DESC
 				LIMIT ?
@@ -161,7 +161,7 @@ func (s *Store) GetMessages(channelID int64, before *int64, after *int64, limit 
 	var messages []domain.Message
 	for rows.Next() {
 		var m domain.Message
-		if err := rows.Scan(&m.ID, &m.ChannelID, &m.UserID, &m.Body, &m.CreatedAt, &m.From, &m.ThreadID); err != nil {
+		if err := rows.Scan(&m.ID, &m.ChannelID, &m.IdentityID, &m.Body, &m.CreatedAt, &m.From, &m.ThreadID); err != nil {
 			return nil, fmt.Errorf("scan message: %w", err)
 		}
 		messages = append(messages, m)
@@ -176,11 +176,11 @@ func (s *Store) GetMessages(channelID int64, before *int64, after *int64, limit 
 	return messages, nil
 }
 
-// GetUnreadMessages returns unread messages for a user, optionally filtered
+// GetUnreadMessages returns unread messages for an identity, optionally filtered
 // by channel, mentions, or thread. Advances the read cursor only when no
 // filters are active (a filtered read is partial and shouldn't mark
 // everything as read).
-func (s *Store) GetUnreadMessages(userID int64, channelID *int64, mentionsOnly bool, threadID *int64) ([]domain.Message, error) {
+func (s *Store) GetUnreadMessages(identityID string, channelID *int64, mentionsOnly bool, threadID *int64) ([]domain.Message, error) {
 	filtered := mentionsOnly || threadID != nil
 	tx, err := s.db.Begin()
 	if err != nil {
@@ -190,9 +190,9 @@ func (s *Store) GetUnreadMessages(userID int64, channelID *int64, mentionsOnly b
 
 	var messages []domain.Message
 	if channelID != nil {
-		messages, err = fetchUnreadForChannel(tx, userID, *channelID, mentionsOnly, threadID, filtered)
+		messages, err = fetchUnreadForChannel(tx, identityID, *channelID, mentionsOnly, threadID, filtered)
 	} else {
-		messages, err = fetchUnreadAllChannels(tx, userID, mentionsOnly, threadID, filtered)
+		messages, err = fetchUnreadAllChannels(tx, identityID, mentionsOnly, threadID, filtered)
 	}
 	if err != nil {
 		return nil, err
@@ -208,15 +208,15 @@ func (s *Store) GetUnreadMessages(userID int64, channelID *int64, mentionsOnly b
 	return messages, nil
 }
 
-func fetchUnreadForChannel(tx *sql.Tx, userID, channelID int64, mentionsOnly bool, threadID *int64, skipCursorAdvance bool) ([]domain.Message, error) {
+func fetchUnreadForChannel(tx *sql.Tx, identityID string, channelID int64, mentionsOnly bool, threadID *int64, skipCursorAdvance bool) ([]domain.Message, error) {
 	mentionJoin := ""
 	var joinArgs []interface{}
 	threadFilter := ""
 	var threadArgs []interface{}
 
 	if mentionsOnly {
-		mentionJoin = " JOIN message_mentions mm ON m.id = mm.message_id AND mm.user_id = ?"
-		joinArgs = append(joinArgs, userID)
+		mentionJoin = " JOIN message_mentions mm ON m.id = mm.message_id AND mm.identity_id = ?"
+		joinArgs = append(joinArgs, identityID)
 	}
 	if threadID != nil {
 		threadFilter = " AND m.thread_id = ?"
@@ -224,17 +224,17 @@ func fetchUnreadForChannel(tx *sql.Tx, userID, channelID int64, mentionsOnly boo
 	}
 
 	query := fmt.Sprintf(`
-		SELECT m.id, m.channel_id, m.user_id, m.body, m.created_at, u.username, m.thread_id
+		SELECT m.id, m.channel_id, m.identity_id, m.body, m.created_at, i.username, m.thread_id
 		FROM messages m
-		JOIN users u ON m.user_id = u.id%s
+		JOIN identities i ON m.identity_id = i.id%s
 		WHERE m.channel_id = ?
 		  AND m.id > COALESCE(
 			(SELECT last_read_message_id FROM read_cursors
-			 WHERE channel_id = ? AND user_id = ?), 0)%s
+			 WHERE channel_id = ? AND identity_id = ?), 0)%s
 		ORDER BY m.id ASC
 	`, mentionJoin, threadFilter)
 
-	args := append(joinArgs, channelID, channelID, userID)
+	args := append(joinArgs, channelID, channelID, identityID)
 	args = append(args, threadArgs...)
 
 	rows, err := tx.Query(query, args...)
@@ -247,13 +247,13 @@ func fetchUnreadForChannel(tx *sql.Tx, userID, channelID int64, mentionsOnly boo
 	var maxID int64
 	for rows.Next() {
 		var m domain.Message
-		if err := rows.Scan(&m.ID, &m.ChannelID, &m.UserID, &m.Body, &m.CreatedAt, &m.From, &m.ThreadID); err != nil {
+		if err := rows.Scan(&m.ID, &m.ChannelID, &m.IdentityID, &m.Body, &m.CreatedAt, &m.From, &m.ThreadID); err != nil {
 			return nil, fmt.Errorf("scan message: %w", err)
 		}
 		if m.ID > maxID {
 			maxID = m.ID
 		}
-		if m.UserID != userID {
+		if m.IdentityID != identityID {
 			messages = append(messages, m)
 		}
 	}
@@ -262,7 +262,7 @@ func fetchUnreadForChannel(tx *sql.Tx, userID, channelID int64, mentionsOnly boo
 	}
 
 	if !skipCursorAdvance && maxID > 0 {
-		if err := advanceCursor(tx, channelID, userID, maxID); err != nil {
+		if err := advanceCursor(tx, channelID, identityID, maxID); err != nil {
 			return nil, err
 		}
 	}
@@ -270,9 +270,9 @@ func fetchUnreadForChannel(tx *sql.Tx, userID, channelID int64, mentionsOnly boo
 	return messages, nil
 }
 
-func fetchUnreadAllChannels(tx *sql.Tx, userID int64, mentionsOnly bool, threadID *int64, skipCursorAdvance bool) ([]domain.Message, error) {
+func fetchUnreadAllChannels(tx *sql.Tx, identityID string, mentionsOnly bool, threadID *int64, skipCursorAdvance bool) ([]domain.Message, error) {
 	chRows, err := tx.Query(
-		"SELECT channel_id FROM channel_members WHERE user_id = ?", userID,
+		"SELECT channel_id FROM channel_members WHERE identity_id = ?", identityID,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("query channels: %w", err)
@@ -293,7 +293,7 @@ func fetchUnreadAllChannels(tx *sql.Tx, userID int64, mentionsOnly bool, threadI
 
 	var allMessages []domain.Message
 	for _, chID := range channelIDs {
-		msgs, err := fetchUnreadForChannel(tx, userID, chID, mentionsOnly, threadID, skipCursorAdvance)
+		msgs, err := fetchUnreadForChannel(tx, identityID, chID, mentionsOnly, threadID, skipCursorAdvance)
 		if err != nil {
 			return nil, err
 		}
@@ -302,12 +302,12 @@ func fetchUnreadAllChannels(tx *sql.Tx, userID int64, mentionsOnly bool, threadI
 	return allMessages, nil
 }
 
-func advanceCursor(tx *sql.Tx, channelID, userID, messageID int64) error {
+func advanceCursor(tx *sql.Tx, channelID int64, identityID string, messageID int64) error {
 	_, err := tx.Exec(`
-		INSERT INTO read_cursors (channel_id, user_id, last_read_message_id)
+		INSERT INTO read_cursors (channel_id, identity_id, last_read_message_id)
 		VALUES (?, ?, ?)
-		ON CONFLICT(channel_id, user_id) DO UPDATE SET last_read_message_id = MAX(excluded.last_read_message_id, last_read_message_id)
-	`, channelID, userID, messageID)
+		ON CONFLICT(channel_id, identity_id) DO UPDATE SET last_read_message_id = MAX(excluded.last_read_message_id, last_read_message_id)
+	`, channelID, identityID, messageID)
 	if err != nil {
 		return fmt.Errorf("advance cursor: %w", err)
 	}
@@ -330,9 +330,9 @@ func (s *Store) loadMentions(messages []domain.Message) error {
 	}
 
 	query := fmt.Sprintf(`
-		SELECT mm.message_id, u.username
+		SELECT mm.message_id, i.username
 		FROM message_mentions mm
-		JOIN users u ON mm.user_id = u.id
+		JOIN identities i ON mm.identity_id = i.id
 		WHERE mm.message_id IN (%s)
 	`, strings.Join(placeholders, ","))
 
@@ -355,9 +355,9 @@ func (s *Store) loadMentions(messages []domain.Message) error {
 	return rows.Err()
 }
 
-// GetUnreadCounts returns per-channel unread message and mention counts for a user.
-// Only returns channels with >0 unreads. Excludes the user's own messages.
-func (s *Store) GetUnreadCounts(userID int64) ([]domain.UnreadCount, error) {
+// GetUnreadCounts returns per-channel unread message and mention counts for an identity.
+// Only returns channels with >0 unreads. Excludes the identity's own messages.
+func (s *Store) GetUnreadCounts(identityID string) ([]domain.UnreadCount, error) {
 	rows, err := s.db.Query(`
 		SELECT c.id, c.name, c.type,
 		       COUNT(m.id) AS unread_count,
@@ -365,15 +365,15 @@ func (s *Store) GetUnreadCounts(userID int64) ([]domain.UnreadCount, error) {
 		FROM channel_members cm
 		JOIN channels c ON cm.channel_id = c.id
 		JOIN messages m ON m.channel_id = c.id
-		  AND m.user_id != ?
+		  AND m.identity_id != ?
 		  AND m.id > COALESCE(
 			(SELECT last_read_message_id FROM read_cursors
-			 WHERE channel_id = c.id AND user_id = ?), 0)
-		LEFT JOIN message_mentions mm ON mm.message_id = m.id AND mm.user_id = ?
-		WHERE cm.user_id = ?
+			 WHERE channel_id = c.id AND identity_id = ?), 0)
+		LEFT JOIN message_mentions mm ON mm.message_id = m.id AND mm.identity_id = ?
+		WHERE cm.identity_id = ?
 		GROUP BY c.id
 		HAVING unread_count > 0
-	`, userID, userID, userID, userID)
+	`, identityID, identityID, identityID, identityID)
 	if err != nil {
 		return nil, fmt.Errorf("get unread counts: %w", err)
 	}
@@ -390,10 +390,10 @@ func (s *Store) GetUnreadCounts(userID int64) ([]domain.UnreadCount, error) {
 	return counts, rows.Err()
 }
 
-// MarkRead advances the read cursor for a user in a channel.
+// MarkRead advances the read cursor for an identity in a channel.
 // If messageID is nil, advances to the latest message.
 // Forward-only: never moves the cursor backwards.
-func (s *Store) MarkRead(userID, channelID int64, messageID *int64) error {
+func (s *Store) MarkRead(identityID string, channelID int64, messageID *int64) error {
 	var targetID int64
 	if messageID != nil {
 		targetID = *messageID
@@ -412,11 +412,11 @@ func (s *Store) MarkRead(userID, channelID int64, messageID *int64) error {
 	}
 
 	_, err := s.db.Exec(`
-		INSERT INTO read_cursors (channel_id, user_id, last_read_message_id)
+		INSERT INTO read_cursors (channel_id, identity_id, last_read_message_id)
 		VALUES (?, ?, ?)
-		ON CONFLICT(channel_id, user_id)
+		ON CONFLICT(channel_id, identity_id)
 		DO UPDATE SET last_read_message_id = MAX(excluded.last_read_message_id, last_read_message_id)
-	`, channelID, userID, targetID)
+	`, channelID, identityID, targetID)
 	if err != nil {
 		return fmt.Errorf("mark read: %w", err)
 	}
