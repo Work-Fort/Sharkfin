@@ -10,7 +10,7 @@ import (
 
 // CreateChannel creates a channel with the given members in a transaction.
 // channelType should be "channel" or "dm".
-func (s *Store) CreateChannel(name string, public bool, memberIDs []int64, channelType string) (int64, error) {
+func (s *Store) CreateChannel(name string, public bool, memberIDs []string, channelType string) (int64, error) {
 	if channelType == "" {
 		channelType = "channel"
 	}
@@ -29,12 +29,12 @@ func (s *Store) CreateChannel(name string, public bool, memberIDs []int64, chann
 		return 0, fmt.Errorf("insert channel: %w", err)
 	}
 
-	for _, uid := range memberIDs {
+	for _, id := range memberIDs {
 		if _, err := tx.Exec(
-			"INSERT INTO channel_members (channel_id, user_id) VALUES ($1, $2)",
-			chID, uid,
+			"INSERT INTO channel_members (channel_id, identity_id) VALUES ($1, $2)",
+			chID, id,
 		); err != nil {
-			return 0, fmt.Errorf("insert member %d: %w", uid, err)
+			return 0, fmt.Errorf("insert member %s: %w", id, err)
 		}
 	}
 
@@ -76,18 +76,18 @@ func (s *Store) GetChannelByName(name string) (*domain.Channel, error) {
 	return &ch, nil
 }
 
-// ListChannelsForUser returns non-DM channels visible to a user:
-// all public channels plus private channels where the user is a member.
-// Each result includes whether the user is a member.
-func (s *Store) ListChannelsForUser(userID int64) ([]domain.ChannelWithMembership, error) {
+// ListChannelsForUser returns non-DM channels visible to an identity:
+// all public channels plus private channels where the identity is a member.
+// Each result includes whether the identity is a member.
+func (s *Store) ListChannelsForUser(identityID string) ([]domain.ChannelWithMembership, error) {
 	rows, err := s.db.Query(`
 		SELECT DISTINCT c.id, c.name, c.public, c.type, c.created_at,
-			CASE WHEN cm.user_id IS NOT NULL THEN TRUE ELSE FALSE END AS member
+			CASE WHEN cm.identity_id IS NOT NULL THEN TRUE ELSE FALSE END AS member
 		FROM channels c
-		LEFT JOIN channel_members cm ON c.id = cm.channel_id AND cm.user_id = $1
-		WHERE c.type = 'channel' AND (c.public = TRUE OR cm.user_id IS NOT NULL)
+		LEFT JOIN channel_members cm ON c.id = cm.channel_id AND cm.identity_id = $1
+		WHERE c.type = 'channel' AND (c.public = TRUE OR cm.identity_id IS NOT NULL)
 		ORDER BY c.name
-	`, userID)
+	`, identityID)
 	if err != nil {
 		return nil, fmt.Errorf("list channels: %w", err)
 	}
@@ -104,16 +104,16 @@ func (s *Store) ListChannelsForUser(userID int64) ([]domain.ChannelWithMembershi
 	return channels, rows.Err()
 }
 
-// ListAllChannelsWithMembership returns all non-DM channels with membership status for the given user.
-func (s *Store) ListAllChannelsWithMembership(userID int64) ([]domain.ChannelWithMembership, error) {
+// ListAllChannelsWithMembership returns all non-DM channels with membership status for the given identity.
+func (s *Store) ListAllChannelsWithMembership(identityID string) ([]domain.ChannelWithMembership, error) {
 	rows, err := s.db.Query(`
 		SELECT c.id, c.name, c.public, c.type, c.created_at,
-			CASE WHEN cm.user_id IS NOT NULL THEN TRUE ELSE FALSE END AS member
+			CASE WHEN cm.identity_id IS NOT NULL THEN TRUE ELSE FALSE END AS member
 		FROM channels c
-		LEFT JOIN channel_members cm ON c.id = cm.channel_id AND cm.user_id = $1
+		LEFT JOIN channel_members cm ON c.id = cm.channel_id AND cm.identity_id = $1
 		WHERE c.type = 'channel'
 		ORDER BY c.name
-	`, userID)
+	`, identityID)
 	if err != nil {
 		return nil, fmt.Errorf("list all channels: %w", err)
 	}
@@ -130,11 +130,11 @@ func (s *Store) ListAllChannelsWithMembership(userID int64) ([]domain.ChannelWit
 	return channels, rows.Err()
 }
 
-// AddChannelMember adds a user to a channel.
-func (s *Store) AddChannelMember(channelID, userID int64) error {
+// AddChannelMember adds an identity to a channel.
+func (s *Store) AddChannelMember(channelID int64, identityID string) error {
 	_, err := s.db.Exec(
-		"INSERT INTO channel_members (channel_id, user_id) VALUES ($1, $2)",
-		channelID, userID,
+		"INSERT INTO channel_members (channel_id, identity_id) VALUES ($1, $2)",
+		channelID, identityID,
 	)
 	if err != nil {
 		return fmt.Errorf("add member: %w", err)
@@ -145,10 +145,10 @@ func (s *Store) AddChannelMember(channelID, userID int64) error {
 // ChannelMemberUsernames returns the usernames of all members of a channel.
 func (s *Store) ChannelMemberUsernames(channelID int64) ([]string, error) {
 	rows, err := s.db.Query(`
-		SELECT u.username FROM channel_members cm
-		JOIN users u ON cm.user_id = u.id
+		SELECT i.username FROM channel_members cm
+		JOIN identities i ON cm.identity_id = i.id
 		WHERE cm.channel_id = $1
-		ORDER BY u.username
+		ORDER BY i.username
 	`, channelID)
 	if err != nil {
 		return nil, fmt.Errorf("channel member usernames: %w", err)
@@ -166,12 +166,12 @@ func (s *Store) ChannelMemberUsernames(channelID int64) ([]string, error) {
 	return names, rows.Err()
 }
 
-// IsChannelMember returns true if the user is a member of the channel.
-func (s *Store) IsChannelMember(channelID, userID int64) (bool, error) {
+// IsChannelMember returns true if the identity is a member of the channel.
+func (s *Store) IsChannelMember(channelID int64, identityID string) (bool, error) {
 	var count int
 	err := s.db.QueryRow(
-		"SELECT COUNT(*) FROM channel_members WHERE channel_id = $1 AND user_id = $2",
-		channelID, userID,
+		"SELECT COUNT(*) FROM channel_members WHERE channel_id = $1 AND identity_id = $2",
+		channelID, identityID,
 	).Scan(&count)
 	if err != nil {
 		return false, fmt.Errorf("check membership: %w", err)
@@ -179,18 +179,18 @@ func (s *Store) IsChannelMember(channelID, userID int64) (bool, error) {
 	return count > 0, nil
 }
 
-// ListDMsForUser returns all DM channels the user is a member of,
+// ListDMsForUser returns all DM channels the identity is a member of,
 // with the other participant's info.
-func (s *Store) ListDMsForUser(userID int64) ([]domain.DMInfo, error) {
+func (s *Store) ListDMsForUser(identityID string) ([]domain.DMInfo, error) {
 	rows, err := s.db.Query(`
-		SELECT c.id, c.name, u.id, u.username
+		SELECT c.id, c.name, i.username
 		FROM channels c
-		JOIN channel_members cm1 ON c.id = cm1.channel_id AND cm1.user_id = $1
-		JOIN channel_members cm2 ON c.id = cm2.channel_id AND cm2.user_id != $2
-		JOIN users u ON cm2.user_id = u.id
+		JOIN channel_members cm1 ON c.id = cm1.channel_id AND cm1.identity_id = $1
+		JOIN channel_members cm2 ON c.id = cm2.channel_id AND cm2.identity_id != $2
+		JOIN identities i ON cm2.identity_id = i.id
 		WHERE c.type = 'dm'
-		ORDER BY u.username
-	`, userID, userID)
+		ORDER BY i.username
+	`, identityID, identityID)
 	if err != nil {
 		return nil, fmt.Errorf("list dms: %w", err)
 	}
@@ -199,7 +199,7 @@ func (s *Store) ListDMsForUser(userID int64) ([]domain.DMInfo, error) {
 	var dms []domain.DMInfo
 	for rows.Next() {
 		var dm domain.DMInfo
-		if err := rows.Scan(&dm.ChannelID, &dm.ChannelName, &dm.OtherUserID, &dm.OtherUsername); err != nil {
+		if err := rows.Scan(&dm.ChannelID, &dm.ChannelName, &dm.OtherUsername); err != nil {
 			return nil, fmt.Errorf("scan dm: %w", err)
 		}
 		dms = append(dms, dm)
@@ -210,12 +210,12 @@ func (s *Store) ListDMsForUser(userID int64) ([]domain.DMInfo, error) {
 // ListAllDMs returns all DM channels with both participants (admin view).
 func (s *Store) ListAllDMs() ([]domain.AllDMInfo, error) {
 	rows, err := s.db.Query(`
-		SELECT c.id, c.name, u.id, u.username
+		SELECT c.id, c.name, i.username
 		FROM channels c
 		JOIN channel_members cm ON c.id = cm.channel_id
-		JOIN users u ON cm.user_id = u.id
+		JOIN identities i ON cm.identity_id = i.id
 		WHERE c.type = 'dm'
-		ORDER BY c.name, u.username
+		ORDER BY c.name, i.username
 	`)
 	if err != nil {
 		return nil, fmt.Errorf("list all dms: %w", err)
@@ -232,9 +232,8 @@ func (s *Store) ListAllDMs() ([]domain.AllDMInfo, error) {
 	for rows.Next() {
 		var chID int64
 		var chName string
-		var userID int64
 		var username string
-		if err := rows.Scan(&chID, &chName, &userID, &username); err != nil {
+		if err := rows.Scan(&chID, &chName, &username); err != nil {
 			return nil, fmt.Errorf("scan dm: %w", err)
 		}
 		e, ok := dmMap[chName]
@@ -251,10 +250,8 @@ func (s *Store) ListAllDMs() ([]domain.AllDMInfo, error) {
 		}
 		// Fill User1 then User2 in order of appearance (sorted by username).
 		if e.info.User1Username == "" {
-			e.info.User1ID = userID
 			e.info.User1Username = username
 		} else {
-			e.info.User2ID = userID
 			e.info.User2Username = username
 		}
 	}
@@ -269,27 +266,27 @@ func (s *Store) ListAllDMs() ([]domain.AllDMInfo, error) {
 	return dms, nil
 }
 
-// OpenDM finds or creates a DM channel between two users.
+// OpenDM finds or creates a DM channel between two identities.
 // Returns the channel name and whether it was newly created.
 //
 // Concurrency: wrapped in a transaction. The unique index on channels(name)
 // with deterministic dm-<lower>-<higher> naming prevents duplicates.
-func (s *Store) OpenDM(userID, otherUserID int64, otherUsername string) (string, bool, error) {
+func (s *Store) OpenDM(identityID, otherIdentityID string, otherUsername string) (string, bool, error) {
 	tx, err := s.db.Begin()
 	if err != nil {
 		return "", false, fmt.Errorf("begin tx: %w", err)
 	}
 	defer tx.Rollback()
 
-	// Look for existing DM between the two users.
+	// Look for existing DM between the two identities.
 	var name string
 	err = tx.QueryRow(`
 		SELECT c.name FROM channels c
-		JOIN channel_members cm1 ON c.id = cm1.channel_id AND cm1.user_id = $1
-		JOIN channel_members cm2 ON c.id = cm2.channel_id AND cm2.user_id = $2
+		JOIN channel_members cm1 ON c.id = cm1.channel_id AND cm1.identity_id = $1
+		JOIN channel_members cm2 ON c.id = cm2.channel_id AND cm2.identity_id = $2
 		WHERE c.type = 'dm'
 		LIMIT 1
-	`, userID, otherUserID).Scan(&name)
+	`, identityID, otherIdentityID).Scan(&name)
 	if err == nil {
 		// Found existing DM — commit read-only tx and return.
 		tx.Commit()
@@ -302,7 +299,7 @@ func (s *Store) OpenDM(userID, otherUserID int64, otherUsername string) (string,
 	// Create a new DM channel.
 	// Use a deterministic name: dm-<lower-username>-<higher-username>
 	var callerUsername string
-	if err := tx.QueryRow("SELECT username FROM users WHERE id = $1", userID).Scan(&callerUsername); err != nil {
+	if err := tx.QueryRow("SELECT username FROM identities WHERE id = $1", identityID).Scan(&callerUsername); err != nil {
 		return "", false, fmt.Errorf("get caller username: %w", err)
 	}
 
@@ -321,12 +318,12 @@ func (s *Store) OpenDM(userID, otherUserID int64, otherUsername string) (string,
 		return "", false, fmt.Errorf("insert dm channel: %w", err)
 	}
 
-	for _, uid := range []int64{userID, otherUserID} {
+	for _, id := range []string{identityID, otherIdentityID} {
 		if _, err := tx.Exec(
-			"INSERT INTO channel_members (channel_id, user_id) VALUES ($1, $2)",
-			chID, uid,
+			"INSERT INTO channel_members (channel_id, identity_id) VALUES ($1, $2)",
+			chID, id,
 		); err != nil {
-			return "", false, fmt.Errorf("insert dm member %d: %w", uid, err)
+			return "", false, fmt.Errorf("insert dm member %s: %w", id, err)
 		}
 	}
 
