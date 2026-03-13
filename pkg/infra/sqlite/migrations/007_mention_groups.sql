@@ -4,17 +4,17 @@
 CREATE TABLE IF NOT EXISTS mention_groups (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
     slug       TEXT    NOT NULL UNIQUE,
-    created_by INTEGER NOT NULL REFERENCES users(id),
+    created_by TEXT    NOT NULL REFERENCES identities(id),
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE IF NOT EXISTS mention_group_members (
-    group_id INTEGER NOT NULL REFERENCES mention_groups(id) ON DELETE CASCADE,
-    user_id  INTEGER NOT NULL REFERENCES users(id),
-    PRIMARY KEY (group_id, user_id)
+    group_id    INTEGER NOT NULL REFERENCES mention_groups(id) ON DELETE CASCADE,
+    identity_id TEXT    NOT NULL REFERENCES identities(id),
+    PRIMARY KEY (group_id, identity_id)
 );
 
-CREATE INDEX idx_mention_group_members_user ON mention_group_members(user_id);
+CREATE INDEX idx_mention_group_members_identity ON mention_group_members(identity_id);
 
 -- +goose Down
 DROP TABLE IF EXISTS mention_group_members;
