@@ -18,8 +18,9 @@ validated once — the connection is trusted for its lifetime.
 validation. Each StreamableHTTP request carries its own Bearer token.
 
 **MCP Bridge:** Authenticates via API key. The bridge passes
-`X-API-Key: <key>` on each request. The SDK validates via
-`POST /v1/verify-api-key` with a 30-second cache.
+`Authorization: Bearer <api-key>` on each request (same header format
+as JWT — the SDK middleware dispatches to the APIKeyValidator which
+POSTs to `/v1/verify-api-key` with a 30-second cache).
 
 **Configuration:** `--passport-url` is a required flag. The server refuses to
 start without it. The SDK uses this to derive endpoints:
