@@ -18,22 +18,22 @@ func ExportData(s domain.Store) (*Backup, error) {
 		Settings:        make(map[string]string),
 	}
 
-	// --- Users ---
-	users, err := s.ListUsers()
+	// --- Identities ---
+	identities, err := s.ListIdentities()
 	if err != nil {
-		return nil, fmt.Errorf("list users: %w", err)
+		return nil, fmt.Errorf("list identities: %w", err)
 	}
-	for _, u := range users {
+	for _, ident := range identities {
 		b.Users = append(b.Users, BackupUser{
-			Username: u.Username,
-			Password: u.Password,
-			Role:     u.Role,
-			Type:     u.Type,
+			Username: ident.Username,
+			Password: "", // Passport owns credentials now
+			Role:     ident.Role,
+			Type:     ident.Type,
 		})
 	}
 
 	// --- Channels ---
-	channels, err := s.ListAllChannelsWithMembership(0)
+	channels, err := s.ListAllChannelsWithMembership("")
 	if err != nil {
 		return nil, fmt.Errorf("list channels: %w", err)
 	}
@@ -68,10 +68,10 @@ func ExportData(s domain.Store) (*Backup, error) {
 	}
 
 	// --- Messages ---
-	// Build a username map for looking up user info by ID.
-	usernameByID := make(map[int64]string, len(users))
-	for _, u := range users {
-		usernameByID[u.ID] = u.Username
+	// Build a username map for looking up identity info by ID.
+	usernameByID := make(map[string]string, len(identities))
+	for _, ident := range identities {
+		usernameByID[ident.ID] = ident.Username
 	}
 
 	// Build a channel name map for all channels (including DMs).

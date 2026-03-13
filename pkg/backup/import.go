@@ -3,6 +3,8 @@ package backup
 
 import (
 	"fmt"
+
+	"github.com/google/uuid"
 )
 
 // ImportData inserts backup data into the store in dependency order.
@@ -26,25 +28,24 @@ func ImportData(s BackupStore, b *Backup, force bool) error {
 		}
 	}
 
-	// 1. Users
-	userIDByName := make(map[string]int64, len(b.Users))
+	// 1. Identities (formerly Users)
+	identityIDByName := make(map[string]string, len(b.Users))
 	for _, u := range b.Users {
-		uid, err := s.CreateUser(u.Username, u.Password)
-		if err != nil {
-			return fmt.Errorf("create user %q: %w", u.Username, err)
+		// Generate a synthetic identity ID for backup imports.
+		// In production, Passport assigns these; during restore we mint fresh UUIDs.
+		identityID := uuid.New().String()
+		identityType := u.Type
+		if identityType == "" {
+			identityType = "user"
 		}
-		userIDByName[u.Username] = uid
-
-		if u.Role != "" && u.Role != "user" {
-			if err := s.SetUserRole(u.Username, u.Role); err != nil {
-				return fmt.Errorf("set role for %q: %w", u.Username, err)
-			}
+		role := u.Role
+		if role == "" {
+			role = "user"
 		}
-		if u.Type != "" && u.Type != "user" {
-			if err := s.SetUserType(u.Username, u.Type); err != nil {
-				return fmt.Errorf("set type for %q: %w", u.Username, err)
-			}
+		if err := s.UpsertIdentity(identityID, u.Username, u.Username, identityType, role); err != nil {
+			return fmt.Errorf("upsert identity %q: %w", u.Username, err)
 		}
+		identityIDByName[u.Username] = identityID
 	}
 
 	// 2. Custom roles (skip built-in, they are seeded by migrations)
@@ -89,10 +90,10 @@ func ImportData(s BackupStore, b *Backup, force bool) error {
 	channelIDByName := make(map[string]int64)
 	for _, ch := range b.Channels {
 		memberNames := b.ChannelMembers[ch.Name]
-		memberIDs := make([]int64, 0, len(memberNames))
+		memberIDs := make([]string, 0, len(memberNames))
 		for _, name := range memberNames {
-			if uid, ok := userIDByName[name]; ok {
-				memberIDs = append(memberIDs, uid)
+			if id, ok := identityIDByName[name]; ok {
+				memberIDs = append(memberIDs, id)
 			}
 		}
 		chID, err := s.CreateChannel(ch.Name, ch.Public, memberIDs, ch.Type)
@@ -104,12 +105,12 @@ func ImportData(s BackupStore, b *Backup, force bool) error {
 
 	// 5. DMs
 	for _, dm := range b.DMs {
-		user1ID, ok1 := userIDByName[dm.User1]
-		user2ID, ok2 := userIDByName[dm.User2]
+		identity1ID, ok1 := identityIDByName[dm.User1]
+		identity2ID, ok2 := identityIDByName[dm.User2]
 		if !ok1 || !ok2 {
-			return fmt.Errorf("dm users not found: %q, %q", dm.User1, dm.User2)
+			return fmt.Errorf("dm identities not found: %q, %q", dm.User1, dm.User2)
 		}
-		chName, _, err := s.OpenDM(user1ID, user2ID, dm.User2)
+		chName, _, err := s.OpenDM(identity1ID, identity2ID, dm.User2)
 		if err != nil {
 			return fmt.Errorf("open dm %q<->%q: %w", dm.User1, dm.User2, err)
 		}
@@ -128,9 +129,9 @@ func ImportData(s BackupStore, b *Backup, force bool) error {
 		if !ok {
 			return fmt.Errorf("channel not found for message: %q", msg.Channel)
 		}
-		userID, ok := userIDByName[msg.From]
+		identityID, ok := identityIDByName[msg.From]
 		if !ok {
-			return fmt.Errorf("user not found for message: %q", msg.From)
+			return fmt.Errorf("identity not found for message: %q", msg.From)
 		}
 
 		var threadID *int64
@@ -140,15 +141,15 @@ func ImportData(s BackupStore, b *Backup, force bool) error {
 			}
 		}
 
-		// Resolve mention usernames to IDs.
-		var mentionIDs []int64
+		// Resolve mention usernames to identity IDs.
+		var mentionIDs []string
 		for _, mention := range msg.Mentions {
-			if uid, ok := userIDByName[mention]; ok {
-				mentionIDs = append(mentionIDs, uid)
+			if id, ok := identityIDByName[mention]; ok {
+				mentionIDs = append(mentionIDs, id)
 			}
 		}
 
-		realID, err := s.ImportMessage(chID, userID, msg.Body, threadID, mentionIDs, msg.CreatedAt)
+		realID, err := s.ImportMessage(chID, identityID, msg.Body, threadID, mentionIDs, msg.CreatedAt)
 		if err != nil {
 			return fmt.Errorf("import message %d: %w", msg.ID, err)
 		}

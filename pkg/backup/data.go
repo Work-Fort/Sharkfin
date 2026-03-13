@@ -10,7 +10,7 @@ import (
 // BackupStore extends domain.Store with backup-specific methods.
 type BackupStore interface {
 	domain.Store
-	ImportMessage(channelID, userID int64, body string, threadID *int64, mentionUserIDs []int64, createdAt time.Time) (int64, error)
+	ImportMessage(channelID int64, identityID string, body string, threadID *int64, mentionIdentityIDs []string, createdAt time.Time) (int64, error)
 	IsEmpty() (bool, error)
 	WipeAll() error
 }
