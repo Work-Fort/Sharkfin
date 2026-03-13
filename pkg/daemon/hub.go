@@ -21,10 +21,10 @@ type Hub struct {
 
 // WSClient represents a connected WebSocket client.
 type WSClient struct {
-	username string
-	userID   int64
-	send     chan []byte
-	hub      *Hub
+	username   string
+	identityID string
+	send       chan []byte
+	hub        *Hub
 }
 
 // NewHub creates a new hub.
@@ -105,8 +105,8 @@ func (h *Hub) BroadcastMessage(channelID int64, channelName string, channelType 
 
 	// Phase 1: snapshot client IDs under lock (fast, no DB calls).
 	type target struct {
-		username string
-		userID   int64
+		username   string
+		identityID string
 	}
 	h.mu.RLock()
 	targets := make([]target, 0, len(h.clients))
@@ -114,7 +114,7 @@ func (h *Hub) BroadcastMessage(channelID int64, channelName string, channelType 
 		if client.username == msg.From {
 			continue // don't echo to sender
 		}
-		targets = append(targets, target{username: client.username, userID: client.userID})
+		targets = append(targets, target{username: client.username, identityID: client.identityID})
 	}
 	h.mu.RUnlock()
 
@@ -123,7 +123,7 @@ func (h *Hub) BroadcastMessage(channelID int64, channelName string, channelType 
 	t0 := time.Now()
 	eligible := make(map[string]bool, len(targets))
 	for _, t := range targets {
-		isMember, err := store.IsChannelMember(channelID, t.userID)
+		isMember, err := store.IsChannelMember(channelID, t.identityID)
 		if err == nil && isMember {
 			eligible[t.username] = true
 		}
@@ -170,13 +170,13 @@ func (h *Hub) BroadcastMessage(channelID int64, channelName string, channelType 
 	}
 }
 
-// BroadcastToRole sends a pre-encoded event to all connected clients whose user has the given role.
+// BroadcastToRole sends a pre-encoded event to all connected clients whose identity has the given role.
 func (h *Hub) BroadcastToRole(role string, data []byte, store domain.Store) {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 	for _, client := range h.clients {
-		user, err := store.GetUserByUsername(client.username)
-		if err != nil || user.Role != role {
+		identity, err := store.GetIdentityByUsername(client.username)
+		if err != nil || identity.Role != role {
 			continue
 		}
 		select {
