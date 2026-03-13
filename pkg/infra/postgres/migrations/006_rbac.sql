@@ -2,7 +2,6 @@
 
 -- +goose Up
 
--- RBAC tables
 CREATE TABLE IF NOT EXISTS roles (
     name       TEXT PRIMARY KEY,
     built_in   BOOLEAN NOT NULL DEFAULT FALSE,
@@ -19,16 +18,12 @@ CREATE TABLE IF NOT EXISTS role_permissions (
     PRIMARY KEY (role, permission)
 );
 
--- Add role and type columns to users.
-ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'user';
-ALTER TABLE users ADD COLUMN type TEXT NOT NULL DEFAULT 'user';
+ALTER TABLE identities ADD COLUMN role TEXT NOT NULL DEFAULT 'user';
 
--- Seed built-in roles.
 INSERT INTO roles (name, built_in) VALUES ('admin', TRUE);
 INSERT INTO roles (name, built_in) VALUES ('user',  TRUE);
 INSERT INTO roles (name, built_in) VALUES ('agent', TRUE);
 
--- Seed permissions.
 INSERT INTO permissions (name) VALUES ('send_message');
 INSERT INTO permissions (name) VALUES ('create_channel');
 INSERT INTO permissions (name) VALUES ('join_channel');
@@ -43,11 +38,9 @@ INSERT INTO permissions (name) VALUES ('dm_open');
 INSERT INTO permissions (name) VALUES ('dm_list');
 INSERT INTO permissions (name) VALUES ('manage_roles');
 
--- Admin gets all permissions.
 INSERT INTO role_permissions (role, permission)
 SELECT 'admin', name FROM permissions;
 
--- User and agent get everything except create_channel and manage_roles.
 INSERT INTO role_permissions (role, permission)
 SELECT 'user', name FROM permissions
 WHERE name NOT IN ('create_channel', 'manage_roles');
@@ -61,5 +54,4 @@ DROP TABLE IF EXISTS role_permissions;
 DROP TABLE IF EXISTS permissions;
 DROP TABLE IF EXISTS roles;
 
-ALTER TABLE users DROP COLUMN role;
-ALTER TABLE users DROP COLUMN type;
+ALTER TABLE identities DROP COLUMN role;
