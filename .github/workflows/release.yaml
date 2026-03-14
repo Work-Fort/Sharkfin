@@ -12,7 +12,7 @@ jobs:
   test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
       - uses: jdx/mise-action@v3
@@ -35,7 +35,7 @@ jobs:
           --health-timeout 5s
           --health-retries 5
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
       - uses: jdx/mise-action@v3
@@ -53,16 +53,16 @@ jobs:
       changelog: ${{ steps.tag_version.outputs.changelog }}
       should_release: ${{ steps.check_tag.outputs.should_release }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
       - name: Bump version and create tag
         id: tag_version
-        uses: mathieudutour/github-tag-action@v6.2
+        uses: Work-Fort/github-tag-action@v6.3
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
-          default_bump: patch
+          default_bump: false
           release_branches: master
           tag_prefix: v
 
@@ -100,7 +100,7 @@ jobs:
             goarch: amd64
       fail-fast: false
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           ref: ${{ needs.tag.outputs.new_tag }}
       - uses: jdx/mise-action@v3
@@ -141,7 +141,7 @@ jobs:
     needs: [tag, build]
     if: needs.tag.outputs.should_release == 'true'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           ref: ${{ needs.tag.outputs.new_tag }}
 
@@ -243,7 +243,7 @@ jobs:
     needs: [tag, release]
     if: needs.tag.outputs.should_release == 'true'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Update PKGBUILD
         env:
