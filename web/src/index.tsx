@@ -1,9 +1,6 @@
 import { SharkfinChat } from './components/chat';
 import { ChannelSidebar } from './components/sidebar';
-import { getClient } from './client';
-import { createChannelStore } from './stores/channels';
-import { createUserStore } from './stores/users';
-import { createUnreadStore } from './stores/unread';
+import { getStores } from './stores';
 
 export default function SharkfinApp(props: { connected: boolean }) {
   return <SharkfinChat connected={props.connected} />;
@@ -16,19 +13,16 @@ export const manifest = {
 };
 
 export function SidebarContent() {
-  const client = getClient();
-  const channelStore = createChannelStore(client);
-  const userStore = createUserStore(client);
-  const unreadStore = createUnreadStore(client, channelStore.activeChannel);
+  const { channels, users, unread } = getStores();
 
   return (
     <ChannelSidebar
-      channels={channelStore.channels()}
-      dms={channelStore.dms()}
-      unreads={unreadStore.unreads()}
-      users={userStore.users()}
-      activeChannel={channelStore.activeChannel()}
-      onSelectChannel={channelStore.setActiveChannel}
+      channels={channels.channels()}
+      dms={channels.dms()}
+      unreads={unread.unreads()}
+      users={users.users()}
+      activeChannel={channels.activeChannel()}
+      onSelectChannel={channels.setActiveChannel}
     />
   );
 }

@@ -1,29 +1,24 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render } from 'solid-js/web';
+import { createSignal } from 'solid-js';
 
-// Mock the client module so we don't need a real WebSocket.
-vi.mock('../../src/client', () => {
-  // We need to inline the mock since dynamic imports in vi.mock are tricky
-  const listeners = new Map<string, Set<Function>>();
-  const mock = {
-    on: vi.fn((event: string, fn: Function) => {
-      if (!listeners.has(event)) listeners.set(event, new Set());
-      listeners.get(event)!.add(fn);
-      return mock;
-    }),
-    off: vi.fn(),
-    channels: vi.fn().mockResolvedValue([{ name: 'general', public: true, member: true }]),
-    users: vi.fn().mockResolvedValue([]),
-    dmList: vi.fn().mockResolvedValue([]),
-    unreadCounts: vi.fn().mockResolvedValue([]),
-    history: vi.fn().mockResolvedValue([]),
-    sendMessage: vi.fn().mockResolvedValue(1),
-    markRead: vi.fn().mockResolvedValue(undefined),
-    connect: vi.fn().mockResolvedValue(undefined),
-    close: vi.fn(),
-  };
-  return { getClient: () => mock, resetClient: vi.fn() };
-});
+// Mock the stores module so we don't need a real WebSocket.
+const [channels, setChannels] = createSignal([{ name: 'general', public: true, member: true }]);
+const [activeChannel, setActiveChannel] = createSignal('');
+const [dms] = createSignal([]);
+const [messages] = createSignal([]);
+const [unreads] = createSignal([]);
+const [users] = createSignal([]);
+
+vi.mock('../../src/stores', () => ({
+  getStores: () => ({
+    channels: { channels, activeChannel, setActiveChannel, dms },
+    messages: { messages, sendMessage: vi.fn().mockResolvedValue(undefined) },
+    users: { users },
+    unread: { unreads, totalUnread: () => 0 },
+  }),
+  resetStores: vi.fn(),
+}));
 
 import { SharkfinChat } from '../../src/components/chat';
 
@@ -34,6 +29,10 @@ function renderInto(component: () => any) {
 }
 
 describe('SharkfinChat', () => {
+  beforeEach(() => {
+    setActiveChannel('');
+  });
+
   it('renders main layout structure when connected', async () => {
     const el = renderInto(() => <SharkfinChat connected={true} />);
     // Allow async store initialization

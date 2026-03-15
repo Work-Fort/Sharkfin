@@ -7,8 +7,8 @@ export function createChannelStore(client: SharkfinClient) {
   const [dms, setDms] = createSignal<DM[]>([]);
 
   // Fetch initial data.
-  client.channels().then(setChannels);
-  client.dmList().then(setDms);
+  client.channels().then(setChannels).catch(() => {});
+  client.dmList().then(setDms).catch(() => {});
 
   return { channels, activeChannel, setActiveChannel, dms };
 }

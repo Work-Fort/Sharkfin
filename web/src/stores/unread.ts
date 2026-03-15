@@ -13,7 +13,7 @@ export function createUnreadStore(client: SharkfinClient, activeChannel: Accesso
           )
         : counts,
     );
-  });
+  }).catch(() => {});
 
   // Increment count for messages arriving in non-active channels.
   client.on('message', (msg: BroadcastMessage) => {

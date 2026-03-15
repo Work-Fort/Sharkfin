@@ -1,12 +1,6 @@
 import { For, Show } from 'solid-js';
 import type { Channel, DM, UnreadCount, User } from '@workfort/sharkfin-client';
-
-/** Extract initials from a username. */
-function initials(username: string): string {
-  const parts = username.split(/[-_.\s]+/);
-  if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase();
-  return username.slice(0, 2).toUpperCase();
-}
+import { initials } from '../utils';
 
 interface SidebarProps {
   channels: Channel[];

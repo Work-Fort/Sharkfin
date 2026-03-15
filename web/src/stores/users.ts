@@ -4,7 +4,7 @@ import type { SharkfinClient, User, PresenceUpdate } from '@workfort/sharkfin-cl
 export function createUserStore(client: SharkfinClient) {
   const [users, setUsers] = createSignal<User[]>([]);
 
-  client.users().then(setUsers);
+  client.users().then(setUsers).catch(() => {});
 
   client.on('presence', (update: PresenceUpdate) => {
     setUsers((prev) =>

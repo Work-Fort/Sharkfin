@@ -8,7 +8,7 @@ export function createMessageStore(client: SharkfinClient, activeChannel: Access
   createEffect(() => {
     const ch = activeChannel();
     if (!ch) return;
-    client.history(ch, { limit: 50 }).then(setMessages);
+    client.history(ch, { limit: 50 }).then(setMessages).catch(() => {});
   });
 
   // Append incoming messages for the active channel.

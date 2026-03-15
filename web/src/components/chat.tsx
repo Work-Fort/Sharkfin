@@ -1,10 +1,6 @@
 import { Show, createEffect } from 'solid-js';
 import '../styles/chat.css';
-import { getClient } from '../client';
-import { createChannelStore } from '../stores/channels';
-import { createMessageStore } from '../stores/messages';
-import { createUserStore } from '../stores/users';
-import { createUnreadStore } from '../stores/unread';
+import { getStores } from '../stores';
 import { ChannelHeader } from './channel-header';
 import { MessageArea } from './message-area';
 import { TypingIndicator } from './typing-indicator';
@@ -15,17 +11,13 @@ interface SharkfinChatProps {
 }
 
 export function SharkfinChat(props: SharkfinChatProps) {
-  const client = getClient();
-  const channelStore = createChannelStore(client);
-  const messageStore = createMessageStore(client, channelStore.activeChannel);
-  const userStore = createUserStore(client);
-  const unreadStore = createUnreadStore(client, channelStore.activeChannel);
+  const { channels, messages } = getStores();
 
   // Auto-select first channel once loaded.
   createEffect(() => {
-    const chs = channelStore.channels();
-    if (chs.length > 0 && !channelStore.activeChannel()) {
-      channelStore.setActiveChannel(chs[0].name);
+    const chs = channels.channels();
+    if (chs.length > 0 && !channels.activeChannel()) {
+      channels.setActiveChannel(chs[0].name);
     }
   });
 
@@ -34,12 +26,12 @@ export function SharkfinChat(props: SharkfinChatProps) {
       <Show when={props.connected} fallback={
         <wf-banner variant="warning" headline="Chat is reconnecting\u2026" />
       }>
-        <ChannelHeader name={channelStore.activeChannel()} />
-        <MessageArea messages={messageStore.messages()} />
+        <ChannelHeader name={channels.activeChannel()} />
+        <MessageArea messages={messages.messages()} />
         <TypingIndicator typingUsers={[]} />
         <InputBar
-          channel={channelStore.activeChannel()}
-          onSend={(body) => messageStore.sendMessage(body)}
+          channel={channels.activeChannel()}
+          onSend={(body) => messages.sendMessage(body)}
         />
       </Show>
     </div>

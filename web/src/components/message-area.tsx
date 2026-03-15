@@ -1,4 +1,4 @@
-import { For } from 'solid-js';
+import { For, createEffect, on } from 'solid-js';
 import type { Message as Msg } from '@workfort/sharkfin-client';
 import { Message } from './message';
 
@@ -8,6 +8,16 @@ interface MessageAreaProps {
 
 export function MessageArea(props: MessageAreaProps) {
   let messagesEl!: HTMLDivElement;
+
+  // Auto-scroll when messages change.
+  createEffect(on(
+    () => props.messages.length,
+    () => {
+      if (messagesEl) {
+        queueMicrotask(() => { messagesEl.scrollTop = messagesEl.scrollHeight; });
+      }
+    }
+  ));
 
   return (
     <div class="sf-messages" ref={messagesEl}>
