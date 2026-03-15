@@ -25,7 +25,7 @@ type Server struct {
 	closers    []interface{ Close() }
 }
 
-func NewServer(ctx context.Context, addr string, store domain.Store, pongTimeout time.Duration, webhookURL string, bus domain.EventBus, version string, passportURL string) (*Server, error) {
+func NewServer(ctx context.Context, addr string, store domain.Store, pongTimeout time.Duration, webhookURL string, bus domain.EventBus, version string, passportURL string, uiDir string) (*Server, error) {
 	if webhookURL != "" {
 		store.SetSetting("webhook_url", webhookURL)
 	}
@@ -57,6 +57,7 @@ func NewServer(ctx context.Context, addr string, store domain.Store, pongTimeout
 	)
 
 	mux := http.NewServeMux()
+	registerUIRoutes(mux, uiDir)
 	mux.Handle("/mcp", mw(mcpTransport))
 	mux.Handle("GET /presence", mw(presenceHandler))
 	mux.Handle("GET /ws", mw(wsHandler))

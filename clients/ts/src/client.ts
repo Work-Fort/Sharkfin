@@ -67,7 +67,7 @@ export class SharkfinClient extends Emitter {
     }
 
     const WS = this.opts.WebSocket ?? WebSocket;
-    const ws = new WS(this.url, { headers });
+    const ws = new WS(this.url, { headers } as any);
     this.ws = ws;
 
     await new Promise<void>((resolve, reject) => {

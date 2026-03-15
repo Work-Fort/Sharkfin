@@ -3,4 +3,7 @@
 tests/e2e/testbin/
 clients/ts/node_modules/
 clients/ts/dist/
+web/node_modules/
+web/dist/
+/node_modules/
 .worktrees/
