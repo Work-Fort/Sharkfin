@@ -1,0 +1,239 @@
+/* Sharkfin Chat — structural layout only. All visual properties use --wf-* tokens. */
+
+/* Sidebar */
+.sf-sidebar {
+  background: var(--wf-color-bg-secondary);
+  border-right: 1px solid var(--wf-color-border);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.sf-sidebar__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--wf-space-md) var(--wf-space-md) var(--wf-space-sm);
+}
+.sf-sidebar__title {
+  font-size: var(--wf-text-sm);
+  font-weight: var(--wf-weight-semibold);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--wf-color-text-secondary);
+}
+.sf-sidebar__search {
+  padding: 0 var(--wf-space-sm) var(--wf-space-sm);
+}
+.sf-sidebar__search input {
+  width: 100%;
+  padding: var(--wf-space-xs) var(--wf-space-sm);
+  border-radius: var(--wf-radius-sm);
+  border: 1px solid var(--wf-color-border);
+  background: var(--wf-color-bg);
+  color: var(--wf-color-text);
+  font-family: inherit;
+  font-size: var(--wf-text-xs);
+  outline: none;
+  box-sizing: border-box;
+}
+.sf-sidebar__search input::placeholder { color: var(--wf-color-text-muted); }
+.sf-sidebar__search input:focus { border-color: var(--wf-color-border-strong); }
+
+.sf-section-label {
+  padding: var(--wf-space-sm) var(--wf-space-md) var(--wf-space-xs);
+  font-size: 0.6875rem;
+  font-weight: var(--wf-weight-semibold);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--wf-color-text-muted);
+}
+
+/* Channel list items */
+.sf-channels {
+  flex: 1;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--wf-color-border) transparent;
+}
+.sf-channel {
+  display: flex;
+  align-items: center;
+  gap: var(--wf-space-sm);
+  padding: var(--wf-space-xs) var(--wf-space-md);
+  cursor: pointer;
+  font-size: var(--wf-text-sm);
+  color: var(--wf-color-text-secondary);
+  transition: background 0.1s;
+}
+.sf-channel:hover { background: var(--wf-color-bg-elevated); }
+.sf-channel--active { background: var(--wf-color-bg-elevated); color: var(--wf-color-text); }
+.sf-channel__hash {
+  font-size: var(--wf-text-md);
+  font-weight: var(--wf-weight-medium);
+  color: var(--wf-color-text-muted);
+  width: 1.25rem;
+  text-align: center;
+  flex-shrink: 0;
+}
+.sf-channel--active .sf-channel__hash { color: var(--wf-color-text-secondary); }
+.sf-channel__name { flex: 1; }
+
+/* DM list items */
+.sf-dm {
+  display: flex;
+  align-items: center;
+  gap: var(--wf-space-sm);
+  padding: var(--wf-space-xs) var(--wf-space-md);
+  cursor: pointer;
+  font-size: var(--wf-text-sm);
+  color: var(--wf-color-text-secondary);
+  transition: background 0.1s;
+}
+.sf-dm:hover { background: var(--wf-color-bg-elevated); }
+.sf-dm__avatar {
+  width: 1.5rem;
+  height: 1.5rem;
+  border-radius: var(--wf-radius-full);
+  background: var(--wf-color-bg-elevated);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.625rem;
+  font-weight: var(--wf-weight-semibold);
+  color: var(--wf-color-text-secondary);
+  flex-shrink: 0;
+  position: relative;
+}
+
+/* Main content area */
+.sf-main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.sf-main__header {
+  display: flex;
+  align-items: center;
+  gap: var(--wf-space-sm);
+  padding: var(--wf-space-sm) var(--wf-space-lg);
+  border-bottom: 1px solid var(--wf-color-border);
+  flex-shrink: 0;
+}
+.sf-main__channel-name {
+  font-size: var(--wf-text-base);
+  font-weight: var(--wf-weight-semibold);
+  color: var(--wf-color-text);
+}
+.sf-main__channel-hash { color: var(--wf-color-text-muted); }
+.sf-main__topic {
+  font-size: var(--wf-text-xs);
+  color: var(--wf-color-text-muted);
+  flex: 1;
+}
+
+/* Messages */
+.sf-messages {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--wf-space-md) var(--wf-space-lg);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--wf-color-border) transparent;
+}
+.sf-msg {
+  display: flex;
+  gap: var(--wf-space-sm);
+  padding: var(--wf-space-xs) 0;
+}
+.sf-msg + .sf-msg:not(.sf-msg--cont) { margin-top: var(--wf-space-xs); }
+.sf-msg__avatar {
+  width: 2rem;
+  height: 2rem;
+  border-radius: var(--wf-radius-md);
+  background: var(--wf-color-bg-elevated);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: var(--wf-text-xs);
+  font-weight: var(--wf-weight-semibold);
+  color: var(--wf-color-text-secondary);
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+.sf-msg__avatar--hidden { visibility: hidden; }
+.sf-msg__body { flex: 1; min-width: 0; }
+.sf-msg__header {
+  display: flex;
+  align-items: baseline;
+  gap: var(--wf-space-sm);
+  margin-bottom: 2px;
+}
+.sf-msg__author {
+  font-size: var(--wf-text-sm);
+  font-weight: var(--wf-weight-semibold);
+  color: var(--wf-color-text);
+}
+.sf-msg__time {
+  font-size: 0.6875rem;
+  color: var(--wf-color-text-muted);
+  font-family: var(--wf-font-mono);
+}
+.sf-msg__text {
+  font-size: var(--wf-text-sm);
+  line-height: var(--wf-leading-normal);
+  color: var(--wf-color-text);
+  word-wrap: break-word;
+}
+
+/* Date divider */
+.sf-divider {
+  display: flex;
+  align-items: center;
+  gap: var(--wf-space-md);
+  padding: var(--wf-space-md) 0 var(--wf-space-sm);
+}
+.sf-divider__line { flex: 1; height: 1px; background: var(--wf-color-border); }
+.sf-divider__text {
+  font-size: var(--wf-text-xs);
+  font-weight: var(--wf-weight-medium);
+  color: var(--wf-color-text-muted);
+}
+
+/* Typing indicator */
+.sf-typing {
+  padding: var(--wf-space-xs) var(--wf-space-lg);
+  font-size: var(--wf-text-xs);
+  color: var(--wf-color-text-muted);
+  height: 1.25rem;
+}
+
+/* Input bar */
+.sf-input {
+  padding: 0 var(--wf-space-lg) var(--wf-space-md);
+}
+.sf-input__box {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--wf-space-sm);
+  border: 1px solid var(--wf-color-border-strong);
+  border-radius: var(--wf-radius-lg);
+  padding: var(--wf-space-sm);
+  background: var(--wf-color-bg-secondary);
+  transition: border-color 0.15s;
+}
+.sf-input__box:focus-within { border-color: var(--wf-color-text-secondary); }
+.sf-input__field {
+  flex: 1;
+  border: none;
+  background: transparent;
+  color: var(--wf-color-text);
+  font-family: inherit;
+  font-size: var(--wf-text-sm);
+  line-height: var(--wf-leading-normal);
+  resize: none;
+  outline: none;
+  min-height: 1.5rem;
+}
+.sf-input__field::placeholder { color: var(--wf-color-text-muted); }
