@@ -160,7 +160,7 @@ func startTestServer(t *testing.T) *testEnv {
 	}
 
 	ctx := context.Background()
-	srv, err := pkgdaemon.NewServer(ctx, addr, store, 20*time.Second, "", nil, "test", jwks.passportURL())
+	srv, err := pkgdaemon.NewServer(ctx, addr, store, 20*time.Second, "", nil, "test", jwks.passportURL(), "")
 	if err != nil {
 		t.Fatalf("create server: %v", err)
 	}

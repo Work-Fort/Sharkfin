@@ -51,8 +51,9 @@ func NewDaemonCmd(version string) *cobra.Command {
 			}
 
 			webhookURL := viper.GetString("webhook-url")
+			uiDir := viper.GetString("ui-dir")
 			bus := domain.NewEventBus()
-			srv, err := pkgdaemon.NewServer(cmd.Context(), addr, store, pongTimeout, webhookURL, bus, version, passportURL)
+			srv, err := pkgdaemon.NewServer(cmd.Context(), addr, store, pongTimeout, webhookURL, bus, version, passportURL, uiDir)
 			if err != nil {
 				return fmt.Errorf("create server: %w", err)
 			}
@@ -89,6 +90,9 @@ func NewDaemonCmd(version string) *cobra.Command {
 
 	cmd.Flags().String("passport-url", "", "Passport identity provider URL (required)")
 	_ = viper.BindPFlag("passport-url", cmd.Flags().Lookup("passport-url"))
+
+	cmd.Flags().String("ui-dir", "", "Directory containing built web UI assets (optional)")
+	_ = viper.BindPFlag("ui-dir", cmd.Flags().Lookup("ui-dir"))
 
 	return cmd
 }
