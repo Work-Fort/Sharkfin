@@ -10,6 +10,7 @@ interface SidebarProps {
   activeChannel: string;
   onSelectChannel: (channel: string) => void;
   currentUsername: string;
+  onNewDM?: () => void;
 }
 
 export function ChannelSidebar(props: SidebarProps) {
@@ -50,7 +51,12 @@ export function ChannelSidebar(props: SidebarProps) {
           }}
         </For>
 
-        <div class="sf-section-label">Direct Messages</div>
+        <div class="sf-section-label" style="display: flex; justify-content: space-between; align-items: center;">
+          Direct Messages
+          <Show when={props.onNewDM}>
+            <wf-button style="padding: 1px 5px; font-size: 12px;" title="New DM" on:click={() => props.onNewDM!()}>+</wf-button>
+          </Show>
+        </div>
         <For each={props.dms}>
           {(dm) => {
             const other = () => dm.participants.find((p) => p !== props.currentUsername) ?? dm.participants[0];

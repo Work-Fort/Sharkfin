@@ -1,7 +1,9 @@
 import { SharkfinChat } from './components/chat';
 import { ChannelSidebar } from './components/sidebar';
+import { DMDialog } from './components/dm-dialog';
 import { getStores, loading } from './stores';
-import { Show } from 'solid-js';
+import { getClient } from './client';
+import { Show, createSignal } from 'solid-js';
 import { useAuth } from '@workfort/ui-solid';
 
 export default function SharkfinApp(props: { connected: boolean }) {
@@ -31,16 +33,34 @@ export function SidebarContent() {
 function SidebarLoaded() {
   const { channels, users, unread } = getStores();
   const { user } = useAuth();
+  const [dmDialogOpen, setDmDialogOpen] = createSignal(false);
+
+  async function handleDMSelect(username: string) {
+    setDmDialogOpen(false);
+    const result = await getClient().dmOpen(username);
+    channels.setActiveChannel(result.channel);
+    getClient().dmList().then((dms) => channels.setDms?.(dms)).catch(() => {});
+  }
 
   return (
-    <ChannelSidebar
-      channels={channels.channels()}
-      dms={channels.dms()}
-      unreads={unread.unreads()}
-      users={users.users()}
-      activeChannel={channels.activeChannel()}
-      onSelectChannel={channels.setActiveChannel}
-      currentUsername={user()?.name ?? ''}
-    />
+    <>
+      <ChannelSidebar
+        channels={channels.channels()}
+        dms={channels.dms()}
+        unreads={unread.unreads()}
+        users={users.users()}
+        activeChannel={channels.activeChannel()}
+        onSelectChannel={channels.setActiveChannel}
+        currentUsername={user()?.name ?? ''}
+        onNewDM={() => setDmDialogOpen(true)}
+      />
+      <DMDialog
+        users={users.users()}
+        currentUsername={user()?.name ?? ''}
+        open={dmDialogOpen()}
+        onSelect={handleDMSelect}
+        onClose={() => setDmDialogOpen(false)}
+      />
+    </>
   );
 }
