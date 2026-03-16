@@ -2,9 +2,21 @@
 package daemon
 
 import (
+	"encoding/json"
 	"io/fs"
 	"net/http"
 )
+
+// uiHealthResponse is the JSON body the shell's service tracker expects
+// from GET /ui/health. The tracker decodes this to discover the service's
+// frontend manifest and WebSocket paths for proxying.
+type uiHealthResponse struct {
+	Status  string   `json:"status"`
+	Name    string   `json:"name"`
+	Label   string   `json:"label"`
+	Route   string   `json:"route"`
+	WSPaths []string `json:"ws_paths"`
+}
 
 // registerUIRoutes adds the /ui/health probe and static file serving.
 // If uiDir is set, files are served from disk (dev mode).
@@ -12,7 +24,14 @@ import (
 // If both are empty/nil, only /ui/health is registered.
 func registerUIRoutes(mux *http.ServeMux, uiDir string, embeddedFS fs.FS) {
 	mux.HandleFunc("GET /ui/health", func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(uiHealthResponse{
+			Status:  "ok",
+			Name:    "sharkfin",
+			Label:   "Chat",
+			Route:   "/chat",
+			WSPaths: []string{"/ws", "/presence"},
+		})
 	})
 
 	var fileServer http.Handler

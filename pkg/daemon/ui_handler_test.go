@@ -2,6 +2,7 @@
 package daemon
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -10,7 +11,7 @@ import (
 	"testing/fstest"
 )
 
-func TestUIHealthReturns200(t *testing.T) {
+func TestUIHealthReturnsManifest(t *testing.T) {
 	mux := http.NewServeMux()
 	registerUIRoutes(mux, "", nil)
 
@@ -20,6 +21,26 @@ func TestUIHealthReturns200(t *testing.T) {
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+	if ct := rec.Header().Get("Content-Type"); ct != "application/json" {
+		t.Fatalf("expected application/json, got %s", ct)
+	}
+
+	var health uiHealthResponse
+	if err := json.NewDecoder(rec.Body).Decode(&health); err != nil {
+		t.Fatalf("decode health response: %v", err)
+	}
+	if health.Name != "sharkfin" {
+		t.Fatalf("expected name=sharkfin, got %s", health.Name)
+	}
+	if health.Label != "Chat" {
+		t.Fatalf("expected label=Chat, got %s", health.Label)
+	}
+	if health.Route != "/chat" {
+		t.Fatalf("expected route=/chat, got %s", health.Route)
+	}
+	if len(health.WSPaths) != 2 || health.WSPaths[0] != "/ws" || health.WSPaths[1] != "/presence" {
+		t.Fatalf("expected ws_paths=[/ws, /presence], got %v", health.WSPaths)
 	}
 }
 
