@@ -38,4 +38,9 @@ describe('ChannelHeader', () => {
     ));
     expect(el.querySelector('wf-button')).toBeFalsy();
   });
+
+  it('renders wf-divider', () => {
+    const el = renderInto(() => <ChannelHeader name="general" />);
+    expect(el.querySelector('wf-divider')).toBeTruthy();
+  });
 });

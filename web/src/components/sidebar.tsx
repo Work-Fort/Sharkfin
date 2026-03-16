@@ -55,29 +55,25 @@ export function ChannelSidebar(props: SidebarProps) {
       </div>
       <div class="sf-channels">
         <div class="sf-section-label">Channels</div>
-        <For each={filteredChannels()}>
-          {(ch) => {
-            const count = () => unreadFor(ch.name)?.unreadCount ?? 0;
-            return (
-              <div
-                class={`sf-channel${ch.name === props.activeChannel ? ' sf-channel--active' : ''}`}
-                on:click={() => {
-                  if (ch.member) {
-                    props.onSelectChannel(ch.name);
-                  } else {
-                    props.onJoinChannel?.(ch.name);
-                  }
-                }}
-              >
-                <span class="sf-channel__hash">#</span>
-                <span class="sf-channel__name" style={ch.member ? undefined : 'font-style: italic; opacity: 0.7;'}>{ch.name}</span>
-                <Show when={count() > 0}>
-                  <wf-badge count={count()} size="sm" />
-                </Show>
-              </div>
-            );
-          }}
-        </For>
+        <wf-list>
+          <For each={filteredChannels()}>
+            {(ch) => {
+              const count = () => unreadFor(ch.name)?.unreadCount ?? 0;
+              return (
+                <wf-list-item
+                  active={ch.name === props.activeChannel}
+                  on:wf-select={() => ch.member ? props.onSelectChannel(ch.name) : props.onJoinChannel?.(ch.name)}
+                >
+                  <span class="sf-channel__hash">#</span>
+                  <span class="sf-channel__name" style={ch.member ? undefined : 'font-style: italic; opacity: 0.7;'}>{ch.name}</span>
+                  <Show when={count() > 0}>
+                    <wf-badge data-wf="trailing" count={count()} size="sm" />
+                  </Show>
+                </wf-list-item>
+              );
+            }}
+          </For>
+        </wf-list>
 
         <Show when={!props.can || props.can('dm_list')}>
           <div class="sf-section-label" style="display: flex; justify-content: space-between; align-items: center;">
@@ -86,29 +82,31 @@ export function ChannelSidebar(props: SidebarProps) {
               <wf-button style="padding: 1px 5px; font-size: 12px;" title="New DM" on:click={() => props.onNewDM!()}>+</wf-button>
             </Show>
           </div>
-          <For each={filteredDms()}>
-            {(dm) => {
-              const other = () => dm.participants.find((p) => p !== props.currentUsername) ?? dm.participants[0];
-              const status = () => userStatus(other());
-              const presenceStatus = () => {
-                const s = status();
-                if (!s?.online) return 'offline';
-                return s.state === 'idle' ? 'away' : 'online';
-              };
-              return (
-                <div class="sf-dm" on:click={() => props.onSelectChannel(dm.channel)}>
-                  <div class="sf-dm__avatar">
-                    {initials(other())}
-                    <wf-status-dot
-                      status={presenceStatus()}
-                      style="position:absolute;bottom:-1px;right:-1px;"
-                    />
-                  </div>
-                  <span>{other()}</span>
-                </div>
-              );
-            }}
-          </For>
+          <wf-list>
+            <For each={filteredDms()}>
+              {(dm) => {
+                const other = () => dm.participants.find((p) => p !== props.currentUsername) ?? dm.participants[0];
+                const status = () => userStatus(other());
+                const presenceStatus = () => {
+                  const s = status();
+                  if (!s?.online) return 'offline';
+                  return s.state === 'idle' ? 'away' : 'online';
+                };
+                return (
+                  <wf-list-item on:wf-select={() => props.onSelectChannel(dm.channel)}>
+                    <div class="sf-dm__avatar">
+                      {initials(other())}
+                      <wf-status-dot
+                        status={presenceStatus()}
+                        style="position:absolute;bottom:-1px;right:-1px;"
+                      />
+                    </div>
+                    <span>{other()}</span>
+                  </wf-list-item>
+                );
+              }}
+            </For>
+          </wf-list>
         </Show>
       </div>
     </div>

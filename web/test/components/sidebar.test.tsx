@@ -47,8 +47,9 @@ describe('ChannelSidebar', () => {
         currentUsername="me"
       />
     ));
-    const active = el.querySelector('.sf-channel--active .sf-channel__name');
-    expect(active?.textContent).toBe('general');
+    const items = el.querySelectorAll('wf-list-item');
+    const activeItem = Array.from(items).find((item) => (item as any).active);
+    expect(activeItem?.querySelector('.sf-channel__name')?.textContent).toBe('general');
   });
 
   it('shows unread badge on channel', () => {
@@ -72,8 +73,8 @@ describe('ChannelSidebar', () => {
         currentUsername="me"
       />
     ));
-    const randomCh = el.querySelectorAll('.sf-channel')[1] as HTMLElement;
-    randomCh.click();
+    const items = el.querySelectorAll('wf-list wf-list-item');
+    items[1].dispatchEvent(new CustomEvent('wf-select', { bubbles: true }));
     expect(onSelect).toHaveBeenCalledWith('random');
   });
 
@@ -85,8 +86,9 @@ describe('ChannelSidebar', () => {
         currentUsername="me"
       />
     ));
-    const dmEls = el.querySelectorAll('.sf-dm');
-    expect(dmEls.length).toBe(1);
+    const dmList = el.querySelectorAll('wf-list')[1];
+    const dmItems = dmList?.querySelectorAll('wf-list-item');
+    expect(dmItems?.length).toBe(1);
   });
 
   it('shows away status for online+idle user', () => {
@@ -121,8 +123,8 @@ describe('ChannelSidebar', () => {
         currentUsername="me"
       />
     ));
-    const unjoinedCh = el.querySelectorAll('.sf-channel')[1] as HTMLElement;
-    unjoinedCh.click();
+    const items = el.querySelectorAll('wf-list wf-list-item');
+    items[1].dispatchEvent(new CustomEvent('wf-select', { bubbles: true }));
     expect(onJoin).toHaveBeenCalledWith('unjoined');
     expect(onSelect).not.toHaveBeenCalled();
   });
@@ -182,8 +184,9 @@ describe('ChannelSidebar', () => {
     searchInput.value = 'bob';
     searchInput.dispatchEvent(new Event('input', { bubbles: true }));
 
-    const dmEls = el.querySelectorAll('.sf-dm');
-    expect(dmEls.length).toBe(1);
+    const dmList = el.querySelectorAll('wf-list')[1];
+    const dmItems = dmList?.querySelectorAll('wf-list-item');
+    expect(dmItems?.length).toBe(1);
   });
 
   it('shows other participant name in DMs (not current user)', () => {
@@ -197,7 +200,7 @@ describe('ChannelSidebar', () => {
         currentUsername="bob-kim"
       />
     ));
-    const dmEl = el.querySelector('.sf-dm span');
-    expect(dmEl?.textContent).toBe('alice-chen');
+    const dmItem = el.querySelector('wf-list wf-list-item .sf-dm__avatar + span');
+    expect(dmItem?.textContent).toBe('alice-chen');
   });
 });
