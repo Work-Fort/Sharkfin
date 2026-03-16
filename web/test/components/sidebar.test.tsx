@@ -107,6 +107,44 @@ describe('ChannelSidebar', () => {
     expect(dot?.status).toBe('away');
   });
 
+  it('calls onJoinChannel for non-member channels', () => {
+    const onSelect = vi.fn();
+    const onJoin = vi.fn();
+    const mixedChannels: Channel[] = [
+      { name: 'general', public: true, member: true },
+      { name: 'unjoined', public: true, member: false },
+    ];
+    const el = renderInto(() => (
+      <ChannelSidebar
+        channels={mixedChannels} dms={dms} unreads={unreads} users={users}
+        activeChannel="general" onSelectChannel={onSelect} onJoinChannel={onJoin}
+        currentUsername="me"
+      />
+    ));
+    const unjoinedCh = el.querySelectorAll('.sf-channel')[1] as HTMLElement;
+    unjoinedCh.click();
+    expect(onJoin).toHaveBeenCalledWith('unjoined');
+    expect(onSelect).not.toHaveBeenCalled();
+  });
+
+  it('styles non-member channels with italic and reduced opacity', () => {
+    const mixedChannels: Channel[] = [
+      { name: 'general', public: true, member: true },
+      { name: 'unjoined', public: true, member: false },
+    ];
+    const el = renderInto(() => (
+      <ChannelSidebar
+        channels={mixedChannels} dms={[]} unreads={[]} users={[]}
+        activeChannel="" onSelectChannel={() => {}}
+        currentUsername="me"
+      />
+    ));
+    const names = el.querySelectorAll('.sf-channel__name');
+    const unjoinedName = names[1] as HTMLElement;
+    expect(unjoinedName.style.fontStyle).toBe('italic');
+    expect(unjoinedName.style.opacity).toBe('0.7');
+  });
+
   it('shows other participant name in DMs (not current user)', () => {
     const testDms: DM[] = [
       { channel: 'dm-1', participants: ['alice-chen', 'bob-kim'] },

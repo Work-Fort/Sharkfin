@@ -11,6 +11,8 @@ interface SidebarProps {
   onSelectChannel: (channel: string) => void;
   currentUsername: string;
   onNewDM?: () => void;
+  onNewChannel?: () => void;
+  onJoinChannel?: (channel: string) => void;
   can?: (permission: string) => boolean;
 }
 
@@ -26,7 +28,7 @@ export function ChannelSidebar(props: SidebarProps) {
       <div class="sf-sidebar__header">
         <span class="sf-sidebar__title">Sharkfin</span>
         <Show when={!props.can || props.can('create_channel')}>
-          <wf-button style="padding: 2px 6px; font-size: 14px;" title="New channel">
+          <wf-button style="padding: 2px 6px; font-size: 14px;" title="New channel" on:click={() => props.onNewChannel?.()}>
             +
           </wf-button>
         </Show>
@@ -42,10 +44,16 @@ export function ChannelSidebar(props: SidebarProps) {
             return (
               <div
                 class={`sf-channel${ch.name === props.activeChannel ? ' sf-channel--active' : ''}`}
-                on:click={() => props.onSelectChannel(ch.name)}
+                on:click={() => {
+                  if (ch.member) {
+                    props.onSelectChannel(ch.name);
+                  } else {
+                    props.onJoinChannel?.(ch.name);
+                  }
+                }}
               >
                 <span class="sf-channel__hash">#</span>
-                <span class="sf-channel__name">{ch.name}</span>
+                <span class="sf-channel__name" style={ch.member ? undefined : 'font-style: italic; opacity: 0.7;'}>{ch.name}</span>
                 <Show when={count() > 0}>
                   <wf-badge count={count()} size="sm" />
                 </Show>

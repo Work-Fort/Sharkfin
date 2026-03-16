@@ -1,5 +1,6 @@
 import { SharkfinChat } from './components/chat';
 import { ChannelSidebar } from './components/sidebar';
+import { CreateChannelDialog } from './components/create-channel-dialog';
 import { DMDialog } from './components/dm-dialog';
 import { getStores, loading } from './stores';
 import { getClient } from './client';
@@ -34,12 +35,26 @@ function SidebarLoaded() {
   const { channels, users, unread, permissions } = getStores();
   const { user } = useAuth();
   const [dmDialogOpen, setDmDialogOpen] = createSignal(false);
+  const [createChannelOpen, setCreateChannelOpen] = createSignal(false);
 
   async function handleDMSelect(username: string) {
     setDmDialogOpen(false);
     const result = await getClient().dmOpen(username);
     channels.setActiveChannel(result.channel);
     getClient().dmList().then((dms) => channels.setDms?.(dms)).catch(() => {});
+  }
+
+  async function handleCreateChannel(name: string, isPublic: boolean) {
+    setCreateChannelOpen(false);
+    await getClient().createChannel(name, isPublic);
+    getClient().channels().then((chs) => channels.setChannels?.(chs)).catch(() => {});
+    channels.setActiveChannel(name);
+  }
+
+  async function handleJoinChannel(channel: string) {
+    await getClient().joinChannel(channel);
+    getClient().channels().then((chs) => channels.setChannels?.(chs)).catch(() => {});
+    channels.setActiveChannel(channel);
   }
 
   return (
@@ -53,7 +68,14 @@ function SidebarLoaded() {
         onSelectChannel={channels.setActiveChannel}
         currentUsername={user()?.name ?? ''}
         onNewDM={() => setDmDialogOpen(true)}
+        onNewChannel={() => setCreateChannelOpen(true)}
+        onJoinChannel={handleJoinChannel}
         can={permissions.can}
+      />
+      <CreateChannelDialog
+        open={createChannelOpen()}
+        onCreate={handleCreateChannel}
+        onClose={() => setCreateChannelOpen(false)}
       />
       <DMDialog
         users={users.users()}
