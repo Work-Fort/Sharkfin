@@ -239,3 +239,26 @@
   min-height: 1.5rem;
 }
 .sf-input__field::placeholder { color: var(--wf-color-text-muted); }
+
+/* Responsive — mobile viewport */
+@media (max-width: 640px) {
+  .sf-sidebar__search { display: none; }
+
+  .sf-main__header {
+    padding: var(--wf-space-xs) var(--wf-space-md);
+  }
+
+  .sf-messages {
+    padding: var(--wf-space-sm) var(--wf-space-md);
+  }
+
+  .sf-input {
+    padding: 0 var(--wf-space-md) var(--wf-space-sm);
+  }
+
+  .sf-msg__avatar {
+    width: 1.5rem;
+    height: 1.5rem;
+    font-size: 0.5rem;
+  }
+}
