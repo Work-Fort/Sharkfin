@@ -278,6 +278,14 @@ This needs investigation — check how the scope team's own MF remotes (if any) 
 | 6 | EdDSA algorithm (informational) | Low | — | No | Noted |
 | 7 | JWT aud/iss uses localhost | Low | Passport | No | Open |
 | 8 | BFF 404 on fort-scoped SPA routes | Medium | Scope | No (client nav works) | Open |
-| 9 | remoteEntry.js ESM format mismatch | **High** | Sharkfin | **Yes** | **Open — new blocker** |
+| 9 | remoteEntry.js ESM format mismatch | **High** | Scope (shell) | **Yes** | **RESOLVED** — shell now loads remotes as ESM |
 
-**Current blocker:** Issue 9. The MF remote entry format must match what the shell's runtime expects.
+**All blockers resolved.** The Sharkfin MF remote loads in the shell. The UI renders its loading/disconnected state correctly. Full chat functionality requires browser-side auth (user signs in via Passport, BFF converts session to JWT for WS proxy).
+
+### Verification Screenshot
+
+Shell at `/forts/local/chat` shows:
+- Navigation: "Auth" + "Chat" tabs
+- Sidebar: `wf-skeleton` loading placeholders (SidebarContent rendered)
+- Main: `wf-banner` "Chat service is unavailable." (`connected=false` from shell)
+- Zero console errors, zero MF load failures
