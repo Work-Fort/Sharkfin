@@ -1,4 +1,4 @@
-import { createSignal, createEffect, type Accessor } from 'solid-js';
+import { createSignal, createEffect, onCleanup, type Accessor } from 'solid-js';
 import type { SharkfinClient, Message, BroadcastMessage } from '@workfort/sharkfin-client';
 
 export function createMessageStore(client: SharkfinClient, activeChannel: Accessor<string>) {
@@ -12,7 +12,7 @@ export function createMessageStore(client: SharkfinClient, activeChannel: Access
   });
 
   // Append incoming messages for the active channel.
-  client.on('message', (msg: BroadcastMessage) => {
+  const handler = (msg: BroadcastMessage) => {
     if (msg.channel === activeChannel()) {
       setMessages((prev) => [...prev, {
         id: msg.id,
@@ -24,7 +24,9 @@ export function createMessageStore(client: SharkfinClient, activeChannel: Access
         mentions: msg.mentions,
       }]);
     }
-  });
+  };
+  client.on('message', handler);
+  onCleanup(() => client.off('message', handler));
 
   async function sendMessage(body: string): Promise<void> {
     const ch = activeChannel();
