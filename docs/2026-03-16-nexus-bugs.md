@@ -67,3 +67,25 @@ mcp__nexus__vm_start(id: "passport") → same error
 **Owning service:** Nexus
 
 **Severity:** Medium — any host reboot or unclean shutdown makes existing VMs unrecoverable without recreation.
+
+## Bug 4: `vm_create` `env` parameter is silently ignored
+
+**Reproduction:**
+```
+mcp__nexus__vm_create(name: "passport", image: "...", env: {"BETTER_AUTH_URL": "http://passport.nexus:3000"})
+→ VM created successfully (no error)
+
+# After starting:
+mcp__nexus__vm_exec(id: "passport", cmd: ["env"])
+→ No BETTER_AUTH_URL in output — only image defaults (PATH, NODE_VERSION, etc.)
+```
+
+**Expected:** Environment variables passed in `env` should be set in the container's environment when it starts.
+
+**Actual:** The `env` parameter is accepted without error but has no effect. The container only has environment variables baked into the image.
+
+**Impact:** Cannot configure runtime behavior (like `BETTER_AUTH_URL`, `DATABASE_URL`, etc.) without rebuilding the image or using `vm_exec` to start processes with inline env vars.
+
+**Owning service:** Nexus
+
+**Severity:** High — environment configuration is fundamental to container operation.
