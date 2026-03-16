@@ -29,6 +29,9 @@ importers:
       '@workfort/ui':
         specifier: latest
         version: 0.1.1
+      '@workfort/ui-solid':
+        specifier: link:/home/kazw/Work/WorkFort/scope/lead/web/packages/solid
+        version: link:../../../scope/lead/web/packages/solid
       solid-js:
         specifier: ^1.9.0
         version: 1.9.11

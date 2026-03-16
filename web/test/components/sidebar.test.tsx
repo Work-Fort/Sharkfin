@@ -30,6 +30,7 @@ describe('ChannelSidebar', () => {
       <ChannelSidebar
         channels={channels} dms={dms} unreads={unreads} users={users}
         activeChannel="general" onSelectChannel={() => {}}
+        currentUsername="me"
       />
     ));
     const names = el.querySelectorAll('.sf-channel__name');
@@ -43,6 +44,7 @@ describe('ChannelSidebar', () => {
       <ChannelSidebar
         channels={channels} dms={dms} unreads={unreads} users={users}
         activeChannel="general" onSelectChannel={() => {}}
+        currentUsername="me"
       />
     ));
     const active = el.querySelector('.sf-channel--active .sf-channel__name');
@@ -54,6 +56,7 @@ describe('ChannelSidebar', () => {
       <ChannelSidebar
         channels={channels} dms={dms} unreads={unreads} users={users}
         activeChannel="random" onSelectChannel={() => {}}
+        currentUsername="me"
       />
     ));
     const badges = el.querySelectorAll('wf-badge');
@@ -66,6 +69,7 @@ describe('ChannelSidebar', () => {
       <ChannelSidebar
         channels={channels} dms={dms} unreads={unreads} users={users}
         activeChannel="general" onSelectChannel={onSelect}
+        currentUsername="me"
       />
     ));
     const randomCh = el.querySelectorAll('.sf-channel')[1] as HTMLElement;
@@ -78,9 +82,25 @@ describe('ChannelSidebar', () => {
       <ChannelSidebar
         channels={channels} dms={dms} unreads={unreads} users={users}
         activeChannel="general" onSelectChannel={() => {}}
+        currentUsername="me"
       />
     ));
     const dmEls = el.querySelectorAll('.sf-dm');
     expect(dmEls.length).toBe(1);
+  });
+
+  it('shows other participant name in DMs (not current user)', () => {
+    const testDms: DM[] = [
+      { channel: 'dm-1', participants: ['alice-chen', 'bob-kim'] },
+    ];
+    const el = renderInto(() => (
+      <ChannelSidebar
+        channels={[]} dms={testDms} unreads={[]} users={users}
+        activeChannel="" onSelectChannel={() => {}}
+        currentUsername="bob-kim"
+      />
+    ));
+    const dmEl = el.querySelector('.sf-dm span');
+    expect(dmEl?.textContent).toBe('alice-chen');
   });
 });

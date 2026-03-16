@@ -9,6 +9,7 @@ interface SidebarProps {
   users: User[];
   activeChannel: string;
   onSelectChannel: (channel: string) => void;
+  currentUsername: string;
 }
 
 export function ChannelSidebar(props: SidebarProps) {
@@ -52,7 +53,7 @@ export function ChannelSidebar(props: SidebarProps) {
         <div class="sf-section-label">Direct Messages</div>
         <For each={props.dms}>
           {(dm) => {
-            const other = () => dm.participants.find((p) => p !== 'me') ?? dm.participants[0];
+            const other = () => dm.participants.find((p) => p !== props.currentUsername) ?? dm.participants[0];
             const status = () => userStatus(other());
             const presenceStatus = () => (status()?.online ? 'online' : 'offline');
             return (

@@ -14,6 +14,7 @@ export default defineConfig({
       shared: {
         'solid-js': { singleton: true },
         '@workfort/ui': { singleton: true },
+        '@workfort/ui-solid': { singleton: true },
       },
     }),
   ],

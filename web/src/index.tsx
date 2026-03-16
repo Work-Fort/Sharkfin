@@ -2,6 +2,7 @@ import { SharkfinChat } from './components/chat';
 import { ChannelSidebar } from './components/sidebar';
 import { getStores, loading } from './stores';
 import { Show } from 'solid-js';
+import { useAuth } from '@workfort/ui-solid';
 
 export default function SharkfinApp(props: { connected: boolean }) {
   return <SharkfinChat connected={props.connected} />;
@@ -29,6 +30,7 @@ export function SidebarContent() {
 
 function SidebarLoaded() {
   const { channels, users, unread } = getStores();
+  const { user } = useAuth();
 
   return (
     <ChannelSidebar
@@ -38,6 +40,7 @@ function SidebarLoaded() {
       users={users.users()}
       activeChannel={channels.activeChannel()}
       onSelectChannel={channels.setActiveChannel}
+      currentUsername={user()?.name ?? ''}
     />
   );
 }
