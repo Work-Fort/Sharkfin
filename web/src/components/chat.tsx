@@ -1,6 +1,6 @@
-import { Show, createEffect } from 'solid-js';
+import { Show, createEffect, onMount, onCleanup } from 'solid-js';
 import '../styles/chat.css';
-import { getStores } from '../stores';
+import { initApp, getStores, connectionState, loading } from '../stores';
 import { ChannelHeader } from './channel-header';
 import { MessageArea } from './message-area';
 import { TypingIndicator } from './typing-indicator';
@@ -11,9 +11,39 @@ interface SharkfinChatProps {
 }
 
 export function SharkfinChat(props: SharkfinChatProps) {
+  onMount(async () => {
+    try {
+      await initApp();
+    } catch {
+      // Connection failed — client will retry via reconnect: true.
+    }
+  });
+
+  return (
+    <div class="sf-main">
+      <Show when={!props.connected}>
+        <wf-banner variant="warning" headline="Chat service is unavailable." />
+      </Show>
+      <Show when={loading()}>
+        <div style="padding: var(--wf-space-lg);">
+          <wf-skeleton width="100%" height="2rem" />
+          <wf-skeleton width="100%" height="200px" style="margin-top: var(--wf-space-md);" />
+          <wf-skeleton width="60%" height="1rem" style="margin-top: var(--wf-space-md);" />
+        </div>
+      </Show>
+      <Show when={!loading() && connectionState() !== 'connecting'}>
+        <Show when={connectionState() === 'disconnected'}>
+          <wf-banner variant="warning" headline="Connection lost. Reconnecting\u2026" />
+        </Show>
+        <ChatContent />
+      </Show>
+    </div>
+  );
+}
+
+function ChatContent() {
   const { channels, messages } = getStores();
 
-  // Auto-select first channel once loaded.
   createEffect(() => {
     const chs = channels.channels();
     if (chs.length > 0 && !channels.activeChannel()) {
@@ -22,18 +52,14 @@ export function SharkfinChat(props: SharkfinChatProps) {
   });
 
   return (
-    <div class="sf-main">
-      <Show when={props.connected} fallback={
-        <wf-banner variant="warning" headline="Chat is reconnecting\u2026" />
-      }>
-        <ChannelHeader name={channels.activeChannel()} />
-        <MessageArea messages={messages.messages()} />
-        <TypingIndicator typingUsers={[]} />
-        <InputBar
-          channel={channels.activeChannel()}
-          onSend={(body) => messages.sendMessage(body)}
-        />
-      </Show>
-    </div>
+    <>
+      <ChannelHeader name={channels.activeChannel()} />
+      <MessageArea messages={messages.messages()} />
+      <TypingIndicator typingUsers={[]} />
+      <InputBar
+        channel={channels.activeChannel()}
+        onSend={(body) => messages.sendMessage(body)}
+      />
+    </>
   );
 }

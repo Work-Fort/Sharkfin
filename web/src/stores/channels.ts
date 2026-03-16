@@ -10,5 +10,5 @@ export function createChannelStore(client: SharkfinClient) {
   client.channels().then(setChannels).catch(() => {});
   client.dmList().then(setDms).catch(() => {});
 
-  return { channels, activeChannel, setActiveChannel, dms };
+  return { channels, activeChannel, setActiveChannel, dms, setChannels, setDms };
 }

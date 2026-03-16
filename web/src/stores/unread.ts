@@ -42,5 +42,5 @@ export function createUnreadStore(client: SharkfinClient, activeChannel: Accesso
 
   const totalUnread = () => unreads().reduce((sum, u) => sum + u.unreadCount, 0);
 
-  return { unreads, totalUnread };
+  return { unreads, totalUnread, setUnreads };
 }

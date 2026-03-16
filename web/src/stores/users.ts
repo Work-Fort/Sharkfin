@@ -16,5 +16,5 @@ export function createUserStore(client: SharkfinClient) {
     );
   });
 
-  return { users };
+  return { users, setUsers };
 }
