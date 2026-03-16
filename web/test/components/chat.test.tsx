@@ -30,6 +30,7 @@ vi.mock('../../src/stores', async () => {
       messages: { messages, sendMessage: vi.fn().mockResolvedValue(undefined) },
       users: { users, setUsers: () => {} },
       unread: { unreads, totalUnread: () => 0, setUnreads: () => {} },
+      permissions: { can: (p: string) => true, permissions: () => new Set<string>() },
     }),
     connectionState,
     loading,

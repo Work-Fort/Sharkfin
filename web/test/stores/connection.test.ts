@@ -47,6 +47,7 @@ describe('connection lifecycle', () => {
     expect(stores.messages).toBeDefined();
     expect(stores.users).toBeDefined();
     expect(stores.unread).toBeDefined();
+    expect(stores.permissions).toBeDefined();
   });
 
   it('throws if getStores() called before initApp()', () => {

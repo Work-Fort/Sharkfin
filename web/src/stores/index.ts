@@ -4,6 +4,7 @@ import { createChannelStore } from './channels';
 import { createMessageStore } from './messages';
 import { createUserStore } from './users';
 import { createUnreadStore } from './unread';
+import { createPermissionStore } from './permissions';
 
 const [connectionState, setConnectionState] = createSignal<'connecting' | 'connected' | 'disconnected'>('connecting');
 const [loading, setLoading] = createSignal(true);
@@ -17,7 +18,8 @@ function createStores() {
   const messages = createMessageStore(client, channels.activeChannel);
   const users = createUserStore(client);
   const unread = createUnreadStore(client, channels.activeChannel);
-  return { channels, messages, users, unread };
+  const permissions = createPermissionStore(client);
+  return { channels, messages, users, unread, permissions };
 }
 
 export async function initApp(): Promise<void> {

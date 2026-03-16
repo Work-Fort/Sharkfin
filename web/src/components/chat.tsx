@@ -46,7 +46,7 @@ export function SharkfinChat(props: SharkfinChatProps) {
 }
 
 function ChatContent() {
-  const { channels, messages } = getStores();
+  const { channels, messages, permissions } = getStores();
 
   createEffect(() => {
     const chs = channels.channels();
@@ -60,10 +60,16 @@ function ChatContent() {
       <ChannelHeader name={channels.activeChannel()} />
       <MessageArea messages={messages.messages()} />
       <TypingIndicator typingUsers={[]} />
-      <InputBar
-        channel={channels.activeChannel()}
-        onSend={(body) => messages.sendMessage(body)}
-      />
+      <Show when={permissions.can('send_message')} fallback={
+        <div class="sf-typing" style="color: var(--wf-color-text-muted); font-size: var(--wf-text-xs);">
+          You don't have permission to send messages.
+        </div>
+      }>
+        <InputBar
+          channel={channels.activeChannel()}
+          onSend={(body) => messages.sendMessage(body)}
+        />
+      </Show>
     </>
   );
 }

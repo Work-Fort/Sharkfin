@@ -31,7 +31,7 @@ export function SidebarContent() {
 }
 
 function SidebarLoaded() {
-  const { channels, users, unread } = getStores();
+  const { channels, users, unread, permissions } = getStores();
   const { user } = useAuth();
   const [dmDialogOpen, setDmDialogOpen] = createSignal(false);
 
@@ -53,6 +53,7 @@ function SidebarLoaded() {
         onSelectChannel={channels.setActiveChannel}
         currentUsername={user()?.name ?? ''}
         onNewDM={() => setDmDialogOpen(true)}
+        can={permissions.can}
       />
       <DMDialog
         users={users.users()}

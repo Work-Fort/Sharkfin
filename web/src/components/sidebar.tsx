@@ -11,6 +11,7 @@ interface SidebarProps {
   onSelectChannel: (channel: string) => void;
   currentUsername: string;
   onNewDM?: () => void;
+  can?: (permission: string) => boolean;
 }
 
 export function ChannelSidebar(props: SidebarProps) {
@@ -24,9 +25,11 @@ export function ChannelSidebar(props: SidebarProps) {
     <div class="sf-sidebar">
       <div class="sf-sidebar__header">
         <span class="sf-sidebar__title">Sharkfin</span>
-        <wf-button style="padding: 2px 6px; font-size: 14px;" title="New channel">
-          +
-        </wf-button>
+        <Show when={!props.can || props.can('create_channel')}>
+          <wf-button style="padding: 2px 6px; font-size: 14px;" title="New channel">
+            +
+          </wf-button>
+        </Show>
       </div>
       <div class="sf-sidebar__search">
         <input type="text" placeholder="Search conversations\u2026" />
@@ -51,35 +54,37 @@ export function ChannelSidebar(props: SidebarProps) {
           }}
         </For>
 
-        <div class="sf-section-label" style="display: flex; justify-content: space-between; align-items: center;">
-          Direct Messages
-          <Show when={props.onNewDM}>
-            <wf-button style="padding: 1px 5px; font-size: 12px;" title="New DM" on:click={() => props.onNewDM!()}>+</wf-button>
-          </Show>
-        </div>
-        <For each={props.dms}>
-          {(dm) => {
-            const other = () => dm.participants.find((p) => p !== props.currentUsername) ?? dm.participants[0];
-            const status = () => userStatus(other());
-            const presenceStatus = () => {
-              const s = status();
-              if (!s?.online) return 'offline';
-              return s.state === 'idle' ? 'away' : 'online';
-            };
-            return (
-              <div class="sf-dm" on:click={() => props.onSelectChannel(dm.channel)}>
-                <div class="sf-dm__avatar">
-                  {initials(other())}
-                  <wf-status-dot
-                    status={presenceStatus()}
-                    style="position:absolute;bottom:-1px;right:-1px;"
-                  />
+        <Show when={!props.can || props.can('dm_list')}>
+          <div class="sf-section-label" style="display: flex; justify-content: space-between; align-items: center;">
+            Direct Messages
+            <Show when={props.onNewDM && (!props.can || props.can('dm_open'))}>
+              <wf-button style="padding: 1px 5px; font-size: 12px;" title="New DM" on:click={() => props.onNewDM!()}>+</wf-button>
+            </Show>
+          </div>
+          <For each={props.dms}>
+            {(dm) => {
+              const other = () => dm.participants.find((p) => p !== props.currentUsername) ?? dm.participants[0];
+              const status = () => userStatus(other());
+              const presenceStatus = () => {
+                const s = status();
+                if (!s?.online) return 'offline';
+                return s.state === 'idle' ? 'away' : 'online';
+              };
+              return (
+                <div class="sf-dm" on:click={() => props.onSelectChannel(dm.channel)}>
+                  <div class="sf-dm__avatar">
+                    {initials(other())}
+                    <wf-status-dot
+                      status={presenceStatus()}
+                      style="position:absolute;bottom:-1px;right:-1px;"
+                    />
+                  </div>
+                  <span>{other()}</span>
                 </div>
-                <span>{other()}</span>
-              </div>
-            );
-          }}
-        </For>
+              );
+            }}
+          </For>
+        </Show>
       </div>
     </div>
   );
