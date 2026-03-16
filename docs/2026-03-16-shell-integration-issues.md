@@ -195,16 +195,89 @@ The `iss` is also `http://localhost:3000` rather than a canonical issuer URL, wh
 
 ---
 
+## Issue 8: BFF returns 404 for fort-scoped SPA routes (direct navigation)
+
+**Step:** Navigate directly to `http://127.0.0.1:16100/forts/local/chat`
+
+**What happened:** Direct navigation to `/forts/local/chat` returns 404. The BFF's SPA fallback only handles the root `/` path. Fort-scoped paths go through `fortDispatch` which strips the prefix and forwards to the fort's handler. The fort handler has `/api/*` routes but no SPA fallback for client-side routes like `/chat`.
+
+**Impact:** Refreshing the browser on `/forts/local/chat` or sharing the URL returns 404. Client-side navigation (clicking "Chat" in the nav) works because the SPA router handles it.
+
+**Evidence:**
+```
+$ curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:16100/forts/local/chat
+404
+
+# But clicking "Chat" in the nav works (client-side routing)
+```
+
+**Root cause:** `fort_router.go:61` dispatches `/forts/{fort}/{rest...}` to the fort handler, which only has `/api/*` routes. Non-API paths need to be forwarded to the SPA.
+
+**Owning service:** Scope (BFF)
+
+**Proposed fix:** The fort-level handler needs a SPA fallback. Non-API paths under `/forts/{fort}/` should serve the SPA HTML so the client-side router can handle them.
+
+---
+
+## Issue 9: remoteEntry.js uses ES modules but shell loads it as classic script
+
+**Step:** Click "Chat" in the shell nav (client-side navigation)
+
+**What happened:** The shell's MF runtime loads `remoteEntry.js` but fails with "Cannot use import statement outside a module". The `remoteEntry.js` built by Vite uses ES module syntax (`import`/`export`), but the shell's `@module-federation/runtime` loads it as a classic script (no `type="module"`).
+
+**Evidence:**
+```
+Console error: Cannot use import statement outside a module
+Error: [ Federation Runtime ]: Failed to load script resources. #RUNTIME-008
+  remoteName: "sharkfin"
+  resourceUrl: "http://127.0.0.1:16100/forts/local/api/sharkfin/ui/remoteEntry.js"
+```
+
+`remoteEntry.js` line 1:
+```javascript
+import{i as c}from"./assets/index.cjs-qNTcCtpj.js";
+```
+
+**Impact:** The Sharkfin UI cannot load at all — the MF remote fails to initialize.
+
+**Root cause:** `@module-federation/vite` generates ESM output by default. The shell's MF runtime (`@module-federation/runtime`) loads remote entries via dynamic `<script>` tag injection (classic scripts, not `type="module"`). ESM and classic scripts are incompatible.
+
+**Owning service:** Sharkfin (build configuration)
+
+**Proposed fix:** Configure the Vite MF plugin to output a format compatible with the shell's MF runtime. Options:
+1. Set `library.type: "global"` or `"system"` in the MF config to output a non-ESM format
+2. Check what format the shell's existing remotes use and match it
+3. Check if `@module-federation/vite` has a `format` option for the remote entry
+
+This needs investigation — check how the scope team's own MF remotes (if any) configure their Vite builds.
+
+---
+
+## Verification Results (2026-03-16, post-fix)
+
+**Issues 1 and 2: RESOLVED**
+- Passport `v0.1.0` returns 503 + auth manifest at `/ui/health`
+- BFF discovers both `auth` (ui: false) and `sharkfin` (ui: true)
+- `remoteEntry.js` returns 200 through BFF (no more 401)
+
+**New blockers:**
+- Issue 9 (ESM format mismatch) blocks the MF remote from loading
+- Issue 8 (SPA fallback) is a UX issue for direct URL navigation
+
+---
+
 ## Summary
 
-| # | Issue | Severity | Owner | Blocks UI? |
-|---|---|---|---|---|
-| 1 | Passport missing `/ui/health` | High | Passport | Yes (cascading) |
-| 2 | BFF auth-wraps static UI assets | High | Scope | Yes |
-| 3 | Service discovery works | OK | — | — |
-| 4 | Shell shows "unavailable" | Cascading | — | Yes (from 1+2) |
-| 5 | Old DB breaks identity provisioning | Medium | Sharkfin | No (fresh DB works) |
-| 6 | EdDSA vs RS256 (informational) | Low | — | No |
-| 7 | JWT aud/iss uses localhost | Low | Passport | No |
+| # | Issue | Severity | Owner | Blocks UI? | Status |
+|---|---|---|---|---|---|
+| 1 | Passport missing `/ui/health` | High | Passport | Yes (cascading) | **RESOLVED** (v0.1.0) |
+| 2 | BFF auth-wraps static UI assets | High | Scope | Yes | **RESOLVED** |
+| 3 | Service discovery works | OK | — | — | OK |
+| 4 | Shell shows "unavailable" | Cascading | — | Yes (from 9) | Open (new root cause) |
+| 5 | Old DB breaks identity provisioning | Medium | Sharkfin | No (fresh DB works) | Non-issue (goose handles it) |
+| 6 | EdDSA algorithm (informational) | Low | — | No | Noted |
+| 7 | JWT aud/iss uses localhost | Low | Passport | No | Open |
+| 8 | BFF 404 on fort-scoped SPA routes | Medium | Scope | No (client nav works) | Open |
+| 9 | remoteEntry.js ESM format mismatch | **High** | Sharkfin | **Yes** | **Open — new blocker** |
 
-**Blockers for shell integration:** Issues 1 and 2 must be resolved. Either Passport adds `/ui/health` OR the BFF exempts `/ui/*` from auth. Ideally both.
+**Current blocker:** Issue 9. The MF remote entry format must match what the shell's runtime expects.
