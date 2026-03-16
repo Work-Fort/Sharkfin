@@ -1,6 +1,8 @@
 import { Show, createEffect, onMount, onCleanup } from 'solid-js';
 import '../styles/chat.css';
 import { initApp, getStores, connectionState, loading } from '../stores';
+import { useIdleDetection } from '../hooks/use-idle';
+import { getClient } from '../client';
 import { ChannelHeader } from './channel-header';
 import { MessageArea } from './message-area';
 import { TypingIndicator } from './typing-indicator';
@@ -14,6 +16,8 @@ export function SharkfinChat(props: SharkfinChatProps) {
   onMount(async () => {
     try {
       await initApp();
+      const disposeIdle = useIdleDetection(getClient());
+      onCleanup(disposeIdle);
     } catch {
       // Connection failed — client will retry via reconnect: true.
     }

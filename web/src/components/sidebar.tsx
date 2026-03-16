@@ -55,7 +55,11 @@ export function ChannelSidebar(props: SidebarProps) {
           {(dm) => {
             const other = () => dm.participants.find((p) => p !== props.currentUsername) ?? dm.participants[0];
             const status = () => userStatus(other());
-            const presenceStatus = () => (status()?.online ? 'online' : 'offline');
+            const presenceStatus = () => {
+              const s = status();
+              if (!s?.online) return 'offline';
+              return s.state === 'idle' ? 'away' : 'online';
+            };
             return (
               <div class="sf-dm" on:click={() => props.onSelectChannel(dm.channel)}>
                 <div class="sf-dm__avatar">

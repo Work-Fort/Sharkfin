@@ -89,6 +89,24 @@ describe('ChannelSidebar', () => {
     expect(dmEls.length).toBe(1);
   });
 
+  it('shows away status for online+idle user', () => {
+    const usersWithIdle: User[] = [
+      { username: 'alice-chen', online: true, type: 'user', state: 'idle' },
+    ];
+    const dms: DM[] = [
+      { channel: 'dm-1', participants: ['alice-chen', 'testuser'] },
+    ];
+    const el = renderInto(() => (
+      <ChannelSidebar
+        channels={[]} dms={dms} unreads={[]} users={usersWithIdle}
+        activeChannel="" onSelectChannel={() => {}}
+        currentUsername="testuser"
+      />
+    ));
+    const dot = el.querySelector('wf-status-dot') as any;
+    expect(dot?.status).toBe('away');
+  });
+
   it('shows other participant name in DMs (not current user)', () => {
     const testDms: DM[] = [
       { channel: 'dm-1', participants: ['alice-chen', 'bob-kim'] },
