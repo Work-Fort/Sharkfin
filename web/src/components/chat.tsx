@@ -1,4 +1,4 @@
-import { Show, createEffect, onMount, onCleanup } from 'solid-js';
+import { Show, createEffect, createSignal, onMount, onCleanup } from 'solid-js';
 import '../styles/chat.css';
 import { initApp, getStores, connectionState, loading } from '../stores';
 import { useIdleDetection } from '../hooks/use-idle';
@@ -7,6 +7,7 @@ import { ChannelHeader } from './channel-header';
 import { MessageArea } from './message-area';
 import { TypingIndicator } from './typing-indicator';
 import { InputBar } from './input-bar';
+import { InviteDialog } from './invite-dialog';
 
 interface SharkfinChatProps {
   connected: boolean;
@@ -46,7 +47,8 @@ export function SharkfinChat(props: SharkfinChatProps) {
 }
 
 function ChatContent() {
-  const { channels, messages, permissions } = getStores();
+  const { channels, messages, users, permissions } = getStores();
+  const [inviteOpen, setInviteOpen] = createSignal(false);
 
   createEffect(() => {
     const chs = channels.channels();
@@ -55,9 +57,21 @@ function ChatContent() {
     }
   });
 
+  const activeChannelObj = () => channels.channels().find(c => c.name === channels.activeChannel());
+
+  async function handleInvite(channel: string, username: string) {
+    setInviteOpen(false);
+    await getClient().inviteToChannel(channel, username);
+  }
+
   return (
     <>
-      <ChannelHeader name={channels.activeChannel()} />
+      <ChannelHeader
+        name={channels.activeChannel()}
+        isPublic={activeChannelObj()?.public ?? true}
+        onInvite={() => setInviteOpen(true)}
+        can={permissions.can}
+      />
       <MessageArea messages={messages.messages()} />
       <TypingIndicator typingUsers={[]} />
       <Show when={permissions.can('send_message')} fallback={
@@ -70,6 +84,13 @@ function ChatContent() {
           onSend={(body) => messages.sendMessage(body)}
         />
       </Show>
+      <InviteDialog
+        channel={channels.activeChannel()}
+        users={users.users()}
+        open={inviteOpen()}
+        onInvite={handleInvite}
+        onClose={() => setInviteOpen(false)}
+      />
     </>
   );
 }

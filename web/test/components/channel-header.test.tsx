@@ -24,4 +24,18 @@ describe('ChannelHeader', () => {
     const el = renderInto(() => <ChannelHeader name="random" />);
     expect(el.querySelector('.sf-main__topic')).toBeFalsy();
   });
+
+  it('shows invite button for private channels', () => {
+    const el = renderInto(() => (
+      <ChannelHeader name="private" isPublic={false} onInvite={() => {}} />
+    ));
+    expect(el.querySelector('wf-button')).toBeTruthy();
+  });
+
+  it('hides invite button for public channels', () => {
+    const el = renderInto(() => (
+      <ChannelHeader name="public" isPublic={true} onInvite={() => {}} />
+    ));
+    expect(el.querySelector('wf-button')).toBeFalsy();
+  });
 });
