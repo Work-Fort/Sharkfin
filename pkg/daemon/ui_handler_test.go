@@ -7,11 +7,12 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"testing/fstest"
 )
 
 func TestUIHealthReturns200(t *testing.T) {
 	mux := http.NewServeMux()
-	registerUIRoutes(mux, "")
+	registerUIRoutes(mux, "", nil)
 
 	req := httptest.NewRequest("GET", "/ui/health", nil)
 	rec := httptest.NewRecorder()
@@ -29,7 +30,7 @@ func TestUIStaticFileServing(t *testing.T) {
 	}
 
 	mux := http.NewServeMux()
-	registerUIRoutes(mux, dir)
+	registerUIRoutes(mux, dir, nil)
 
 	req := httptest.NewRequest("GET", "/ui/test.js", nil)
 	rec := httptest.NewRecorder()
@@ -45,7 +46,7 @@ func TestUIStaticFileServing(t *testing.T) {
 
 func TestUINoStaticWhenDirEmpty(t *testing.T) {
 	mux := http.NewServeMux()
-	registerUIRoutes(mux, "")
+	registerUIRoutes(mux, "", nil)
 
 	req := httptest.NewRequest("GET", "/ui/test.js", nil)
 	rec := httptest.NewRecorder()
@@ -53,5 +54,25 @@ func TestUINoStaticWhenDirEmpty(t *testing.T) {
 
 	if rec.Code == http.StatusOK {
 		t.Fatalf("expected non-200 when uiDir is empty, got %d", rec.Code)
+	}
+}
+
+func TestUIEmbeddedFS(t *testing.T) {
+	fsys := fstest.MapFS{
+		"dist/test.js": &fstest.MapFile{Data: []byte("embedded")},
+	}
+
+	mux := http.NewServeMux()
+	registerUIRoutes(mux, "", fsys)
+
+	req := httptest.NewRequest("GET", "/ui/test.js", nil)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+	if body := rec.Body.String(); body != "embedded" {
+		t.Fatalf("unexpected body: %s", body)
 	}
 }

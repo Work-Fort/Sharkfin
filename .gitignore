@@ -7,3 +7,4 @@ web/node_modules/
 web/dist/
 /node_modules/
 .worktrees/
+build/aur-test/

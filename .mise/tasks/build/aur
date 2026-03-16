@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#MISE description="Test building the AUR package locally"
+set -euo pipefail
+
+BUILD_DIR="build/aur-test"
+
+echo "==> Preparing AUR test build in $BUILD_DIR..."
+rm -rf "$BUILD_DIR"
+mkdir -p "$BUILD_DIR"
+
+# Copy PKGBUILD
+cp aur/PKGBUILD "$BUILD_DIR/"
+
+# Create a source tarball from the current tree (simulating the GitHub release archive)
+VERSION=$(grep "pkgver=" aur/PKGBUILD | cut -d= -f2)
+ARCHIVE_DIR="$BUILD_DIR/Sharkfin-${VERSION}"
+mkdir -p "$ARCHIVE_DIR"
+
+# Copy everything except build artifacts and node_modules
+rsync -a --exclude='build/' --exclude='node_modules/' --exclude='.git/' \
+  --exclude='dist/' --exclude='web/dist/' --exclude='web/node_modules/' \
+  --exclude='web/.__mf__temp/' \
+  . "$ARCHIVE_DIR/"
+
+# Create the tarball
+(cd "$BUILD_DIR" && tar czf "v${VERSION}.tar.gz" "Sharkfin-${VERSION}")
+rm -rf "$ARCHIVE_DIR"
+
+# Build the package (--nodeps skips pacman dependency install since we have mise)
+echo "==> Running makepkg..."
+(cd "$BUILD_DIR" && makepkg -sf --noconfirm --skipchecksums --nodeps)
+
+# Show result
+PKG=$(find "$BUILD_DIR" -name "*.pkg.tar.*" | head -1)
+if [ -n "$PKG" ]; then
+  echo "==> Package built successfully: $PKG"
+  ls -lh "$PKG"
+else
+  echo "==> ERROR: Package build failed"
+  exit 1
+fi
