@@ -1,4 +1,4 @@
-import { For, Show } from 'solid-js';
+import { createSignal, For, Show } from 'solid-js';
 import type { Channel, DM, UnreadCount, User } from '@workfort/sharkfin-client';
 import { initials } from '../utils';
 
@@ -17,11 +17,28 @@ interface SidebarProps {
 }
 
 export function ChannelSidebar(props: SidebarProps) {
+  const [searchTerm, setSearchTerm] = createSignal('');
+
   const unreadFor = (channel: string) =>
     props.unreads.find((u) => u.channel === channel);
 
   const userStatus = (username: string) =>
     props.users.find((u) => u.username === username);
+
+  const filteredChannels = () => {
+    const term = searchTerm().toLowerCase();
+    if (!term) return props.channels;
+    return props.channels.filter((ch) => ch.name.toLowerCase().includes(term));
+  };
+
+  const filteredDms = () => {
+    const term = searchTerm().toLowerCase();
+    if (!term) return props.dms;
+    return props.dms.filter((dm) => {
+      const other = dm.participants.find((p) => p !== props.currentUsername) ?? dm.participants[0];
+      return other.toLowerCase().includes(term);
+    });
+  };
 
   return (
     <div class="sf-sidebar">
@@ -34,11 +51,11 @@ export function ChannelSidebar(props: SidebarProps) {
         </Show>
       </div>
       <div class="sf-sidebar__search">
-        <input type="text" placeholder="Search conversations\u2026" />
+        <input type="text" placeholder="Search conversations\u2026" on:input={(e: Event) => setSearchTerm((e.target as HTMLInputElement).value)} />
       </div>
       <div class="sf-channels">
         <div class="sf-section-label">Channels</div>
-        <For each={props.channels}>
+        <For each={filteredChannels()}>
           {(ch) => {
             const count = () => unreadFor(ch.name)?.unreadCount ?? 0;
             return (
@@ -69,7 +86,7 @@ export function ChannelSidebar(props: SidebarProps) {
               <wf-button style="padding: 1px 5px; font-size: 12px;" title="New DM" on:click={() => props.onNewDM!()}>+</wf-button>
             </Show>
           </div>
-          <For each={props.dms}>
+          <For each={filteredDms()}>
             {(dm) => {
               const other = () => dm.participants.find((p) => p !== props.currentUsername) ?? dm.participants[0];
               const status = () => userStatus(other());

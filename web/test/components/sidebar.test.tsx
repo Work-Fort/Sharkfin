@@ -145,6 +145,47 @@ describe('ChannelSidebar', () => {
     expect(unjoinedName.style.opacity).toBe('0.7');
   });
 
+  it('filters channels by search term', () => {
+    const el = renderInto(() => (
+      <ChannelSidebar
+        channels={channels} dms={dms} unreads={unreads} users={users}
+        activeChannel="general" onSelectChannel={() => {}}
+        currentUsername="me"
+      />
+    ));
+    const searchInput = el.querySelector('input[type="text"]') as HTMLInputElement;
+    searchInput.value = 'ran';
+    searchInput.dispatchEvent(new Event('input', { bubbles: true }));
+
+    const names = el.querySelectorAll('.sf-channel__name');
+    expect(names.length).toBe(1);
+    expect(names[0].textContent).toBe('random');
+  });
+
+  it('filters DMs by participant name', () => {
+    const testDms: DM[] = [
+      { channel: 'dm-1', participants: ['alice-chen', 'me'] },
+      { channel: 'dm-2', participants: ['bob-kim', 'me'] },
+    ];
+    const testUsers: User[] = [
+      { username: 'alice-chen', online: true, type: 'user' },
+      { username: 'bob-kim', online: true, type: 'user' },
+    ];
+    const el = renderInto(() => (
+      <ChannelSidebar
+        channels={[]} dms={testDms} unreads={[]} users={testUsers}
+        activeChannel="" onSelectChannel={() => {}}
+        currentUsername="me"
+      />
+    ));
+    const searchInput = el.querySelector('input[type="text"]') as HTMLInputElement;
+    searchInput.value = 'bob';
+    searchInput.dispatchEvent(new Event('input', { bubbles: true }));
+
+    const dmEls = el.querySelectorAll('.sf-dm');
+    expect(dmEls.length).toBe(1);
+  });
+
   it('shows other participant name in DMs (not current user)', () => {
     const testDms: DM[] = [
       { channel: 'dm-1', participants: ['alice-chen', 'bob-kim'] },
