@@ -69,6 +69,14 @@ func Open(path string) (*Store, error) {
 		sqldb.Close()
 		return nil, fmt.Errorf("migrate: %w", err)
 	}
+
+	// Seed a default "general" channel on first run.
+	var channelCount int
+	_ = sqldb.QueryRow("SELECT COUNT(*) FROM channels").Scan(&channelCount)
+	if channelCount == 0 {
+		_, _ = sqldb.Exec("INSERT INTO channels (name, public, type) VALUES ('general', 1, 'channel')")
+	}
+
 	return &Store{db: sqldb}, nil
 }
 

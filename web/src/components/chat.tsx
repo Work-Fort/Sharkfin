@@ -87,13 +87,19 @@ function ChatContent() {
 
   return (
     <>
+      <Show when={channels.activeChannel()} fallback={
+        <div class="sf-messages" style="display: flex; align-items: center; justify-content: center; color: var(--wf-color-text-muted); font-size: var(--wf-text-sm); flex-direction: column; gap: var(--wf-space-md);">
+          <span style="font-size: var(--wf-text-lg);">No channels yet</span>
+          <span>Create one with the + button in the sidebar.</span>
+        </div>
+      }>
       <ChannelHeader
         name={channels.activeChannel()}
         isPublic={activeChannelObj()?.public ?? true}
         onInvite={() => setInviteOpen(true)}
         can={permissions.can}
       />
-      <Show when={() => permissions.can('history')} fallback={
+      <Show when={permissions.can('history')} fallback={
         <div class="sf-messages" style="display: flex; align-items: center; justify-content: center; color: var(--wf-color-text-muted); font-size: var(--wf-text-sm);">
           You don't have permission to view message history.
         </div>
@@ -101,7 +107,7 @@ function ChatContent() {
         <MessageArea messages={messages.messages()} />
       </Show>
       <TypingIndicator typingUsers={[]} />
-      <Show when={() => permissions.can('send_message')} fallback={
+      <Show when={permissions.can('send_message')} fallback={
         <div class="sf-typing" style="color: var(--wf-color-text-muted); font-size: var(--wf-text-xs);">
           You don't have permission to send messages.
         </div>
@@ -110,6 +116,7 @@ function ChatContent() {
           channel={channels.activeChannel()}
           onSend={(body) => messages.sendMessage(body)}
         />
+      </Show>
       </Show>
       <InviteDialog
         channel={channels.activeChannel()}

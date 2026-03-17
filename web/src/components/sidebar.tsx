@@ -44,7 +44,7 @@ export function ChannelSidebar(props: SidebarProps) {
     <div class="sf-sidebar">
       <div class="sf-sidebar__header">
         <span class="sf-sidebar__title">Sharkfin</span>
-        <Show when={() => !props.can || props.can('create_channel')}>
+        <Show when={!props.can || props.can('create_channel')}>
           <wf-button style="padding: 2px 6px; font-size: 14px;" title="New channel" on:click={() => props.onNewChannel?.()}>
             +
           </wf-button>
@@ -55,7 +55,7 @@ export function ChannelSidebar(props: SidebarProps) {
       </div>
       <div class="sf-channels">
         <div class="sf-section-label">Channels</div>
-        <Show when={() => !props.can || props.can('channel_list')} fallback={
+        <Show when={!props.can || props.can('channel_list')} fallback={
           <div style="padding: var(--wf-space-sm) var(--wf-space-md); font-size: var(--wf-text-xs); color: var(--wf-color-text-muted);">
             No channel access
           </div>
@@ -87,10 +87,10 @@ export function ChannelSidebar(props: SidebarProps) {
           </wf-list>
         </Show>
 
-        <Show when={() => !props.can || props.can('dm_list')}>
+        <Show when={!props.can || props.can('dm_list')}>
           <div class="sf-section-label" style="display: flex; justify-content: space-between; align-items: center;">
             Direct Messages
-            <Show when={() => props.onNewDM && (!props.can || props.can('dm_open'))}>
+            <Show when={props.onNewDM && (!props.can || props.can('dm_open'))}>
               <wf-button style="padding: 1px 5px; font-size: 12px;" title="New DM" on:click={() => props.onNewDM!()}>+</wf-button>
             </Show>
           </div>
