@@ -83,6 +83,17 @@ describe('connection lifecycle', () => {
     expect(mockClient.unreadCounts).toHaveBeenCalledOnce();
   });
 
+  it('refetches capabilities on reconnect', async () => {
+    await initApp();
+    // Reset call count after initial store creation fetch.
+    mockClient.capabilities.mockClear();
+
+    mockClient._emit('reconnect');
+    await flushPromises();
+
+    expect(mockClient.capabilities).toHaveBeenCalledOnce();
+  });
+
   it('resetStores clears state back to initial', async () => {
     await initApp();
     expect(loading()).toBe(false);

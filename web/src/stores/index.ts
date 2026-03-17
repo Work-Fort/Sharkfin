@@ -32,6 +32,7 @@ export async function initApp(): Promise<void> {
     client.channels().then((chs) => stores.channels.setChannels?.(chs)).catch(() => {});
     client.users().then((us) => stores.users.setUsers?.(us)).catch(() => {});
     client.unreadCounts().then((counts) => stores.unread.setUnreads?.(counts)).catch(() => {});
+    client.capabilities().then((perms) => stores.permissions.update(perms)).catch(() => {});
   });
 
   await client.connect();
