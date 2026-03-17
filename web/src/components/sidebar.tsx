@@ -1,4 +1,4 @@
-import { createSignal, For, Show } from 'solid-js';
+import { createSignal, createMemo, For, Show } from 'solid-js';
 import type { Channel, DM, UnreadCount, User } from '@workfort/sharkfin-client';
 import { initials } from '@workfort/ui';
 
@@ -17,6 +17,13 @@ interface SidebarProps {
 }
 
 export function ChannelSidebar(props: SidebarProps) {
+  // Pre-compute permissions as memos for SolidJS reactivity.
+  // Direct calls like props.can('x') in JSX aren't tracked by the compiler.
+  const canCreateChannel = createMemo(() => !props.can || props.can('create_channel'));
+  const canChannelList = createMemo(() => !props.can || props.can('channel_list'));
+  const canJoinChannel = createMemo(() => !props.can || props.can('join_channel'));
+  const canDmList = createMemo(() => !props.can || props.can('dm_list'));
+  const canDmOpen = createMemo(() => !props.can || props.can('dm_open'));
   const [searchTerm, setSearchTerm] = createSignal('');
 
   const unreadFor = (channel: string) =>
@@ -44,7 +51,7 @@ export function ChannelSidebar(props: SidebarProps) {
     <div class="sf-sidebar">
       <div class="sf-sidebar__header">
         <span class="sf-sidebar__title">Sharkfin</span>
-        <Show when={!props.can || props.can('create_channel')}>
+        <Show when={canCreateChannel()}>
           <wf-button style="padding: 2px 6px; font-size: 14px;" title="New channel" on:click={() => props.onNewChannel?.()}>
             +
           </wf-button>
@@ -55,7 +62,7 @@ export function ChannelSidebar(props: SidebarProps) {
       </div>
       <div class="sf-channels">
         <div class="sf-section-label">Channels</div>
-        <Show when={!props.can || props.can('channel_list')} fallback={
+        <Show when={canChannelList()} fallback={
           <div style="padding: var(--wf-space-sm) var(--wf-space-md); font-size: var(--wf-text-xs); color: var(--wf-color-text-muted);">
             No channel access
           </div>
@@ -70,7 +77,7 @@ export function ChannelSidebar(props: SidebarProps) {
                     on:wf-select={() => {
                       if (ch.member) {
                         props.onSelectChannel(ch.name);
-                      } else if (!props.can || props.can('join_channel')) {
+                      } else if (canJoinChannel()) {
                         props.onJoinChannel?.(ch.name);
                       }
                     }}
@@ -87,10 +94,10 @@ export function ChannelSidebar(props: SidebarProps) {
           </wf-list>
         </Show>
 
-        <Show when={!props.can || props.can('dm_list')}>
+        <Show when={canDmList()}>
           <div class="sf-section-label" style="display: flex; justify-content: space-between; align-items: center;">
             Direct Messages
-            <Show when={props.onNewDM && (!props.can || props.can('dm_open'))}>
+            <Show when={props.onNewDM && canDmOpen()}>
               <wf-button style="padding: 1px 5px; font-size: 12px;" title="New DM" on:click={() => props.onNewDM!()}>+</wf-button>
             </Show>
           </div>

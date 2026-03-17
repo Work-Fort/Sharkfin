@@ -1,4 +1,4 @@
-import { Show, createEffect, createSignal, onMount, onCleanup } from 'solid-js';
+import { Show, createEffect, createMemo, createSignal, onMount, onCleanup } from 'solid-js';
 import '../styles/chat.css';
 import { initApp, getStores, connectionState, loading } from '../stores';
 import { useIdleDetection } from '@workfort/ui-solid';
@@ -79,6 +79,8 @@ function ChatContent() {
   });
 
   const activeChannelObj = () => channels.channels().find(c => c.name === channels.activeChannel());
+  const canHistory = createMemo(() => permissions.can('history'));
+  const canSend = createMemo(() => permissions.can('send_message'));
 
   async function handleInvite(channel: string, username: string) {
     setInviteOpen(false);
@@ -99,7 +101,7 @@ function ChatContent() {
         onInvite={() => setInviteOpen(true)}
         can={permissions.can}
       />
-      <Show when={permissions.can('history')} fallback={
+      <Show when={canHistory()} fallback={
         <div class="sf-messages" style="display: flex; align-items: center; justify-content: center; color: var(--wf-color-text-muted); font-size: var(--wf-text-sm);">
           You don't have permission to view message history.
         </div>
@@ -107,7 +109,7 @@ function ChatContent() {
         <MessageArea messages={messages.messages()} />
       </Show>
       <TypingIndicator typingUsers={[]} />
-      <Show when={permissions.can('send_message')} fallback={
+      <Show when={canSend()} fallback={
         <div class="sf-typing" style="color: var(--wf-color-text-muted); font-size: var(--wf-text-xs);">
           You don't have permission to send messages.
         </div>
