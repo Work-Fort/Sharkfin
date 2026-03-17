@@ -280,6 +280,24 @@ This needs investigation — check how the scope team's own MF remotes (if any) 
 | 8 | BFF 404 on fort-scoped SPA routes | Medium | Scope | No (client nav works) | Open |
 | 9 | remoteEntry.js ESM format mismatch | **High** | Scope (shell) | **Yes** | **RESOLVED** — shell now loads remotes as ESM |
 
+## Issue 10: `wf-button` with `type="submit"` does not trigger form submission
+
+**Step:** Click "Create Account" button in the setup form
+
+**What happened:** Clicking `<wf-button type="submit">` inside a `<form>` does not fire the form's `submit` event. The form handler never runs.
+
+**Root cause:** `wf-button` is a custom element (Lit web component). Custom elements don't participate in native form submission unless they use the `ElementInternals` API with `formAssociated: true`. The `type="submit"` attribute is ignored by the browser for non-native buttons.
+
+**Impact:** Any form using `wf-button` as the submit trigger will silently fail to submit.
+
+**Owning service:** Scope (`@workfort/ui`)
+
+**Workaround:** Use a native `<button type="submit">` styled with `--wf-*` tokens.
+
+**Proposed fix:** Either implement `ElementInternals` in `WfButton` for form association, or document that `wf-button` cannot be used as a form submit button.
+
+---
+
 **All blockers resolved.** The Sharkfin MF remote loads in the shell. The UI renders its loading/disconnected state correctly. Full chat functionality requires browser-side auth (user signs in via Passport, BFF converts session to JWT for WS proxy).
 
 ### Verification Screenshot
