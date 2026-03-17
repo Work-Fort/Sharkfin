@@ -364,12 +364,20 @@ func TestWSHistoryNonParticipant(t *testing.T) {
 		"name": "secret", "public": false,
 	}, "c1")
 
-	// WS has admin-like access: non-members can read history
+	// Non-members must NOT be able to read history
 	resp := wsReq(t, bobConn, "history", map[string]interface{}{
 		"channel": "secret",
 	}, "h2")
-	if resp.OK == nil || !*resp.OK {
-		t.Error("expected ok: WS should allow history for non-members")
+	if resp.OK != nil && *resp.OK {
+		t.Error("expected error: bob is not a participant of secret channel")
+	}
+	d, _ := json.Marshal(resp.D)
+	var result struct {
+		Message string `json:"message"`
+	}
+	json.Unmarshal(d, &result)
+	if result.Message != "you are not a participant of this channel" {
+		t.Errorf("error = %q, want 'you are not a participant of this channel'", result.Message)
 	}
 }
 

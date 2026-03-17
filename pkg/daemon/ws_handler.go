@@ -513,6 +513,16 @@ func (h *WSHandler) handleWSHistory(sendCh chan<- []byte, ref string, rawD json.
 		return
 	}
 
+	isMember, err := h.store.IsChannelMember(ch.ID, identityID)
+	if err != nil {
+		sendError(sendCh, ref, err.Error())
+		return
+	}
+	if !isMember {
+		sendError(sendCh, ref, "you are not a participant of this channel")
+		return
+	}
+
 	if d.Limit <= 0 {
 		d.Limit = 50
 	}
