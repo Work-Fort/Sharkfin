@@ -31,7 +31,8 @@ export async function initApp(): Promise<void> {
   const client = getClient();
 
   // Create permissions outside createRoot for cross-tree reactivity.
-  _permissions = createPermissionStore(client);
+  // Don't fetch capabilities here — client isn't connected yet.
+  _permissions = createPermissionStore();
 
   client.on('disconnect', () => setConnectionState('disconnected'));
   client.on('reconnect', () => {
@@ -45,6 +46,9 @@ export async function initApp(): Promise<void> {
 
   await client.connect();
   setConnectionState('connected');
+
+  // Fetch permissions after connect.
+  client.capabilities().then((perms) => _permissions!.update(perms)).catch(() => {});
 
   createRoot((dispose) => {
     _stores = createStores();
