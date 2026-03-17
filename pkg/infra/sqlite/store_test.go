@@ -49,6 +49,36 @@ func TestUpsertIdentity(t *testing.T) {
 	}
 }
 
+func TestUpsertIdentityFirstUserAutoAdmin(t *testing.T) {
+	s := newTestStore(t)
+
+	// First user on empty DB should be auto-promoted to admin.
+	err := s.UpsertIdentity("uuid-first", "first", "First", "user", "user")
+	if err != nil {
+		t.Fatalf("upsert first identity: %v", err)
+	}
+	ident, err := s.GetIdentityByUsername("first")
+	if err != nil {
+		t.Fatalf("get first identity: %v", err)
+	}
+	if ident.Role != "admin" {
+		t.Errorf("first user role = %q, want admin", ident.Role)
+	}
+
+	// Second user should NOT be auto-promoted.
+	err = s.UpsertIdentity("uuid-second", "second", "Second", "user", "user")
+	if err != nil {
+		t.Fatalf("upsert second identity: %v", err)
+	}
+	ident2, err := s.GetIdentityByUsername("second")
+	if err != nil {
+		t.Fatalf("get second identity: %v", err)
+	}
+	if ident2.Role != "user" {
+		t.Errorf("second user role = %q, want user", ident2.Role)
+	}
+}
+
 func TestUpsertIdentityIdempotent(t *testing.T) {
 	s := newTestStore(t)
 	err := s.UpsertIdentity("uuid-alice", "alice", "Alice", "user", "user")
@@ -1026,7 +1056,8 @@ func TestGetUserPermissions(t *testing.T) {
 
 func TestHasPermission(t *testing.T) {
 	s := newTestStore(t)
-	upsertIdentity(t, s, "uuid-alice", "alice")
+	upsertIdentity(t, s, "uuid-admin-seed", "admin-seed") // first user auto-promoted to admin
+	upsertIdentity(t, s, "uuid-alice", "alice")            // second user keeps "user" role
 
 	has, err := s.HasPermission("alice", "send_message")
 	if err != nil {

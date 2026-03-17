@@ -12,6 +12,11 @@ func (s *Store) UpsertIdentity(id, username, displayName, identityType, role str
 	if role == "" {
 		role = "user"
 	}
+	var count int
+	s.db.QueryRow("SELECT COUNT(*) FROM identities").Scan(&count)
+	if count == 0 {
+		role = "admin"
+	}
 	_, err := s.db.Exec(`
 		INSERT INTO identities (id, username, display_name, type, role)
 		VALUES (?, ?, ?, ?, ?)
