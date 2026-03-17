@@ -733,6 +733,52 @@ func TestWSSendMessageWithMentionGroup(t *testing.T) {
 	}
 }
 
+func TestWSUpgradeRejectsMismatchedOrigin(t *testing.T) {
+	env := newWSTestEnv(t)
+	server := env.serverForUser(t, "alice")
+
+	// Dial with a mismatched Origin header
+	dialer := websocket.Dialer{}
+	header := http.Header{}
+	header.Set("Origin", "http://evil.example.com")
+	_, resp, err := dialer.Dial(wsURL(server), header)
+	if err == nil {
+		t.Fatal("expected dial to fail with mismatched origin")
+	}
+	if resp != nil && resp.StatusCode != http.StatusForbidden {
+		t.Errorf("status = %d, want 403", resp.StatusCode)
+	}
+}
+
+func TestWSUpgradeAllowsSameOrigin(t *testing.T) {
+	env := newWSTestEnv(t)
+	server := env.serverForUser(t, "alice")
+
+	// Dial with matching Origin header
+	dialer := websocket.Dialer{}
+	header := http.Header{}
+	// server.URL is like http://127.0.0.1:PORT — extract host
+	header.Set("Origin", server.URL)
+	conn, _, err := dialer.Dial(wsURL(server), header)
+	if err != nil {
+		t.Fatalf("expected dial to succeed with same origin, got: %v", err)
+	}
+	conn.Close()
+}
+
+func TestWSUpgradeAllowsNoOrigin(t *testing.T) {
+	env := newWSTestEnv(t)
+	server := env.serverForUser(t, "alice")
+
+	// Dial with no Origin header (non-browser client)
+	dialer := websocket.Dialer{}
+	conn, _, err := dialer.Dial(wsURL(server), nil)
+	if err != nil {
+		t.Fatalf("expected dial to succeed with no origin, got: %v", err)
+	}
+	conn.Close()
+}
+
 func TestWSDMListScopedToUser(t *testing.T) {
 	env := newWSTestEnv(t)
 	aliceConn := connectUser(t, env, "alice")
