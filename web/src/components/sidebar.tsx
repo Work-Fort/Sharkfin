@@ -55,25 +55,37 @@ export function ChannelSidebar(props: SidebarProps) {
       </div>
       <div class="sf-channels">
         <div class="sf-section-label">Channels</div>
-        <wf-list>
-          <For each={filteredChannels()}>
-            {(ch) => {
-              const count = () => unreadFor(ch.name)?.unreadCount ?? 0;
-              return (
-                <wf-list-item
-                  active={ch.name === props.activeChannel}
-                  on:wf-select={() => ch.member ? props.onSelectChannel(ch.name) : props.onJoinChannel?.(ch.name)}
-                >
-                  <span class="sf-channel__hash">#</span>
-                  <span class="sf-channel__name" style={ch.member ? undefined : 'font-style: italic; opacity: 0.7;'}>{ch.name}</span>
-                  <Show when={count() > 0}>
-                    <wf-badge data-wf="trailing" count={count()} size="sm" />
-                  </Show>
-                </wf-list-item>
-              );
-            }}
-          </For>
-        </wf-list>
+        <Show when={!props.can || props.can('channel_list')} fallback={
+          <div style="padding: var(--wf-space-sm) var(--wf-space-md); font-size: var(--wf-text-xs); color: var(--wf-color-text-muted);">
+            No channel access
+          </div>
+        }>
+          <wf-list>
+            <For each={filteredChannels()}>
+              {(ch) => {
+                const count = () => unreadFor(ch.name)?.unreadCount ?? 0;
+                return (
+                  <wf-list-item
+                    active={ch.name === props.activeChannel}
+                    on:wf-select={() => {
+                      if (ch.member) {
+                        props.onSelectChannel(ch.name);
+                      } else if (!props.can || props.can('join_channel')) {
+                        props.onJoinChannel?.(ch.name);
+                      }
+                    }}
+                  >
+                    <span class="sf-channel__hash">#</span>
+                    <span class="sf-channel__name" style={ch.member ? undefined : 'font-style: italic; opacity: 0.7;'}>{ch.name}</span>
+                    <Show when={count() > 0}>
+                      <wf-badge data-wf="trailing" count={count()} size="sm" />
+                    </Show>
+                  </wf-list-item>
+                );
+              }}
+            </For>
+          </wf-list>
+        </Show>
 
         <Show when={!props.can || props.can('dm_list')}>
           <div class="sf-section-label" style="display: flex; justify-content: space-between; align-items: center;">

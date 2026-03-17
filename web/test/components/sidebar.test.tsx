@@ -189,6 +189,34 @@ describe('ChannelSidebar', () => {
     expect(dmItems?.length).toBe(1);
   });
 
+  it('shows no channel access when can returns false for channel_list', () => {
+    const el = renderInto(() => (
+      <ChannelSidebar
+        channels={[]} dms={[]} unreads={[]} users={[]}
+        activeChannel="" onSelectChannel={() => {}}
+        currentUsername="me" can={(p) => p !== 'channel_list'}
+      />
+    ));
+    expect(el.textContent).toContain('No channel access');
+  });
+
+  it('does not call onJoinChannel when can returns false for join_channel', () => {
+    const mixedChannels: Channel[] = [
+      { name: 'private', public: false, member: false },
+    ];
+    const onJoin = vi.fn();
+    const el = renderInto(() => (
+      <ChannelSidebar
+        channels={mixedChannels} dms={[]} unreads={[]} users={[]}
+        activeChannel="" onSelectChannel={() => {}} onJoinChannel={onJoin}
+        currentUsername="me" can={(p) => p !== 'join_channel'}
+      />
+    ));
+    const item = el.querySelector('wf-list-item');
+    item?.dispatchEvent(new CustomEvent('wf-select', { bubbles: true }));
+    expect(onJoin).not.toHaveBeenCalled();
+  });
+
   it('shows other participant name in DMs (not current user)', () => {
     const testDms: DM[] = [
       { channel: 'dm-1', participants: ['alice-chen', 'bob-kim'] },
