@@ -87,7 +87,13 @@ function ChatContent() {
         onInvite={() => setInviteOpen(true)}
         can={permissions.can}
       />
-      <MessageArea messages={messages.messages()} />
+      <Show when={permissions.can('history')} fallback={
+        <div class="sf-messages" style="display: flex; align-items: center; justify-content: center; color: var(--wf-color-text-muted); font-size: var(--wf-text-sm);">
+          You don't have permission to view message history.
+        </div>
+      }>
+        <MessageArea messages={messages.messages()} />
+      </Show>
       <TypingIndicator typingUsers={[]} />
       <Show when={permissions.can('send_message')} fallback={
         <div class="sf-typing" style="color: var(--wf-color-text-muted); font-size: var(--wf-text-xs);">

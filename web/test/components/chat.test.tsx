@@ -6,9 +6,12 @@ import { createSignal } from 'solid-js';
 const mocks = vi.hoisted(() => {
   // We can't import solid-js inside vi.hoisted, so we'll create simple getter fns.
   let _activeChannel = '';
+  let _canFn: (p: string) => boolean = () => true;
   return {
     setActiveChannel: (v: string) => { _activeChannel = v; },
     getActiveChannel: () => _activeChannel,
+    setCanFn: (fn: (p: string) => boolean) => { _canFn = fn; },
+    can: (p: string) => _canFn(p),
   };
 });
 
@@ -30,7 +33,7 @@ vi.mock('../../src/stores', async () => {
       messages: { messages, sendMessage: vi.fn().mockResolvedValue(undefined) },
       users: { users, setUsers: () => {} },
       unread: { unreads, totalUnread: () => 0, setUnreads: () => {} },
-      permissions: { can: (p: string) => true, permissions: () => new Set<string>() },
+      permissions: { can: mocks.can, permissions: () => new Set<string>() },
     }),
     connectionState,
     loading,
@@ -47,6 +50,10 @@ function renderInto(component: () => any) {
 }
 
 describe('SharkfinChat', () => {
+  beforeEach(() => {
+    mocks.setCanFn(() => true);
+  });
+
   it('renders main layout structure when connected', async () => {
     const el = renderInto(() => <SharkfinChat connected={true} />);
     // Allow async store initialization (onMount + initApp)
@@ -68,5 +75,12 @@ describe('SharkfinChat', () => {
     expect(banner).toBeTruthy();
     expect(banner?.getAttribute('headline')).toBe('Sign in to use Chat');
     (stores as any).initApp = original;
+  });
+
+  it('shows no-permission message when history permission is denied', async () => {
+    mocks.setCanFn((p: string) => p !== 'history');
+    const el = renderInto(() => <SharkfinChat connected={true} />);
+    await new Promise(r => setTimeout(r, 100));
+    expect(el.textContent).toContain("You don't have permission to view message history.");
   });
 });
