@@ -47,8 +47,13 @@ export async function initApp(): Promise<void> {
   await client.connect();
   setConnectionState('connected');
 
-  // Fetch permissions after connect.
-  client.capabilities().then((perms) => _permissions!.update(perms)).catch(() => {});
+  // Fetch permissions after connect, BEFORE creating stores/rendering.
+  try {
+    const perms = await client.capabilities();
+    _permissions!.update(perms);
+  } catch {
+    // Non-fatal — UI will show no-permission state.
+  }
 
   createRoot((dispose) => {
     _stores = createStores();
