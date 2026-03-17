@@ -1,6 +1,6 @@
 import { For, createEffect } from 'solid-js';
 import type { User } from '@workfort/sharkfin-client';
-import { initials } from '../utils';
+import { initials } from '@workfort/ui';
 
 interface InviteDialogProps {
   channel: string;

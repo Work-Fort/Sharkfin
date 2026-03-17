@@ -27,8 +27,8 @@ importers:
         specifier: workspace:*
         version: link:../clients/ts
       '@workfort/ui':
-        specifier: latest
-        version: 0.1.1
+        specifier: link:/home/kazw/Work/WorkFort/scope/lead/web/packages/ui
+        version: link:../../../scope/lead/web/packages/ui
       '@workfort/ui-solid':
         specifier: link:/home/kazw/Work/WorkFort/scope/lead/web/packages/solid
         version: link:../../../scope/lead/web/packages/solid
@@ -152,9 +152,6 @@ packages:
   '@babel/types@7.29.0':
     resolution: {integrity: sha512-LwdZHpScM4Qz8Xw2iKSzS+cfglZzJGvofQICy7W7v4caru4EaAmyUuO6BGrbyQ2mYV11W0U8j5mBhd14dd3B0A==}
     engines: {node: '>=6.9.0'}
-
-  '@bundled-es-modules/message-format@6.2.4':
-    resolution: {integrity: sha512-NBaIEUCzSjLZjrsmSOh8PJLqQjSpXVuekIOuUT8tt4N/FdtAavWsC1YinIqIrbRnkBqV90OxgKzsxhFCzETQBw==}
 
   '@csstools/color-helpers@5.1.0':
     resolution: {integrity: sha512-S11EXWJyy0Mz5SYvRmY8nJYTFFd1LCNV+7cXyAgQtOOuzb4EsgfqDufL+9esx72/eLhsRdGZwaldu/h+E4t4BA==}
@@ -512,15 +509,6 @@ packages:
   '@jridgewell/trace-mapping@0.3.31':
     resolution: {integrity: sha512-zzNR+SdQSDJzc8joaeP8QQoCQr8NuYx2dIIytl1QeBEZHJ9uW6hebsrYgbz8hJwUQao3TWCMtmfV8Nu1twOLAw==}
 
-  '@lion/ui@0.16.1':
-    resolution: {integrity: sha512-dv9iZNJo7/Yi6EV/Q0ffbrT4yCV6xX2AWlizSvN4gGiUoAS0qC4I7Q6vdpTmeU/Lj/q5dF075oLjX4GuesMj4g==}
-
-  '@lit-labs/ssr-dom-shim@1.5.1':
-    resolution: {integrity: sha512-Aou5UdlSpr5whQe8AA/bZG0jMj96CoJIWbGfZ91qieWu5AWUMKw8VR/pAkQkJYvBNhmCcWnZlyyk5oze8JIqYA==}
-
-  '@lit/reactive-element@2.1.2':
-    resolution: {integrity: sha512-pbCDiVMnne1lYUIaYNN5wrwQXDtHaYtg7YEFPeW+hws6U47WeFvISGUWekPGKWOP1ygrs0ef0o1VJMk1exos5A==}
-
   '@module-federation/dts-plugin@2.2.0':
     resolution: {integrity: sha512-vsoL9z5MjbwdG2H4Z+6ipOnNYKGWNSjb+LHKwKWfi1VC8YP/AzFAqka18+z+hZoTIM676SSrH206kI5NyL4hrA==}
     peerDependencies:
@@ -559,19 +547,10 @@ packages:
     peerDependencies:
       vite: ^5.0.0 || ^6.0.0 || ^7.0.0 || ^8.0.0
 
-  '@open-wc/dedupe-mixin@2.0.1':
-    resolution: {integrity: sha512-+R4VxvceUxHAUJXJQipkkoV9fy10vNo+OnUnGKZnVmcwxMl460KLzytnUM4S35SI073R0yZQp9ra0MbPUwVcEA==}
-
-  '@open-wc/scoped-elements@3.0.6':
-    resolution: {integrity: sha512-w1ayJaUUmBw8tALtqQ6cBueld+op+bufujzbrOdH0uCTXnSQkONYZzOH+9jyQ8auVgKLqcxZ8oU6SzfqQhQkPg==}
-
   '@playwright/test@1.58.2':
     resolution: {integrity: sha512-akea+6bHYBBfA9uQqSYmlJXn61cTa+jbO87xVLCWbTqbWadRVmhxlXATaOjOgcBaWU4ePo0wB41KMFv3o35IXA==}
     engines: {node: '>=18'}
     hasBin: true
-
-  '@popperjs/core@2.11.8':
-    resolution: {integrity: sha512-P1st0aksCrn9sGZhp8GMYwBnQsbvAWsZAX44oXNNvLHGqAOcoVxmjZiohstwQ7SqKnbR47akdNi+uleWD8+g6A==}
 
   '@rollup/pluginutils@5.3.0':
     resolution: {integrity: sha512-5EdhGZtnu3V88ces7s53hhfK5KSASnJZv8Lulpc04cWO3REESroJXg73DFsOmgbU2BhwV0E20bu2IDZb3VKW4Q==}
@@ -744,9 +723,6 @@ packages:
   '@types/node@25.5.0':
     resolution: {integrity: sha512-jp2P3tQMSxWugkCUKLRPVUpGaL5MVFwF8RDuSRztfwgN1wmqJeMSbKlnEtQqU8UrhTmzEmZdu2I6v2dpp7XIxw==}
 
-  '@types/trusted-types@2.0.7':
-    resolution: {integrity: sha512-ScaPdn1dQczgbl0QFTeTOmVHFULt394XJgOQNoyVhZ6r2vLnMLJfBPd53SB52T/3G36VI1/g2MZaX0cwDuXsfw==}
-
   '@types/ws@8.18.1':
     resolution: {integrity: sha512-ThVF6DCVhA8kUGy+aazFQ4kXQ7E1Ty7A3ypFOe0IcJV8O/M511G99AW24irKrW56Wt44yG9+ij8FaqoBGkuBXg==}
 
@@ -778,9 +754,6 @@ packages:
 
   '@vitest/utils@3.2.4':
     resolution: {integrity: sha512-fB2V0JFrQSMsCo9HiSq3Ezpdv4iYaXRG1Sx8edX3MwxfyNn83mKiGzOcH+Fkxt4MHxr3y42fQi1oeAInqgX2QA==}
-
-  '@workfort/ui@0.1.1':
-    resolution: {integrity: sha512-vPHV6ZS2D7Hm5qWnAG0Wd7BknTEAEF6RTyhLI5uu+FkK2YJ0jRsQGKj7Ix2DCNmM2zLl+UR9nnYroNS/RMJKnw==}
 
   acorn@8.16.0:
     resolution: {integrity: sha512-UVJyE9MttOsBQIDKw1skb9nAwQuR5wuGD3+82K6JgJlm/Y+KI92oNsMNGZCYdDsVtRHSak0pcV5Dno5+4jh9sw==}
@@ -816,13 +789,6 @@ packages:
   at-least-node@1.0.0:
     resolution: {integrity: sha512-+q/t7Ekv1EDY2l6Gda6LLiX14rU9TV20Wa3ofeQmwPFZbOMo9DXrLbOjFaaclkXKWidIaopwAObQDqwWtGUjqg==}
     engines: {node: '>= 4.0.0'}
-
-  autosize@6.0.1:
-    resolution: {integrity: sha512-f86EjiUKE6Xvczc4ioP1JBlWG7FKrE13qe/DxBCpe8GCipCq2nFw73aO8QEBKHfSbYGDN5eB9jXWKen7tspDqQ==}
-
-  awesome-phonenumber@6.12.0:
-    resolution: {integrity: sha512-17Ts/ceWeWXzWZqTIRKA48y3+OyxYsAXYzuxYCn4n0+By+W0dcHk3fHszW6lLxAlCZt3VmVKY6n9AxOCU84qNw==}
-    engines: {node: '>=18'}
 
   axios@1.13.6:
     resolution: {integrity: sha512-ChTCHMouEe2kn713WHbQGcuYrr6fXTBiu460OTwWrWob16g1bXn4vtz07Ope7ewMozJAnEquLk5lWQWtBig9DQ==}
@@ -1128,9 +1094,6 @@ packages:
     resolution: {integrity: sha512-vK9P5/iUfdl95AI+JVyUuIcVtd4ofvtrOr3HNtM2yxC9bnMbEdp3x01OhQNnjb8IJYi38VlTE3mBXwcfvywuSw==}
     engines: {node: '>= 14'}
 
-  ibantools@4.5.1:
-    resolution: {integrity: sha512-DfKQpLlFq9yEUIEnFuCJzss3XavD7iHZTU5PyqXiAJ+rmaMp+NFP3hboumHKuK8nZjuOJg93WemTzcQ5b9jOZA==}
-
   iconv-lite@0.6.3:
     resolution: {integrity: sha512-4fCk79wshMdzMp2rH06qWrJE4iolqLhCUH+OiuIgU++RB0+94NlDL81atO7GX55uUKueo0txHNtvEyI6D7WdMw==}
     engines: {node: '>=0.10.0'}
@@ -1205,15 +1168,6 @@ packages:
 
   lines-and-columns@1.2.4:
     resolution: {integrity: sha512-7ylylesZQ/PV29jhEDl3Ufjo6ZX7gCqJr5F7PKrqc93v7fzSymt1BpwEU8nAUXs8qzzvqhbjhK5QZg6Mt/HkBg==}
-
-  lit-element@4.2.2:
-    resolution: {integrity: sha512-aFKhNToWxoyhkNDmWZwEva2SlQia+jfG0fjIWV//YeTaWrVnOxD89dPKfigCUspXFmjzOEUQpOkejH5Ly6sG0w==}
-
-  lit-html@3.3.2:
-    resolution: {integrity: sha512-Qy9hU88zcmaxBXcc10ZpdK7cOLXvXpRoBxERdtqV9QOrfpMZZ6pSYP91LhpPtap3sFMUiL7Tw2RImbe0Al2/kw==}
-
-  lit@3.3.2:
-    resolution: {integrity: sha512-NF9zbsP79l4ao2SNrH3NkfmFgN/hBYSQo90saIVI1o5GpjAdCPVstVzO1MrLOakHoEhYkrtRjPK6Ob521aoYWQ==}
 
   load-tsconfig@0.2.5:
     resolution: {integrity: sha512-IXO6OCs9yg8tMKzfPZ1YmheJbZCiEsnBdcB03l0OcfK9prKnJb96siuHCr5Fl37/yo9DnKU+TLpxzTUspw9shg==}
@@ -1415,9 +1369,6 @@ packages:
 
   siginfo@2.0.0:
     resolution: {integrity: sha512-ybx0WO1/8bSBLEWXZvEd7gMW3Sn3JFlW3TvX1nREbDLRNQNaeNN8WK0meBwPdAaOI7TtRRRJn/Es1zhrrCHu7g==}
-
-  singleton-manager@1.8.0:
-    resolution: {integrity: sha512-1M3qImeT5j74a/GtRwM8Q+JOMwhiNRE/uJtIu+U6LBgbRvl9reoeFbQ+ZALR0CwCqg2hhwmLAGZ9KuxefuIWlA==}
 
   solid-js@1.9.11:
     resolution: {integrity: sha512-WEJtcc5mkh/BnHA6Yrg4whlF8g6QwpmXXRg4P2ztPmcKeHHlH4+djYecBLhSpecZY2RRECXYUwIc/C2r3yzQ4Q==}
@@ -1838,8 +1789,6 @@ snapshots:
       '@babel/helper-string-parser': 7.27.1
       '@babel/helper-validator-identifier': 7.28.5
 
-  '@bundled-es-modules/message-format@6.2.4': {}
-
   '@csstools/color-helpers@5.1.0': {}
 
   '@csstools/css-calc@2.1.4(@csstools/css-parser-algorithms@3.0.5(@csstools/css-tokenizer@3.0.4))(@csstools/css-tokenizer@3.0.4)':
@@ -2035,24 +1984,6 @@ snapshots:
       '@jridgewell/resolve-uri': 3.1.2
       '@jridgewell/sourcemap-codec': 1.5.5
 
-  '@lion/ui@0.16.1':
-    dependencies:
-      '@bundled-es-modules/message-format': 6.2.4
-      '@open-wc/dedupe-mixin': 2.0.1
-      '@open-wc/scoped-elements': 3.0.6
-      '@popperjs/core': 2.11.8
-      autosize: 6.0.1
-      awesome-phonenumber: 6.12.0
-      ibantools: 4.5.1
-      lit: 3.3.2
-      singleton-manager: 1.8.0
-
-  '@lit-labs/ssr-dom-shim@1.5.1': {}
-
-  '@lit/reactive-element@2.1.2':
-    dependencies:
-      '@lit-labs/ssr-dom-shim': 1.5.1
-
   '@module-federation/dts-plugin@2.2.0(typescript@5.9.3)':
     dependencies:
       '@module-federation/error-codes': 2.2.0
@@ -2128,18 +2059,9 @@ snapshots:
       - utf-8-validate
       - vue-tsc
 
-  '@open-wc/dedupe-mixin@2.0.1': {}
-
-  '@open-wc/scoped-elements@3.0.6':
-    dependencies:
-      '@open-wc/dedupe-mixin': 2.0.1
-      lit: 3.3.2
-
   '@playwright/test@1.58.2':
     dependencies:
       playwright: 1.58.2
-
-  '@popperjs/core@2.11.8': {}
 
   '@rollup/pluginutils@5.3.0(rollup@4.59.0)':
     dependencies:
@@ -2258,8 +2180,6 @@ snapshots:
     dependencies:
       undici-types: 7.18.2
 
-  '@types/trusted-types@2.0.7': {}
-
   '@types/ws@8.18.1':
     dependencies:
       '@types/node': 25.5.0
@@ -2306,11 +2226,6 @@ snapshots:
       loupe: 3.2.1
       tinyrainbow: 2.0.0
 
-  '@workfort/ui@0.1.1':
-    dependencies:
-      '@lion/ui': 0.16.1
-      lit: 3.3.2
-
   acorn@8.16.0: {}
 
   adm-zip@0.5.16: {}
@@ -2330,10 +2245,6 @@ snapshots:
   asynckit@0.4.0: {}
 
   at-least-node@1.0.0: {}
-
-  autosize@6.0.1: {}
-
-  awesome-phonenumber@6.12.0: {}
 
   axios@1.13.6:
     dependencies:
@@ -2674,8 +2585,6 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  ibantools@4.5.1: {}
-
   iconv-lite@0.6.3:
     dependencies:
       safer-buffer: 2.1.2
@@ -2751,22 +2660,6 @@ snapshots:
   lilconfig@3.1.3: {}
 
   lines-and-columns@1.2.4: {}
-
-  lit-element@4.2.2:
-    dependencies:
-      '@lit-labs/ssr-dom-shim': 1.5.1
-      '@lit/reactive-element': 2.1.2
-      lit-html: 3.3.2
-
-  lit-html@3.3.2:
-    dependencies:
-      '@types/trusted-types': 2.0.7
-
-  lit@3.3.2:
-    dependencies:
-      '@lit/reactive-element': 2.1.2
-      lit-element: 4.2.2
-      lit-html: 3.3.2
 
   load-tsconfig@0.2.5: {}
 
@@ -2956,8 +2849,6 @@ snapshots:
   seroval@1.5.1: {}
 
   siginfo@2.0.0: {}
-
-  singleton-manager@1.8.0: {}
 
   solid-js@1.9.11:
     dependencies:

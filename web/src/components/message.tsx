@@ -1,11 +1,5 @@
 import { Show } from 'solid-js';
-import { initials } from '../utils';
-
-/** Format ISO timestamp to HH:MM. */
-function formatTime(iso: string): string {
-  const d = new Date(iso);
-  return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
-}
+import { initials, formatTime } from '@workfort/ui';
 
 interface MessageProps {
   from: string;

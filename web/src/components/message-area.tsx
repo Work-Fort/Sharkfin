@@ -1,20 +1,7 @@
 import { For, createEffect, on } from 'solid-js';
 import type { Message as Msg } from '@workfort/sharkfin-client';
+import { formatDateLabel, isSameDay } from '@workfort/ui';
 import { Message } from './message';
-
-function formatDateLabel(iso: string): string {
-  const d = new Date(iso);
-  const today = new Date();
-  if (d.toDateString() === today.toDateString()) return 'Today';
-  const yesterday = new Date(today);
-  yesterday.setDate(today.getDate() - 1);
-  if (d.toDateString() === yesterday.toDateString()) return 'Yesterday';
-  return d.toLocaleDateString(undefined, { month: 'long', day: 'numeric', year: 'numeric' });
-}
-
-function isSameDay(a: string, b: string): boolean {
-  return new Date(a).toDateString() === new Date(b).toDateString();
-}
 
 interface MessageAreaProps {
   messages: Msg[];

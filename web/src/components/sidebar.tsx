@@ -1,6 +1,6 @@
 import { createSignal, For, Show } from 'solid-js';
 import type { Channel, DM, UnreadCount, User } from '@workfort/sharkfin-client';
-import { initials } from '../utils';
+import { initials } from '@workfort/ui';
 
 interface SidebarProps {
   channels: Channel[];
