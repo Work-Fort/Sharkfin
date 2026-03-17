@@ -1,6 +1,4 @@
-import { For, createEffect } from 'solid-js';
 import type { User } from '@workfort/sharkfin-client';
-import { initials } from '@workfort/ui';
 
 interface InviteDialogProps {
   channel: string;
@@ -11,27 +9,13 @@ interface InviteDialogProps {
 }
 
 export function InviteDialog(props: InviteDialogProps) {
-  let dialogRef!: HTMLElement & { show(): void; hide(): void };
-
-  createEffect(() => {
-    if (props.open) dialogRef?.show?.();
-    else dialogRef?.hide?.();
-  });
-
   return (
-    <wf-dialog ref={dialogRef} header={`Invite to #${props.channel}`} on:wf-close={props.onClose}>
-      <wf-list>
-        <For each={props.users}>
-          {(user) => (
-            <wf-list-item on:wf-select={() => props.onInvite(props.channel, user.username)}>
-              <div class="sf-dm__avatar" style="margin-right: var(--wf-space-sm);">
-                {initials(user.username)}
-              </div>
-              <span>{user.username}</span>
-            </wf-list-item>
-          )}
-        </For>
-      </wf-list>
-    </wf-dialog>
+    <wf-user-picker
+      header={`Invite to #${props.channel}`}
+      open={props.open}
+      users={props.users}
+      on:wf-select={(e: CustomEvent) => props.onInvite(props.channel, e.detail.username)}
+      on:wf-close={props.onClose}
+    />
   );
 }

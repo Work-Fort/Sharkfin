@@ -15,22 +15,25 @@ describe('InviteDialog', () => {
     { username: 'bob', online: false, type: 'agent' },
   ];
 
-  it('renders dialog with user list', () => {
+  it('renders wf-user-picker with header', () => {
     const el = renderInto(() => (
       <InviteDialog channel="private-ch" users={users} open={true} onInvite={() => {}} onClose={() => {}} />
     ));
-    expect(el.querySelector('wf-dialog')).toBeTruthy();
-    const items = el.querySelectorAll('wf-list-item');
-    expect(items.length).toBe(2);
+    const picker = el.querySelector('wf-user-picker') as any;
+    expect(picker).toBeTruthy();
+    expect(picker.header).toBe('Invite to #private-ch');
   });
 
-  it('calls onInvite with channel and username', () => {
+  it('calls onInvite with channel and username on wf-select', () => {
     const onInvite = vi.fn();
     const el = renderInto(() => (
       <InviteDialog channel="private-ch" users={users} open={true} onInvite={onInvite} onClose={() => {}} />
     ));
-    const firstItem = el.querySelector('wf-list-item') as HTMLElement;
-    firstItem?.dispatchEvent(new CustomEvent('wf-select', { bubbles: true }));
+    const picker = el.querySelector('wf-user-picker') as HTMLElement;
+    picker.dispatchEvent(new CustomEvent('wf-select', {
+      bubbles: true,
+      detail: { username: 'alice' },
+    }));
     expect(onInvite).toHaveBeenCalledWith('private-ch', 'alice');
   });
 });
