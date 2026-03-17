@@ -1,7 +1,7 @@
 import { Show, createEffect, createSignal, onMount, onCleanup } from 'solid-js';
 import '../styles/chat.css';
 import { initApp, getStores, connectionState, loading } from '../stores';
-import { useIdleDetection } from '../hooks/use-idle';
+import { useIdleDetection } from '@workfort/ui-solid';
 import { getClient } from '../client';
 import { ChannelHeader } from './channel-header';
 import { MessageArea } from './message-area';
@@ -19,8 +19,11 @@ export function SharkfinChat(props: SharkfinChatProps) {
   onMount(async () => {
     try {
       await initApp();
-      const disposeIdle = useIdleDetection(getClient());
-      onCleanup(disposeIdle);
+      const client = getClient();
+      useIdleDetection({
+        onActive: () => client.setState('active').catch(() => {}),
+        onIdle: () => client.setState('idle').catch(() => {}),
+      });
     } catch {
       setInitFailed(true);
     }
@@ -32,8 +35,11 @@ export function SharkfinChat(props: SharkfinChatProps) {
       setInitFailed(false);
       initApp()
         .then(() => {
-          const disposeIdle = useIdleDetection(getClient());
-          onCleanup(disposeIdle);
+          const client = getClient();
+          useIdleDetection({
+            onActive: () => client.setState('active').catch(() => {}),
+            onIdle: () => client.setState('idle').catch(() => {}),
+          });
         })
         .catch(() => setInitFailed(true));
     }
