@@ -67,7 +67,14 @@ export class SharkfinClient extends Emitter {
     }
 
     const WS = this.opts.WebSocket ?? WebSocket;
-    const ws = new WS(this.url, { headers } as any);
+    // The native browser WebSocket doesn't support custom headers —
+    // the second argument is treated as subprotocols. Only pass the
+    // options object when a custom WebSocket implementation (e.g., 'ws'
+    // in Node.js) is provided, or when there are headers to send.
+    const hasHeaders = Object.keys(headers).length > 0;
+    const ws = hasHeaders && this.opts.WebSocket
+      ? new WS(this.url, { headers } as any)
+      : new WS(this.url);
     this.ws = ws;
 
     await new Promise<void>((resolve, reject) => {

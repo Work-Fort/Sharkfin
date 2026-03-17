@@ -298,6 +298,22 @@ This needs investigation — check how the scope team's own MF remotes (if any) 
 
 ---
 
+## Issue 11: SharkfinClient WebSocket constructor fails in browser
+
+**Step:** Sharkfin UI attempts to connect WebSocket after sign-in
+
+**What happened:** `SharkfinClient.connect()` calls `new WebSocket(url, { headers } as any)`. In Node.js (with the `ws` package), the second argument is an options object. In the browser, the native `WebSocket` constructor treats the second argument as subprotocols. Passing `{ headers: {...} }` causes: `Failed to construct 'WebSocket': The subprotocol '[object Object]' is invalid.`
+
+**Impact:** The Sharkfin web UI cannot connect to the daemon via the BFF. `initApp()` throws and the UI shows "Sign in to use Chat" even when the user is authenticated.
+
+**Root cause:** `clients/ts/src/client.ts:70` — `new WS(this.url, { headers } as any)` is not browser-compatible.
+
+**Fix:** Only pass the options object when a custom WebSocket implementation is provided (Node.js) and there are headers to send. Browser connections go through the BFF which handles auth via cookie conversion — no Authorization header needed on the WebSocket.
+
+**Owning service:** Sharkfin (client library)
+
+---
+
 **All blockers resolved.** The Sharkfin MF remote loads in the shell. The UI renders its loading/disconnected state correctly. Full chat functionality requires browser-side auth (user signs in via Passport, BFF converts session to JWT for WS proxy).
 
 ### Verification Screenshot
