@@ -9,6 +9,12 @@ import { createPermissionStore } from './permissions';
 const [connectionState, setConnectionState] = createSignal<'connecting' | 'connected' | 'disconnected'>('connecting');
 const [loading, setLoading] = createSignal(true);
 
+// Permissions are created at module level (outside createRoot) so that
+// SolidJS components in the shell's render tree can track the signal.
+// Signals created inside createRoot are isolated and not tracked by
+// computations outside that root.
+let _permissions: ReturnType<typeof createPermissionStore> | null = null;
+
 let _stores: ReturnType<typeof createStores> | null = null;
 let _dispose: (() => void) | null = null;
 
@@ -18,12 +24,14 @@ function createStores() {
   const messages = createMessageStore(client, channels.activeChannel);
   const users = createUserStore(client);
   const unread = createUnreadStore(client, channels.activeChannel);
-  const permissions = createPermissionStore(client);
-  return { channels, messages, users, unread, permissions };
+  return { channels, messages, users, unread, permissions: _permissions! };
 }
 
 export async function initApp(): Promise<void> {
   const client = getClient();
+
+  // Create permissions outside createRoot for cross-tree reactivity.
+  _permissions = createPermissionStore(client);
 
   client.on('disconnect', () => setConnectionState('disconnected'));
   client.on('reconnect', () => {

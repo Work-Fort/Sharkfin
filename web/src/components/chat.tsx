@@ -82,6 +82,10 @@ function ChatContent() {
   const canHistory = createMemo(() => permissions.can('history'));
   const canSend = createMemo(() => permissions.can('send_message'));
 
+  createEffect(() => {
+    console.log('[sharkfin] canHistory memo:', canHistory(), 'canSend memo:', canSend());
+  });
+
   async function handleInvite(channel: string, username: string) {
     setInviteOpen(false);
     await getClient().inviteToChannel(channel, username);
