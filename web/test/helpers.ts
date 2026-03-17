@@ -24,6 +24,7 @@ export function createMockClient() {
     markRead: vi.fn().mockResolvedValue(undefined),
     dmList: vi.fn().mockResolvedValue([]),
     dmOpen: vi.fn().mockResolvedValue({ channel: 'dm-1', participant: 'user', created: false }),
+    capabilities: vi.fn().mockResolvedValue([]),
     connect: vi.fn().mockResolvedValue(undefined),
     close: vi.fn(),
     /** Emit an event to all registered listeners (test-only). */

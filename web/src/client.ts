@@ -7,8 +7,11 @@ import { SharkfinClient } from '@workfort/sharkfin-client';
 export function getWebSocketUrl(): string {
   const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
   const match = location.pathname.match(/^\/forts\/([^/]+)/);
-  const fort = match?.[1] ?? '';
-  return `${proto}//${location.host}/forts/${fort}/api/sharkfin/ws`;
+  if (match) {
+    return `${proto}//${location.host}/forts/${match[1]}/api/sharkfin/ws`;
+  }
+  // Direct daemon access (e2e tests, standalone mode).
+  return `${proto}//${location.host}/ws`;
 }
 
 let _client: SharkfinClient | null = null;

@@ -1,19 +1,70 @@
-import { Show, createEffect } from 'solid-js';
+import { Show, createEffect, createSignal, onMount, onCleanup } from 'solid-js';
 import '../styles/chat.css';
-import { getStores } from '../stores';
+import { initApp, getStores, connectionState, loading } from '../stores';
+import { useIdleDetection } from '../hooks/use-idle';
+import { getClient } from '../client';
 import { ChannelHeader } from './channel-header';
 import { MessageArea } from './message-area';
 import { TypingIndicator } from './typing-indicator';
 import { InputBar } from './input-bar';
+import { InviteDialog } from './invite-dialog';
 
 interface SharkfinChatProps {
   connected: boolean;
 }
 
 export function SharkfinChat(props: SharkfinChatProps) {
-  const { channels, messages } = getStores();
+  const [initFailed, setInitFailed] = createSignal(false);
 
-  // Auto-select first channel once loaded.
+  onMount(async () => {
+    try {
+      await initApp();
+      const disposeIdle = useIdleDetection(getClient());
+      onCleanup(disposeIdle);
+    } catch {
+      setInitFailed(true);
+    }
+  });
+
+  // Retry when connected flips to true after auth failure.
+  createEffect(() => {
+    if (props.connected && initFailed()) {
+      setInitFailed(false);
+      initApp()
+        .then(() => {
+          const disposeIdle = useIdleDetection(getClient());
+          onCleanup(disposeIdle);
+        })
+        .catch(() => setInitFailed(true));
+    }
+  });
+
+  return (
+    <div class="sf-main">
+      <Show when={initFailed()}>
+        <wf-banner variant="info" headline="Sign in to use Chat" />
+      </Show>
+      <Show when={!initFailed() && loading()}>
+        <div style="padding: var(--wf-space-lg);">
+          <wf-skeleton width="100%" height="2rem" />
+          <wf-skeleton width="100%" height="200px" style="margin-top: var(--wf-space-md);" />
+          <wf-skeleton width="60%" height="1rem" style="margin-top: var(--wf-space-md);" />
+        </div>
+      </Show>
+      <Show when={!initFailed() && !loading() && connectionState() !== 'connecting'}>
+        <Show when={connectionState() === 'disconnected'}>
+          <wf-banner variant="warning" headline="Connection lost. Reconnecting\u2026" />
+        </Show>
+        <ChatContent />
+      </Show>
+    </div>
+  );
+}
+
+function ChatContent() {
+  const { channels, messages, users, permissions } = getStores();
+  const [inviteOpen, setInviteOpen] = createSignal(false);
+
   createEffect(() => {
     const chs = channels.channels();
     if (chs.length > 0 && !channels.activeChannel()) {
@@ -21,19 +72,40 @@ export function SharkfinChat(props: SharkfinChatProps) {
     }
   });
 
+  const activeChannelObj = () => channels.channels().find(c => c.name === channels.activeChannel());
+
+  async function handleInvite(channel: string, username: string) {
+    setInviteOpen(false);
+    await getClient().inviteToChannel(channel, username);
+  }
+
   return (
-    <div class="sf-main">
-      <Show when={props.connected} fallback={
-        <wf-banner variant="warning" headline="Chat is reconnecting\u2026" />
+    <>
+      <ChannelHeader
+        name={channels.activeChannel()}
+        isPublic={activeChannelObj()?.public ?? true}
+        onInvite={() => setInviteOpen(true)}
+        can={permissions.can}
+      />
+      <MessageArea messages={messages.messages()} />
+      <TypingIndicator typingUsers={[]} />
+      <Show when={permissions.can('send_message')} fallback={
+        <div class="sf-typing" style="color: var(--wf-color-text-muted); font-size: var(--wf-text-xs);">
+          You don't have permission to send messages.
+        </div>
       }>
-        <ChannelHeader name={channels.activeChannel()} />
-        <MessageArea messages={messages.messages()} />
-        <TypingIndicator typingUsers={[]} />
         <InputBar
           channel={channels.activeChannel()}
           onSend={(body) => messages.sendMessage(body)}
         />
       </Show>
-    </div>
+      <InviteDialog
+        channel={channels.activeChannel()}
+        users={users.users()}
+        open={inviteOpen()}
+        onInvite={handleInvite}
+        onClose={() => setInviteOpen(false)}
+      />
+    </>
   );
 }

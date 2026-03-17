@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"time"
 
 	"github.com/charmbracelet/log"
@@ -15,7 +16,17 @@ import (
 )
 
 var upgrader = websocket.Upgrader{
-	CheckOrigin: func(r *http.Request) bool { return true },
+	CheckOrigin: func(r *http.Request) bool {
+		origin := r.Header.Get("Origin")
+		if origin == "" {
+			return true // same-origin or non-browser client
+		}
+		u, err := url.Parse(origin)
+		if err != nil {
+			return false
+		}
+		return u.Host == r.Host
+	},
 }
 
 // WSHandler handles WebSocket connections for non-MCP clients.
@@ -513,6 +524,16 @@ func (h *WSHandler) handleWSHistory(sendCh chan<- []byte, ref string, rawD json.
 		return
 	}
 
+	isMember, err := h.store.IsChannelMember(ch.ID, identityID)
+	if err != nil {
+		sendError(sendCh, ref, err.Error())
+		return
+	}
+	if !isMember {
+		sendError(sendCh, ref, "you are not a participant of this channel")
+		return
+	}
+
 	if d.Limit <= 0 {
 		d.Limit = 50
 	}
@@ -626,18 +647,18 @@ func (h *WSHandler) handleWSUnreadCounts(sendCh chan<- []byte, ref string, ident
 }
 
 func (h *WSHandler) handleWSDMList(sendCh chan<- []byte, ref string, identityID string) {
-	dms, err := h.store.ListAllDMs()
+	dms, err := h.store.ListDMsForUser(identityID)
 	if err != nil {
 		sendError(sendCh, ref, err.Error())
 		return
 	}
 	type dmInfo struct {
-		Channel      string   `json:"channel"`
-		Participants []string `json:"participants"`
+		Channel     string `json:"channel"`
+		Participant string `json:"participant"`
 	}
 	var list []dmInfo
 	for _, dm := range dms {
-		list = append(list, dmInfo{Channel: dm.ChannelName, Participants: []string{dm.User1Username, dm.User2Username}})
+		list = append(list, dmInfo{Channel: dm.ChannelName, Participant: dm.OtherUsername})
 	}
 	sendReply(sendCh, ref, true, map[string]interface{}{"dms": list})
 }

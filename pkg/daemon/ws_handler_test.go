@@ -364,12 +364,20 @@ func TestWSHistoryNonParticipant(t *testing.T) {
 		"name": "secret", "public": false,
 	}, "c1")
 
-	// WS has admin-like access: non-members can read history
+	// Non-members must NOT be able to read history
 	resp := wsReq(t, bobConn, "history", map[string]interface{}{
 		"channel": "secret",
 	}, "h2")
-	if resp.OK == nil || !*resp.OK {
-		t.Error("expected ok: WS should allow history for non-members")
+	if resp.OK != nil && *resp.OK {
+		t.Error("expected error: bob is not a participant of secret channel")
+	}
+	d, _ := json.Marshal(resp.D)
+	var result struct {
+		Message string `json:"message"`
+	}
+	json.Unmarshal(d, &result)
+	if result.Message != "you are not a participant of this channel" {
+		t.Errorf("error = %q, want 'you are not a participant of this channel'", result.Message)
 	}
 }
 
@@ -722,5 +730,87 @@ func TestWSSendMessageWithMentionGroup(t *testing.T) {
 	json.Unmarshal(d, &msg)
 	if len(msg.Mentions) == 0 {
 		t.Error("expected mentions from group expansion")
+	}
+}
+
+func TestWSUpgradeRejectsMismatchedOrigin(t *testing.T) {
+	env := newWSTestEnv(t)
+	server := env.serverForUser(t, "alice")
+
+	// Dial with a mismatched Origin header
+	dialer := websocket.Dialer{}
+	header := http.Header{}
+	header.Set("Origin", "http://evil.example.com")
+	_, resp, err := dialer.Dial(wsURL(server), header)
+	if err == nil {
+		t.Fatal("expected dial to fail with mismatched origin")
+	}
+	if resp != nil && resp.StatusCode != http.StatusForbidden {
+		t.Errorf("status = %d, want 403", resp.StatusCode)
+	}
+}
+
+func TestWSUpgradeAllowsSameOrigin(t *testing.T) {
+	env := newWSTestEnv(t)
+	server := env.serverForUser(t, "alice")
+
+	// Dial with matching Origin header
+	dialer := websocket.Dialer{}
+	header := http.Header{}
+	// server.URL is like http://127.0.0.1:PORT — extract host
+	header.Set("Origin", server.URL)
+	conn, _, err := dialer.Dial(wsURL(server), header)
+	if err != nil {
+		t.Fatalf("expected dial to succeed with same origin, got: %v", err)
+	}
+	conn.Close()
+}
+
+func TestWSUpgradeAllowsNoOrigin(t *testing.T) {
+	env := newWSTestEnv(t)
+	server := env.serverForUser(t, "alice")
+
+	// Dial with no Origin header (non-browser client)
+	dialer := websocket.Dialer{}
+	conn, _, err := dialer.Dial(wsURL(server), nil)
+	if err != nil {
+		t.Fatalf("expected dial to succeed with no origin, got: %v", err)
+	}
+	conn.Close()
+}
+
+func TestWSDMListScopedToUser(t *testing.T) {
+	env := newWSTestEnv(t)
+	aliceConn := connectUser(t, env, "alice")
+	grantAdmin(t, env, "alice")
+	bobConn := connectUser(t, env, "bob")
+	connectUser(t, env, "charlie")
+
+	// Alice opens DMs with Bob and Charlie
+	wsReq(t, aliceConn, "dm_open", map[string]interface{}{
+		"username": "bob",
+	}, "d1")
+	wsReq(t, aliceConn, "dm_open", map[string]interface{}{
+		"username": "charlie",
+	}, "d2")
+
+	// Bob should only see the alice-bob DM
+	resp := wsReq(t, bobConn, "dm_list", map[string]interface{}{}, "dl1")
+	if resp.OK == nil || !*resp.OK {
+		t.Fatalf("expected ok, got %+v", resp)
+	}
+	d, _ := json.Marshal(resp.D)
+	var result struct {
+		DMs []struct {
+			Channel     string `json:"channel"`
+			Participant string `json:"participant"`
+		} `json:"dms"`
+	}
+	json.Unmarshal(d, &result)
+	if len(result.DMs) != 1 {
+		t.Fatalf("bob should see 1 DM, got %d", len(result.DMs))
+	}
+	if result.DMs[0].Participant != "alice" {
+		t.Errorf("participant = %q, want alice", result.DMs[0].Participant)
 	}
 }

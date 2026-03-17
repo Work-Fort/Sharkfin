@@ -16,6 +16,7 @@ import (
 	authapikey "github.com/Work-Fort/Passport/go/service-auth/apikey"
 	authjwt "github.com/Work-Fort/Passport/go/service-auth/jwt"
 	"github.com/Work-Fort/sharkfin/pkg/domain"
+	"github.com/Work-Fort/sharkfin/web"
 )
 
 type Server struct {
@@ -57,7 +58,7 @@ func NewServer(ctx context.Context, addr string, store domain.Store, pongTimeout
 	)
 
 	mux := http.NewServeMux()
-	registerUIRoutes(mux, uiDir)
+	registerUIRoutes(mux, uiDir, web.Dist)
 	mux.Handle("/mcp", mw(mcpTransport))
 	mux.Handle("GET /presence", mw(presenceHandler))
 	mux.Handle("GET /ws", mw(wsHandler))

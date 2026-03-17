@@ -2,16 +2,18 @@
 package daemon
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
+	"testing/fstest"
 )
 
-func TestUIHealthReturns200(t *testing.T) {
+func TestUIHealthReturnsManifest(t *testing.T) {
 	mux := http.NewServeMux()
-	registerUIRoutes(mux, "")
+	registerUIRoutes(mux, "", nil)
 
 	req := httptest.NewRequest("GET", "/ui/health", nil)
 	rec := httptest.NewRecorder()
@@ -19,6 +21,26 @@ func TestUIHealthReturns200(t *testing.T) {
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+	if ct := rec.Header().Get("Content-Type"); ct != "application/json" {
+		t.Fatalf("expected application/json, got %s", ct)
+	}
+
+	var health uiHealthResponse
+	if err := json.NewDecoder(rec.Body).Decode(&health); err != nil {
+		t.Fatalf("decode health response: %v", err)
+	}
+	if health.Name != "sharkfin" {
+		t.Fatalf("expected name=sharkfin, got %s", health.Name)
+	}
+	if health.Label != "Chat" {
+		t.Fatalf("expected label=Chat, got %s", health.Label)
+	}
+	if health.Route != "/chat" {
+		t.Fatalf("expected route=/chat, got %s", health.Route)
+	}
+	if len(health.WSPaths) != 2 || health.WSPaths[0] != "/ws" || health.WSPaths[1] != "/presence" {
+		t.Fatalf("expected ws_paths=[/ws, /presence], got %v", health.WSPaths)
 	}
 }
 
@@ -29,7 +51,7 @@ func TestUIStaticFileServing(t *testing.T) {
 	}
 
 	mux := http.NewServeMux()
-	registerUIRoutes(mux, dir)
+	registerUIRoutes(mux, dir, nil)
 
 	req := httptest.NewRequest("GET", "/ui/test.js", nil)
 	rec := httptest.NewRecorder()
@@ -45,7 +67,7 @@ func TestUIStaticFileServing(t *testing.T) {
 
 func TestUINoStaticWhenDirEmpty(t *testing.T) {
 	mux := http.NewServeMux()
-	registerUIRoutes(mux, "")
+	registerUIRoutes(mux, "", nil)
 
 	req := httptest.NewRequest("GET", "/ui/test.js", nil)
 	rec := httptest.NewRecorder()
@@ -53,5 +75,25 @@ func TestUINoStaticWhenDirEmpty(t *testing.T) {
 
 	if rec.Code == http.StatusOK {
 		t.Fatalf("expected non-200 when uiDir is empty, got %d", rec.Code)
+	}
+}
+
+func TestUIEmbeddedFS(t *testing.T) {
+	fsys := fstest.MapFS{
+		"dist/test.js": &fstest.MapFile{Data: []byte("embedded")},
+	}
+
+	mux := http.NewServeMux()
+	registerUIRoutes(mux, "", fsys)
+
+	req := httptest.NewRequest("GET", "/ui/test.js", nil)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+	if body := rec.Body.String(); body != "embedded" {
+		t.Fatalf("unexpected body: %s", body)
 	}
 }

@@ -1,4 +1,4 @@
-import { createSignal, createEffect, type Accessor } from 'solid-js';
+import { createSignal, createEffect, onCleanup, type Accessor } from 'solid-js';
 import type { SharkfinClient, UnreadCount, BroadcastMessage } from '@workfort/sharkfin-client';
 
 export function createUnreadStore(client: SharkfinClient, activeChannel: Accessor<string>) {
@@ -16,7 +16,7 @@ export function createUnreadStore(client: SharkfinClient, activeChannel: Accesso
   }).catch(() => {});
 
   // Increment count for messages arriving in non-active channels.
-  client.on('message', (msg: BroadcastMessage) => {
+  const handler = (msg: BroadcastMessage) => {
     if (msg.channel !== activeChannel()) {
       setUnreads((prev) =>
         prev.map((u) =>
@@ -26,7 +26,9 @@ export function createUnreadStore(client: SharkfinClient, activeChannel: Accesso
         ),
       );
     }
-  });
+  };
+  client.on('message', handler);
+  onCleanup(() => client.off('message', handler));
 
   // Mark read and reset counts when switching channels.
   createEffect(() => {
@@ -42,5 +44,5 @@ export function createUnreadStore(client: SharkfinClient, activeChannel: Accesso
 
   const totalUnread = () => unreads().reduce((sum, u) => sum + u.unreadCount, 0);
 
-  return { unreads, totalUnread };
+  return { unreads, totalUnread, setUnreads };
 }

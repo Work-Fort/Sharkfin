@@ -1,4 +1,4 @@
-import { createSignal } from 'solid-js';
+import { createSignal, onCleanup } from 'solid-js';
 import type { SharkfinClient, User, PresenceUpdate } from '@workfort/sharkfin-client';
 
 export function createUserStore(client: SharkfinClient) {
@@ -6,7 +6,7 @@ export function createUserStore(client: SharkfinClient) {
 
   client.users().then(setUsers).catch(() => {});
 
-  client.on('presence', (update: PresenceUpdate) => {
+  const handler = (update: PresenceUpdate) => {
     setUsers((prev) =>
       prev.map((u) =>
         u.username === update.username
@@ -14,7 +14,9 @@ export function createUserStore(client: SharkfinClient) {
           : u,
       ),
     );
-  });
+  };
+  client.on('presence', handler);
+  onCleanup(() => client.off('presence', handler));
 
-  return { users };
+  return { users, setUsers };
 }

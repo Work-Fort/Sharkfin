@@ -6,6 +6,7 @@ export default defineConfig({
   test: {
     environment: 'jsdom',
     globals: true,
+    exclude: ['test/e2e/**', 'node_modules/**'],
   },
   resolve: {
     conditions: ['development', 'browser'],
