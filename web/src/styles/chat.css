@@ -112,6 +112,7 @@
   min-width: 0;
   flex: 1;
   min-height: 0;
+  height: 100%;
 }
 .sf-main__header {
   display: flex;
@@ -209,11 +210,14 @@
   font-size: var(--wf-text-xs);
   color: var(--wf-color-text-muted);
   height: 1.25rem;
+  flex-shrink: 0;
 }
 
 /* Input bar */
 .sf-input {
   padding: 0 var(--wf-space-lg) var(--wf-space-md);
+  flex-shrink: 0;
+  margin-top: auto;
 }
 .sf-input__box {
   display: flex;
