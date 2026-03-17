@@ -14,29 +14,44 @@ interface SharkfinChatProps {
 }
 
 export function SharkfinChat(props: SharkfinChatProps) {
+  const [initFailed, setInitFailed] = createSignal(false);
+
   onMount(async () => {
     try {
       await initApp();
       const disposeIdle = useIdleDetection(getClient());
       onCleanup(disposeIdle);
     } catch {
-      // Connection failed — client will retry via reconnect: true.
+      setInitFailed(true);
+    }
+  });
+
+  // Retry when connected flips to true after auth failure.
+  createEffect(() => {
+    if (props.connected && initFailed()) {
+      setInitFailed(false);
+      initApp()
+        .then(() => {
+          const disposeIdle = useIdleDetection(getClient());
+          onCleanup(disposeIdle);
+        })
+        .catch(() => setInitFailed(true));
     }
   });
 
   return (
     <div class="sf-main">
-      <Show when={!props.connected}>
-        <wf-banner variant="warning" headline="Chat service is unavailable." />
+      <Show when={initFailed()}>
+        <wf-banner variant="info" headline="Sign in to use Chat" />
       </Show>
-      <Show when={loading()}>
+      <Show when={!initFailed() && loading()}>
         <div style="padding: var(--wf-space-lg);">
           <wf-skeleton width="100%" height="2rem" />
           <wf-skeleton width="100%" height="200px" style="margin-top: var(--wf-space-md);" />
           <wf-skeleton width="60%" height="1rem" style="margin-top: var(--wf-space-md);" />
         </div>
       </Show>
-      <Show when={!loading() && connectionState() !== 'connecting'}>
+      <Show when={!initFailed() && !loading() && connectionState() !== 'connecting'}>
         <Show when={connectionState() === 'disconnected'}>
           <wf-banner variant="warning" headline="Connection lost. Reconnecting\u2026" />
         </Show>

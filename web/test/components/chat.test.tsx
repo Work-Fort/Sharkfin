@@ -57,9 +57,16 @@ describe('SharkfinChat', () => {
     expect(el.querySelector('.sf-input')).toBeTruthy();
   });
 
-  it('shows disconnected banner when not connected', async () => {
+  it('shows sign-in banner when initApp fails', async () => {
+    // Override initApp to reject, simulating auth failure.
+    const stores = await import('../../src/stores');
+    const original = stores.initApp;
+    (stores as any).initApp = async () => { throw new Error('auth'); };
     const el = renderInto(() => <SharkfinChat connected={false} />);
     await new Promise(r => setTimeout(r, 100));
-    expect(el.querySelector('wf-banner')).toBeTruthy();
+    const banner = el.querySelector('wf-banner');
+    expect(banner).toBeTruthy();
+    expect(banner?.getAttribute('headline')).toBe('Sign in to use Chat');
+    (stores as any).initApp = original;
   });
 });
