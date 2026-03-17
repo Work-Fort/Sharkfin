@@ -84,6 +84,19 @@ func (s *Store) IsEmpty() (bool, error) {
 	return count == 0, nil
 }
 
+// validWipeTables is the allowlist of tables that WipeAll may truncate.
+var validWipeTables = map[string]bool{
+	"mention_group_members": true,
+	"mention_groups":        true,
+	"message_mentions":      true,
+	"read_cursors":          true,
+	"messages":              true,
+	"channel_members":       true,
+	"channels":              true,
+	"settings":              true,
+	"identities":            true,
+}
+
 // WipeAll deletes all user data, preserving schema and built-in RBAC seeds.
 func (s *Store) WipeAll() error {
 	tables := []string{
@@ -98,6 +111,9 @@ func (s *Store) WipeAll() error {
 		"identities",
 	}
 	for _, t := range tables {
+		if !validWipeTables[t] {
+			return fmt.Errorf("wipe rejected: %q is not an allowed table", t)
+		}
 		if _, err := s.db.Exec("DELETE FROM " + t); err != nil {
 			return fmt.Errorf("wipe %s: %w", t, err)
 		}

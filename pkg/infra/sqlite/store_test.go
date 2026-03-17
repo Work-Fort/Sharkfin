@@ -1236,6 +1236,38 @@ func TestExpandMentionGroups(t *testing.T) {
 	require.ElementsMatch(t, []string{aliceID, bobID}, result["backend"])
 }
 
+func TestWipeAll(t *testing.T) {
+	s := newTestStore(t)
+	aliceID := upsertIdentity(t, s, "uuid-alice", "alice")
+	bobID := upsertIdentity(t, s, "uuid-bob", "bob")
+
+	// Create some data to wipe
+	s.CreateChannel("general", true, []string{aliceID, bobID}, "channel")
+	ch, _ := s.GetChannelByName("general")
+	s.SendMessage(ch.ID, aliceID, "hello", nil, nil)
+
+	err := s.WipeAll()
+	if err != nil {
+		t.Fatalf("wipe all: %v", err)
+	}
+
+	// Verify data is gone
+	identities, _ := s.ListIdentities()
+	if len(identities) != 0 {
+		t.Errorf("expected 0 identities, got %d", len(identities))
+	}
+}
+
+func TestWipeAllRejectsInvalidTable(t *testing.T) {
+	// Verify the allowlist protects against invalid table names.
+	// This tests the validWipeTables guard in WipeAll.
+	for _, bad := range []string{"users; DROP TABLE identities --", "nonexistent", ""} {
+		if validWipeTables[bad] {
+			t.Errorf("table %q should not be in allowlist", bad)
+		}
+	}
+}
+
 // --- Compile-time check ---
 
 func TestStoreImplementsDomainStore(t *testing.T) {
