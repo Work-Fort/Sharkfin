@@ -7,8 +7,9 @@ Tracks all UI work across the platform. Items are roughly priority-ordered withi
 ## Immediate: Bugs to Fix
 
 ### Sharkfin Chat
-- [ ] Auto-join public channels on click — when user clicks a public channel they're not a member of, join automatically instead of showing error
-- [ ] Message rendering after send — messages saved to DB but not rendering in the UI (broadcast handler may not be appending, or message area component not showing messages)
+- [ ] Auto-join public channels on click — when user clicks a public channel they're not a member of, auto-join if they have `join_channel` permission, then select it
+- [ ] `read_public` permission — new RBAC permission allowing reading history of public channels without joining. Default: off (must join to read). When enabled, clicking a public channel shows history in read-only mode with a "Join to send messages" prompt. Sending always requires membership. Add to migration, seed off for all roles. Design principle: configurable with sensible defaults.
+- [ ] Message rendering after send — messages saved to DB but not rendering in the UI (broadcast handler may not be appending, or message area not showing messages). Needs systematic debugging.
 - [ ] Remove debug logging from permissions store and chat component (temporary `console.log` calls)
 - [ ] Sharkfin daemon should set proper `Cache-Control` headers on UI assets (`no-cache` on `remoteEntry.js`, immutable on content-hashed `assets/*`)
 
