@@ -732,3 +732,39 @@ func TestWSSendMessageWithMentionGroup(t *testing.T) {
 		t.Error("expected mentions from group expansion")
 	}
 }
+
+func TestWSDMListScopedToUser(t *testing.T) {
+	env := newWSTestEnv(t)
+	aliceConn := connectUser(t, env, "alice")
+	grantAdmin(t, env, "alice")
+	bobConn := connectUser(t, env, "bob")
+	connectUser(t, env, "charlie")
+
+	// Alice opens DMs with Bob and Charlie
+	wsReq(t, aliceConn, "dm_open", map[string]interface{}{
+		"username": "bob",
+	}, "d1")
+	wsReq(t, aliceConn, "dm_open", map[string]interface{}{
+		"username": "charlie",
+	}, "d2")
+
+	// Bob should only see the alice-bob DM
+	resp := wsReq(t, bobConn, "dm_list", map[string]interface{}{}, "dl1")
+	if resp.OK == nil || !*resp.OK {
+		t.Fatalf("expected ok, got %+v", resp)
+	}
+	d, _ := json.Marshal(resp.D)
+	var result struct {
+		DMs []struct {
+			Channel     string `json:"channel"`
+			Participant string `json:"participant"`
+		} `json:"dms"`
+	}
+	json.Unmarshal(d, &result)
+	if len(result.DMs) != 1 {
+		t.Fatalf("bob should see 1 DM, got %d", len(result.DMs))
+	}
+	if result.DMs[0].Participant != "alice" {
+		t.Errorf("participant = %q, want alice", result.DMs[0].Participant)
+	}
+}
