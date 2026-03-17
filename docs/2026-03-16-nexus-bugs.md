@@ -89,3 +89,24 @@ mcp__nexus__vm_exec(id: "passport", cmd: ["env"])
 **Owning service:** Nexus
 
 **Severity:** High — environment configuration is fundamental to container operation.
+
+## Bug 5: `vm_create` `script_override` parameter is silently ignored
+
+**Reproduction:**
+```
+mcp__nexus__vm_create(name: "passport", image: "...", script_override: "BETTER_AUTH_SECRET=secret node dist/index.js")
+→ VM created (no error)
+
+mcp__nexus__vm_get(id: "passport")
+→ ScriptOverride: "" (empty — parameter was ignored)
+```
+
+**Expected:** The `script_override` should replace the container's CMD/entrypoint with the provided command.
+
+**Actual:** The parameter is accepted without error but has no effect. The container runs its original CMD.
+
+**Impact:** Cannot override the entrypoint to inject environment variables as a workaround for Bug 4.
+
+**Owning service:** Nexus
+
+**Severity:** Medium — blocks the only workaround for Bug 4.
