@@ -4,36 +4,85 @@ Tracks all UI work across the platform. Items are roughly priority-ordered withi
 
 ---
 
-## In Progress: Component Extraction + Shell Chrome
+## Immediate: Bugs to Fix
 
-### Component Extraction (Sharkfin → @workfort/ui)
-- [ ] Extract utilities to `@workfort/ui`: `initials()`, `formatTime()`, `formatDateLabel()`, `isSameDay()`, `throttle()`
-- [ ] Extract `wf-compose-input` web component (from InputBar)
-- [ ] Extract `wf-user-picker` web component (from DM/Invite dialogs)
-- [ ] Extract `IdleDetector` core class to `@workfort/ui`
-- [ ] Extract `useIdleDetection` hook to `@workfort/ui-solid` (+ react/svelte/vue stubs)
-- [ ] Extract `PermissionSet` core class to `@workfort/ui`
-- [ ] Extract permission hooks per framework adapter
-- [ ] Refactor Sharkfin to use extracted components
-- [ ] Storybook stories for all extracted components
-- [ ] Documentation pages for utilities and hooks
+### Sharkfin Chat
+- [ ] Auto-join public channels on click — when user clicks a public channel they're not a member of, join automatically instead of showing error
+- [ ] Message rendering after send — messages saved to DB but not rendering in the UI (broadcast handler may not be appending, or message area component not showing messages)
+- [ ] Remove debug logging from permissions store and chat component (temporary `console.log` calls)
+- [ ] Sharkfin daemon should set proper `Cache-Control` headers on UI assets (`no-cache` on `remoteEntry.js`, immutable on content-hashed `assets/*`)
 
-### Shell Chrome Redesign
-- [ ] Hide services without UI (like Auth) from nav tabs
-- [ ] Horizontal service tabs (not vertical stacked)
-- [ ] Hamburger collapse when tabs overflow
-- [ ] Configurable hamburger position (any corner)
-- [ ] Responsive shell layout (mobile-friendly)
-- [ ] Storybook stories for shell chrome at multiple viewports
+### Shell Chrome
+- [ ] Hamburger menu content still visible alongside button on desktop (MutationObserver fix landed but needs verification)
+- [ ] Hamburger menu should be hidden on desktop — settings only show inside hamburger panel
 
-### Responsive Layouts
-- [ ] Shell chrome responsive (hamburger on mobile)
-- [ ] Sharkfin chat responsive (sidebar collapse, tight spacing)
-- [ ] Storybook stories showing mobile/tablet/desktop states
+### Session / Auth
+- [ ] BFF logout endpoint — clear session cookie
+- [ ] Session probe should also work after fort change (reset + re-probe)
 
 ---
 
-## Planned
+## In Progress: Storybook (Plan 10)
+
+- [ ] Utility documentation page (initials, time, throttle)
+- [ ] ComposeInput stories
+- [ ] UserPicker stories
+- [ ] NavBar stories at multiple viewports
+- [ ] Shell chrome layout stories
+- [ ] Sharkfin chat stories (updated with extracted components)
+- [ ] Hook documentation pages (IdleDetector, Permissions per framework)
+
+---
+
+## Recently Completed
+
+### Component Extraction (Plans 5-8)
+- [x] Extract utilities to `@workfort/ui`: `initials()`, `formatTime()`, `formatDateLabel()`, `isSameDay()`, `throttle()`
+- [x] Extract `wf-compose-input` web component
+- [x] Extract `wf-user-picker` web component
+- [x] Extract `IdleDetector` core class to `@workfort/ui`
+- [x] Extract `PermissionSet` core class to `@workfort/ui`
+- [x] Extract `useIdleDetection` + `usePermissions` hooks to all 4 framework adapters (solid, react, svelte, vue)
+- [x] Refactor Sharkfin to use extracted components
+
+### Shell Chrome Redesign (Plan 9)
+- [x] `wf-hamburger` component with configurable position
+- [x] `wf-nav-bar` component with overflow detection
+- [x] Shell updated to use new components
+- [x] Non-UI services hidden from nav tabs
+- [x] Handedness preference (left/right)
+- [x] Responsive grid — sidebar overlay on mobile
+
+### Onboarding (Plan 11 partial)
+- [x] Passport: `setup_mode` flag in `/ui/health`
+- [x] Passport: sign-up guard (admin only after first user)
+- [x] Passport: migrations on startup
+- [x] Passport: `TRUSTED_ORIGINS` env var
+- [x] BFF: `setup_mode` passthrough in service tracker
+- [x] BFF: session probe endpoint (`GET /api/session`)
+- [x] Shell: setup form (create admin account)
+- [x] Shell: sign-in form (returning users)
+- [x] Shell: session persistence across page reloads
+
+### Bug Fixes
+- [x] `wf-button` form submission via ElementInternals
+- [x] BFF SPA fallback for fort-scoped routes
+- [x] SharkfinClient WebSocket browser compatibility
+- [x] Permission reactivity — `createMemo` + module-level signal + `await capabilities`
+- [x] First user auto-admin role
+- [x] Capabilities refetch on reconnect
+- [x] General channel seeded on first startup
+- [x] Search placeholder ellipsis rendering
+- [x] Input bar pinned to bottom
+
+### Security Fixes (13 total)
+- [x] Sharkfin: WS history membership check, WS dm_list scoping, WS origin validation, WipeAll allowlist
+- [x] Passport: BETTER_AUTH_SECRET startup guard, sign-up admin role check, DB error handling, log sanitization
+- [x] Scope: WS origin validation, HTTP server timeouts, cookie HttpOnly/SameSite, token cache eviction, UI asset whitelist
+
+---
+
+## Planned (Future)
 
 ### Cross-App Notification System
 - [ ] Design: shell-wide notification mechanism for cross-app alerts
@@ -54,17 +103,7 @@ Tracks all UI work across the platform. Items are roughly priority-ordered withi
 - [ ] Sign-in page improvements (social providers when configured)
 - [ ] User management admin panel (future)
 
----
-
-## Done (This Sprint)
-
-- [x] Web UI foundation (Plans 1-2): scaffolding, stores, components, CSS
-- [x] Web UI completeness (Plans 3-4): connection lifecycle, identity, permissions, dialogs, search, wf-list migration, responsive CSS, go:embed, Playwright e2e
-- [x] Shell integration fixes: Passport /ui/health, BFF auth exemption, ESM module loading
-- [x] Onboarding flow: setup mode, sign-up guard, setup form, sign-in form
-- [x] Security audit + fixes: 13 vulnerabilities across 3 repos
-- [x] Permission gating: join_channel, channel_list, history
-- [x] Input bar pinned to bottom
-- [x] wf-button form submission (ElementInternals)
-- [x] BFF SPA fallback for fort-scoped routes
-- [x] SharkfinClient browser WebSocket compatibility
+### Infrastructure
+- [ ] Nexus: document Bug 4 (env vars) — RESOLVED in latest version
+- [ ] Nexus: document Bug 5 (script_override) — may be resolved
+- [ ] Sharkfin: proper Cache-Control headers matching scope's `frontend.Handler` pattern
