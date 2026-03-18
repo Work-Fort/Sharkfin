@@ -75,36 +75,62 @@ func newTestStore(t *testing.T) *Store {
 	return s
 }
 
-// upsertTestIdentity is a helper that upserts an identity with a deterministic ID and returns the ID.
+// upsertTestIdentity is a helper that upserts an identity and returns the internal ID.
 func upsertTestIdentity(t *testing.T, s *Store, username string) string {
 	t.Helper()
-	id := "test-" + username // deterministic test ID
-	err := s.UpsertIdentity(id, username, username, "user", "user")
+	authID := "auth-" + username // deterministic auth ID for tests
+	ident, err := s.UpsertIdentity(authID, username, username, "user", "user")
 	if err != nil {
 		t.Fatalf("upsert identity %s: %v", username, err)
 	}
-	return id
+	return ident.ID
 }
 
 // --- Identities ---
 
 func TestUpsertIdentity(t *testing.T) {
 	s := newTestStore(t)
-	id := upsertTestIdentity(t, s, "alice")
-	if id == "" {
-		t.Error("expected non-empty id")
-	}
+	ident, err := s.UpsertIdentity("uuid-alice", "alice", "Alice", "user", "user")
+	require.NoError(t, err)
+	require.Equal(t, "uuid-alice", ident.AuthID)
+	require.Equal(t, "alice", ident.Username)
+	require.NotEmpty(t, ident.ID)
+	// Internal ID should differ from auth_id (it's a generated hex UUID)
+	require.NotEqual(t, "uuid-alice", ident.ID)
 }
 
 func TestUpsertIdentityDuplicateUpdates(t *testing.T) {
 	s := newTestStore(t)
-	id := "id-alice"
-	require.NoError(t, s.UpsertIdentity(id, "alice", "Alice", "user", "user"))
-	// Upsert again with different display name — should update, not fail.
-	require.NoError(t, s.UpsertIdentity(id, "alice", "Alice Updated", "user", "user"))
-	i, err := s.GetIdentityByID(id)
+	ident1, err := s.UpsertIdentity("auth-alice", "alice", "Alice", "user", "user")
 	require.NoError(t, err)
-	require.Equal(t, "Alice Updated", i.DisplayName)
+	// Upsert again with different display name — should update, not fail.
+	ident2, err := s.UpsertIdentity("auth-alice", "alice", "Alice Updated", "user", "user")
+	require.NoError(t, err)
+	require.Equal(t, ident1.ID, ident2.ID)
+	require.Equal(t, "Alice Updated", ident2.DisplayName)
+}
+
+func TestUpsertIdentityAuthIDChange(t *testing.T) {
+	s := newTestStore(t)
+
+	// First provision with auth_id "old-passport-id"
+	ident1, err := s.UpsertIdentity("old-passport-id", "alice", "Alice", "user", "user")
+	require.NoError(t, err)
+	require.Equal(t, "alice", ident1.Username)
+	require.Equal(t, "old-passport-id", ident1.AuthID)
+	internalID := ident1.ID
+
+	// Passport recreates user with new UUID
+	ident2, err := s.UpsertIdentity("new-passport-id", "alice", "Alice Updated", "user", "user")
+	require.NoError(t, err)
+	require.Equal(t, internalID, ident2.ID, "internal ID must not change")
+	require.Equal(t, "new-passport-id", ident2.AuthID)
+	require.Equal(t, "Alice Updated", ident2.DisplayName)
+
+	// FK references still work — lookup by internal ID
+	ident3, err := s.GetIdentityByID(internalID)
+	require.NoError(t, err)
+	require.Equal(t, "new-passport-id", ident3.AuthID)
 }
 
 func TestGetIdentityByUsername(t *testing.T) {
