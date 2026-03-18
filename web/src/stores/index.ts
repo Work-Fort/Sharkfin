@@ -9,6 +9,12 @@ import { createPermissionStore } from './permissions';
 const [connectionState, setConnectionState] = createSignal<'connecting' | 'connected' | 'disconnected'>('connecting');
 const [loading, setLoading] = createSignal(true);
 
+// Debounced disconnected state: goes true immediately on disconnect,
+// only goes false after 'connected' has been stable for 2 seconds.
+// Prevents banner flashing during rapid reconnect cycles.
+const [disconnected, setDisconnected] = createSignal(false);
+let _reconnectDebounce: ReturnType<typeof setTimeout> | null = null;
+
 // Permissions are created at module level (outside createRoot) so that
 // SolidJS components in the shell's render tree can track the signal.
 // Signals created inside createRoot are isolated and not tracked by
@@ -34,9 +40,16 @@ export async function initApp(): Promise<void> {
   // Don't fetch capabilities here — client isn't connected yet.
   _permissions = createPermissionStore();
 
-  client.on('disconnect', () => setConnectionState('disconnected'));
+  client.on('disconnect', () => {
+    setConnectionState('disconnected');
+    if (_reconnectDebounce) { clearTimeout(_reconnectDebounce); _reconnectDebounce = null; }
+    setDisconnected(true);
+  });
   client.on('reconnect', () => {
     setConnectionState('connected');
+    // Delay clearing the banner so it doesn't flash during rapid reconnect cycles.
+    if (_reconnectDebounce) clearTimeout(_reconnectDebounce);
+    _reconnectDebounce = setTimeout(() => { setDisconnected(false); _reconnectDebounce = null; }, 2000);
     const stores = getStores();
     client.channels().then((chs) => stores.channels.setChannels?.(chs)).catch(() => {});
     client.users().then((us) => stores.users.setUsers?.(us)).catch(() => {});
@@ -67,7 +80,7 @@ export function getStores() {
   return _stores;
 }
 
-export { connectionState, loading };
+export { connectionState, disconnected, loading };
 
 export function resetStores(): void {
   _dispose?.();

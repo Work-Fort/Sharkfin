@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"io/fs"
 	"net/http"
+	"strings"
 )
 
 // uiHealthResponse is the JSON body the shell's service tracker expects
@@ -47,6 +48,20 @@ func registerUIRoutes(mux *http.ServeMux, uiDir string, embeddedFS fs.FS) {
 	}
 
 	if fileServer != nil {
-		mux.Handle("/ui/", http.StripPrefix("/ui/", fileServer))
+		mux.Handle("/ui/", http.StripPrefix("/ui/", cacheControl(fileServer)))
 	}
+}
+
+// cacheControl wraps a file server with appropriate Cache-Control headers.
+// Content-hashed assets get immutable caching; everything else gets no-cache.
+func cacheControl(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		path := r.URL.Path
+		if strings.HasPrefix(path, "assets/") || strings.HasPrefix(path, "/assets/") {
+			w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+		} else {
+			w.Header().Set("Cache-Control", "no-cache")
+		}
+		next.ServeHTTP(w, r)
+	})
 }

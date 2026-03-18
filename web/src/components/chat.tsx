@@ -1,6 +1,6 @@
 import { Show, createEffect, createMemo, createSignal, onMount, onCleanup } from 'solid-js';
 import '../styles/chat.css';
-import { initApp, getStores, connectionState, loading } from '../stores';
+import { initApp, getStores, connectionState, disconnected, loading } from '../stores';
 import { useIdleDetection } from '@workfort/ui-solid';
 import { getClient } from '../client';
 import { ChannelHeader } from './channel-header';
@@ -58,8 +58,8 @@ export function SharkfinChat(props: SharkfinChatProps) {
         </div>
       </Show>
       <Show when={!initFailed() && !loading() && connectionState() !== 'connecting'}>
-        <Show when={connectionState() === 'disconnected'}>
-          <wf-banner variant="warning" headline="Connection lost. Reconnecting\u2026" />
+        <Show when={disconnected()}>
+          <wf-banner variant="warning" headline="Connection lost. Reconnecting…" />
         </Show>
         <ChatContent />
       </Show>
@@ -74,17 +74,14 @@ function ChatContent() {
   createEffect(() => {
     const chs = channels.channels();
     if (chs.length > 0 && !channels.activeChannel()) {
-      channels.setActiveChannel(chs[0].name);
+      const joined = chs.find(c => c.member);
+      channels.setActiveChannel((joined ?? chs[0]).name);
     }
   });
 
   const activeChannelObj = () => channels.channels().find(c => c.name === channels.activeChannel());
   const canHistory = createMemo(() => permissions.can('history'));
   const canSend = createMemo(() => permissions.can('send_message'));
-
-  createEffect(() => {
-    console.log('[sharkfin] canHistory memo:', canHistory(), 'canSend memo:', canSend());
-  });
 
   async function handleInvite(channel: string, username: string) {
     setInviteOpen(false);
@@ -113,9 +110,9 @@ function ChatContent() {
         <MessageArea messages={messages.messages()} />
       </Show>
       <TypingIndicator typingUsers={[]} />
-      <Show when={canSend()} fallback={
+      <Show when={canSend() && activeChannelObj()?.member} fallback={
         <div class="sf-typing" style="color: var(--wf-color-text-muted); font-size: var(--wf-text-xs);">
-          You don't have permission to send messages.
+          {activeChannelObj()?.member === false ? 'Join this channel to send messages.' : "You don't have permission to send messages."}
         </div>
       }>
         <InputBar
