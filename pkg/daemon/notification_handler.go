@@ -38,14 +38,9 @@ func (h *WSHandler) handleNotificationSubscribe(w http.ResponseWriter, r *http.R
 	if role == "" {
 		role = "user"
 	}
-	if err := h.store.UpsertIdentity(identity.ID, identity.Username, identity.DisplayName, identity.Type, role); err != nil {
-		http.Error(w, "identity provisioning failed", http.StatusInternalServerError)
-		return
-	}
-
-	localIdentity, err := h.store.GetIdentityByID(identity.ID)
+	localIdentity, err := h.store.UpsertIdentity(identity.ID, identity.Username, identity.DisplayName, identity.Type, role)
 	if err != nil {
-		http.Error(w, "identity lookup failed", http.StatusInternalServerError)
+		http.Error(w, "identity provisioning failed", http.StatusInternalServerError)
 		return
 	}
 

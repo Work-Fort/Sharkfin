@@ -117,7 +117,9 @@ func (s *SharkfinMCP) authMiddleware(next server.ToolHandlerFunc) server.ToolHan
 		if role == "" {
 			role = "user"
 		}
-		_ = s.store.UpsertIdentity(identity.ID, identity.Username, identity.DisplayName, identity.Type, role)
+		if _, err := s.store.UpsertIdentity(identity.ID, identity.Username, identity.DisplayName, identity.Type, role); err != nil {
+			log.Warn("identity provisioning failed", "err", err, "username", identity.Username)
+		}
 
 		username := identity.Username
 

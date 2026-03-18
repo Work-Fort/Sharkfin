@@ -42,10 +42,11 @@ func ImportData(s BackupStore, b *Backup, force bool) error {
 		if role == "" {
 			role = "user"
 		}
-		if err := s.UpsertIdentity(identityID, u.Username, u.Username, identityType, role); err != nil {
-			return fmt.Errorf("upsert identity %q: %w", u.Username, err)
+		ident, err := s.UpsertIdentity(identityID, u.Username, u.Username, identityType, role)
+		if err != nil {
+			return fmt.Errorf("import identity %s: %w", u.Username, err)
 		}
-		identityIDByName[u.Username] = identityID
+		identityIDByName[u.Username] = ident.ID
 	}
 
 	// 2. Custom roles (skip built-in, they are seeded by migrations)
