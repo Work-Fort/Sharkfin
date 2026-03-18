@@ -68,9 +68,10 @@ React MF remote providing CRUD for users, service keys, and agent keys. Blocked 
 ## Immediate: Bugs to Fix
 
 ### Sharkfin Chat
+- [ ] Message rendering after send — messages saved to DB but not rendering in the UI until page refresh. Broadcast handler may not be appending to the reactive message list, or the message area isn't updating. Needs systematic debugging.
+- [ ] Message input should be disabled when user hasn't joined the selected channel — prevent sending to channels where the user isn't a member. Input should show a disabled state with "Join to send messages" or similar.
 - [ ] Auto-join public channels on click — when user clicks a public channel they're not a member of, auto-join if they have `join_channel` permission, then select it
 - [ ] `read_public` permission — new RBAC permission allowing reading history of public channels without joining. Default: off (must join to read). When enabled, clicking a public channel shows history in read-only mode with a "Join to send messages" prompt. Sending always requires membership. Add to migration, seed off for all roles. Design principle: configurable with sensible defaults.
-- [ ] Message rendering after send — messages saved to DB but not rendering in the UI (broadcast handler may not be appending, or message area not showing messages). Needs systematic debugging.
 - [ ] Remove debug logging from permissions store and chat component (temporary `console.log` calls)
 - [ ] Sharkfin daemon should set proper `Cache-Control` headers on UI assets (`no-cache` on `remoteEntry.js`, immutable on content-hashed `assets/*`)
 
