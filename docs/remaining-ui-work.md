@@ -67,23 +67,25 @@ React MF remote providing CRUD for users, service keys, and agent keys. Blocked 
 
 ## Immediate: Bugs to Fix
 
+Complexity: 🟢 easy fix, 🟡 moderate, 🔴 needs a plan
+
 ### Sharkfin Chat
-- [ ] Message rendering after send — messages saved to DB but not rendering in the UI until page refresh. Broadcast handler may not be appending to the reactive message list, or the message area isn't updating. Needs systematic debugging.
-- [ ] Message input should be disabled when user hasn't joined the selected channel — prevent sending to channels where the user isn't a member. Input should show a disabled state with "Join to send messages" or similar.
-- [ ] Auto-join public channels on click — when user clicks a public channel they're not a member of, auto-join if they have `join_channel` permission, then select it
-- [ ] `read_public` permission — new RBAC permission allowing reading history of public channels without joining. Default: off (must join to read). When enabled, clicking a public channel shows history in read-only mode with a "Join to send messages" prompt. Sending always requires membership. Add to migration, seed off for all roles. Design principle: configurable with sensible defaults.
-- [ ] Remove debug logging from permissions store and chat component (temporary `console.log` calls)
-- [ ] Sharkfin daemon should set proper `Cache-Control` headers on UI assets (`no-cache` on `remoteEntry.js`, immutable on content-hashed `assets/*`)
+- [ ] 🔴 Message rendering after send — messages saved to DB but not rendering in the UI until page refresh. Broadcast handler may not be appending to the reactive message list, or the message area isn't updating. Needs systematic debugging of the WS message handler → SolidJS signal update → DOM render pipeline.
+- [ ] 🟢 Message input should be disabled when user hasn't joined the selected channel — check membership state, disable input + show "Join to send messages" placeholder.
+- [ ] 🟡 Auto-join public channels on click — when user clicks a public channel they're not a member of, auto-join if they have `join_channel` permission, then select it. Requires WS call + state update + error handling.
+- [ ] 🔴 `read_public` permission — new RBAC permission, migration, seed, UI changes for read-only mode with join prompt. Touches daemon, client, and web UI.
+- [ ] 🟢 Remove debug logging from permissions store and chat component (temporary `console.log` calls). Grep and delete.
+- [ ] 🟢 Sharkfin daemon should set proper `Cache-Control` headers on UI assets (`no-cache` on `remoteEntry.js`, immutable on content-hashed `assets/*`).
 
 ### Shell Chrome
-- [ ] Hamburger menu content still visible alongside button on desktop (MutationObserver fix landed but needs verification)
-- [ ] Hamburger menu should be hidden on desktop — settings only show inside hamburger panel
+- [ ] 🟢 Hamburger menu content still visible alongside button on desktop (MutationObserver fix landed but needs verification). May already be fixed.
+- [ ] 🟢 Hamburger menu should be hidden on desktop — settings only show inside hamburger panel.
 
 ### Session / Auth
-- [ ] Login form flashes on refresh before session check completes — `needsAuth` defaults to `true`, shows sign-in form, then async `checkSession` hides it. Fix: delay render or default to loading state.
+- [ ] 🟡 Login form flashes on refresh before session check completes — `needsAuth` defaults to `true`, shows sign-in form, then async `checkSession` hides it. Fix: show loading/skeleton state until session check resolves instead of defaulting to sign-in.
 
 ### Integration Issues
-- [ ] MCP bridge identity has no permissions (chicken-and-egg — [Issue 12](2026-03-16-shell-integration-issues.md))
+- [ ] 🟡 MCP bridge identity has no permissions (chicken-and-egg — [Issue 12](2026-03-16-shell-integration-issues.md)). Now solvable via the admin UI (create agent key), but the bootstrap flow needs documenting.
 
 ---
 
