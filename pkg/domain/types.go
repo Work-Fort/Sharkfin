@@ -4,7 +4,8 @@ package domain
 import "time"
 
 type Identity struct {
-	ID          string // Passport UUID
+	ID          string // Internal stable UUID (never changes after creation)
+	AuthID      string // Passport-provided UUID (may change if user is recreated)
 	Username    string
 	DisplayName string
 	Type        string // "user", "agent", "service"

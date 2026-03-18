@@ -2,7 +2,7 @@
 package domain
 
 type IdentityStore interface {
-	UpsertIdentity(id, username, displayName, identityType, role string) error
+	UpsertIdentity(authID, username, displayName, identityType, role string) (*Identity, error)
 	GetIdentityByID(id string) (*Identity, error)
 	GetIdentityByUsername(username string) (*Identity, error)
 	ListIdentities() ([]Identity, error)
