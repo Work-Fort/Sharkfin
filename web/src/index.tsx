@@ -1,3 +1,4 @@
+import { render } from 'solid-js/web';
 import { SharkfinChat } from './components/chat';
 import { ChannelSidebar } from './components/sidebar';
 import { CreateChannelDialog } from './components/create-channel-dialog';
@@ -7,17 +8,33 @@ import { getClient } from './client';
 import { Show, createSignal } from 'solid-js';
 import { useAuth } from '@workfort/ui-solid';
 
-export default function SharkfinApp(props: { connected: boolean }) {
+function SharkfinApp(props: { connected: boolean }) {
   return <SharkfinChat connected={props.connected} />;
+}
+
+const roots = new WeakMap<HTMLElement, () => void>();
+
+export function mount(el: HTMLElement, props: { connected: boolean }) {
+  const dispose = render(() => <SharkfinApp connected={props.connected} />, el);
+  roots.set(el, dispose);
+}
+
+export function unmount(el: HTMLElement) {
+  const dispose = roots.get(el);
+  if (dispose) {
+    dispose();
+    roots.delete(el);
+  }
 }
 
 export const manifest = {
   name: 'sharkfin',
   label: 'Chat',
   route: '/chat',
+  display: 'nav' as const,
 };
 
-export function SidebarContent() {
+function SidebarContent() {
   return (
     <Show when={!loading()} fallback={
       <div style="padding: var(--wf-space-md);">
@@ -29,6 +46,19 @@ export function SidebarContent() {
       <SidebarLoaded />
     </Show>
   );
+}
+
+export function mountSidebar(el: HTMLElement) {
+  const dispose = render(() => <SidebarContent />, el);
+  roots.set(el, dispose);
+}
+
+export function unmountSidebar(el: HTMLElement) {
+  const dispose = roots.get(el);
+  if (dispose) {
+    dispose();
+    roots.delete(el);
+  }
 }
 
 function SidebarLoaded() {
