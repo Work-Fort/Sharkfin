@@ -447,6 +447,14 @@ Tauri app stores fort config in its database instead of YAML (managed via UI). T
 5. **Server deployments** — scope-server with Postgres, UI served externally, zero-downtime UI updates
 6. **Gateway path** — notification subscriber connects to gateway instead of individual services
 
+## Security: Fort Trust Model
+
+**scope-server:** Only serves forts explicitly defined in the YAML config file. No dynamic fort addition via API. The operator controls which forts are trusted. Typically single-fort or a small trusted set.
+
+**workfort-scope (Tauri):** Multi-fort by design. Users can add arbitrary forts. Fort isolation is critical — per-fort encrypted storage (see `docs/fort-isolated-storage-design.md`), auth tokens in proxy memory only, service remotes run in shared JS context but can't access other forts' decrypted data.
+
+---
+
 ## Supersedes
 
 - Go BFF (`cmd/web/`, `internal/infra/httpapi/`)
