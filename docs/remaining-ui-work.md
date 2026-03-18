@@ -4,6 +4,67 @@ Tracks all UI work across the platform. Items are roughly priority-ordered withi
 
 ---
 
+## Active: Scope Rust Migration (scope-core)
+
+Replacing the Go BFF with a shared Rust library crate. This is the current top priority — it unblocks the Passport admin UI, cross-app notifications, and framework-agnostic MF remotes.
+
+- [Design](2026-03-17-scope-core-design.md) · [Plan](plans/2026-03-17-scope-core-plan.md)
+
+### Phase 1: Workspace + Domain
+- [ ] Cargo workspace setup (scope-core, scope-server, workfort-scope)
+- [ ] Remove all Go code from scope repo
+- [ ] Domain types and Store trait (ports)
+
+### Phase 2: Store Adapters
+- [ ] SQLite store adapter (sqlx)
+- [ ] Postgres store adapter (sqlx, TIMESTAMPTZ, JSONB)
+
+### Phase 3: Infrastructure
+- [ ] HTTP/WS reverse proxy
+- [ ] Service discovery + health polling
+- [ ] Notification subscriber (connects to service `/notifications/subscribe` WS)
+- [ ] YAML config parsing (XDG paths)
+
+### Phase 4: scope-server (axum)
+- [ ] API endpoints (forts, session, services, notifications, preferences)
+- [ ] Proxy routes + SPA fallback
+- [ ] Shell WebSocket (real-time push to browser)
+
+### Phase 5: Tauri Refactor
+- [ ] Refactor workfort-scope to use scope-core
+- [ ] Native OS notifications via tauri-plugin-notification
+
+### Phase 6: Shell SPA
+- [ ] Framework-agnostic service module contract (mount/unmount)
+- [ ] Update Sharkfin entry point to mount/unmount
+- [ ] Notification bell UI + unread badge
+- [ ] Menu display type (hamburger links vs nav tabs)
+- [ ] Switch services store from polling to shell WS
+
+### Phase 7: Integration
+- [ ] Sharkfin `/notifications/subscribe` endpoint
+- [ ] End-to-end verification
+
+---
+
+## Blocked by scope-core: Passport Admin UI
+
+React MF remote providing CRUD for users, service keys, and agent keys. Blocked because it needs admin-only service filtering and the framework-agnostic service mount — both delivered by scope-core.
+
+- [Design](plans/2026-03-17-passport-admin-ui-design.md) · [Plan](plans/2026-03-17-passport-admin-ui-plan.md)
+
+- [ ] Passport: last-admin guard
+- [ ] Passport: custom admin API key listing route
+- [ ] Passport: /ui/health update (route: "/admin", admin_only: true)
+- [ ] Passport: static UI serving at /ui/*
+- [ ] Passport: React MF remote scaffold (Vite + Module Federation)
+- [ ] Passport: Users page (list, create, edit role, deactivate, delete)
+- [ ] Passport: Service Keys page (create, revoke)
+- [ ] Passport: Agent Keys page (create, revoke)
+- [ ] Sharkfin: identity type → role mapping in auth middleware
+
+---
+
 ## Immediate: Bugs to Fix
 
 ### Sharkfin Chat
@@ -17,13 +78,14 @@ Tracks all UI work across the platform. Items are roughly priority-ordered withi
 - [ ] Hamburger menu content still visible alongside button on desktop (MutationObserver fix landed but needs verification)
 - [ ] Hamburger menu should be hidden on desktop — settings only show inside hamburger panel
 
-### Session / Auth
-- [ ] BFF logout endpoint — clear session cookie
-- [ ] Session probe should also work after fort change (reset + re-probe)
+### Integration Issues
+- [ ] MCP bridge identity has no permissions (chicken-and-egg — [Issue 12](2026-03-16-shell-integration-issues.md))
 
 ---
 
-## In Progress: Storybook (Plan 10)
+## Deferred: Storybook (Plan 10)
+
+On hold until scope-core migration is complete and service module contract is finalized.
 
 - [ ] Utility documentation page (initials, time, throttle)
 - [ ] ComposeInput stories
@@ -81,15 +143,14 @@ Tracks all UI work across the platform. Items are roughly priority-ordered withi
 - [x] Passport: BETTER_AUTH_SECRET startup guard, sign-up admin role check, DB error handling, log sanitization
 - [x] Scope: WS origin validation, HTTP server timeouts, cookie HttpOnly/SameSite, token cache eviction, UI asset whitelist
 
+### Design Documents (2026-03-17)
+- [x] Passport admin UI design — React MF remote, CRUD for users/service keys/agent keys, bootstrap flow
+- [x] Scope-core design — Rust migration, shared library crate, notification system, service module contract
+- [x] Scope-core implementation plan — 16 tasks across 7 phases
+
 ---
 
 ## Planned (Future)
-
-### Cross-App Notification System
-- [ ] Design: shell-wide notification mechanism for cross-app alerts
-- [ ] Notification sound support
-- [ ] Notification UI (not just toasts — persistent attention-getting)
-- [ ] Example: Sharkfin message notification while user is in Hive
 
 ### Sharkfin: Mention Groups UI
 - [ ] Create/delete mention groups
@@ -100,11 +161,11 @@ Tracks all UI work across the platform. Items are roughly priority-ordered withi
 - [ ] `setSetting` / `getSettings` exposed in UI
 - [ ] User preferences (notification sounds, etc.)
 
-### Passport: Auth UI
+### Passport: Auth Enhancements
 - [ ] Sign-in page improvements (social providers when configured)
-- [ ] User management admin panel (future)
+- [ ] User self-service profile management
 
 ### Infrastructure
-- [ ] Nexus: document Bug 4 (env vars) — RESOLVED in latest version
-- [ ] Nexus: document Bug 5 (script_override) — may be resolved
+- [ ] Fort-isolated storage (per-fort AES-256-GCM encryption for localStorage)
+- [ ] Gateway architecture (single entry point, scope-core connects to gateway instead of individual services)
 - [ ] Sharkfin: proper Cache-Control headers matching scope's `frontend.Handler` pattern
