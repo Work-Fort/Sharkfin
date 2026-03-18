@@ -145,7 +145,7 @@ func TestCreateChannel(t *testing.T) {
 	aliceID := upsertIdentity(t, s, "uuid-alice", "alice")
 	bobID := upsertIdentity(t, s, "uuid-bob", "bob")
 
-	chID, err := s.CreateChannel("general", true, []string{aliceID, bobID}, "channel")
+	chID, err := s.CreateChannel("dev", true, []string{aliceID, bobID}, "channel")
 	if err != nil {
 		t.Fatalf("create channel: %v", err)
 	}
@@ -157,14 +157,14 @@ func TestCreateChannel(t *testing.T) {
 func TestGetChannelByID(t *testing.T) {
 	s := newTestStore(t)
 	aliceID := upsertIdentity(t, s, "uuid-alice", "alice")
-	chID, _ := s.CreateChannel("general", true, []string{aliceID}, "channel")
+	chID, _ := s.CreateChannel("dev", true, []string{aliceID}, "channel")
 
 	ch, err := s.GetChannelByID(chID)
 	if err != nil {
 		t.Fatalf("get channel: %v", err)
 	}
-	if ch.Name != "general" {
-		t.Errorf("name = %q, want general", ch.Name)
+	if ch.Name != "dev" {
+		t.Errorf("name = %q, want dev", ch.Name)
 	}
 	if !ch.Public {
 		t.Error("expected public=true")
@@ -204,19 +204,25 @@ func TestListChannelsPublicVisibility(t *testing.T) {
 
 	s.CreateChannel("public-ch", true, []string{aliceID, bobID}, "channel")
 
-	// Charlie is not a member but should see public channels
+	// Charlie is not a member but should see public channels (seeded "general" + "public-ch")
 	channels, err := s.ListChannelsForUser(charlieID)
 	if err != nil {
 		t.Fatalf("list channels: %v", err)
 	}
-	if len(channels) != 1 {
-		t.Fatalf("len = %d, want 1", len(channels))
+	if len(channels) != 2 {
+		t.Fatalf("len = %d, want 2", len(channels))
 	}
-	if channels[0].Name != "public-ch" {
-		t.Errorf("name = %q, want public-ch", channels[0].Name)
+	var found bool
+	for _, ch := range channels {
+		if ch.Name == "public-ch" {
+			found = true
+			if ch.Member {
+				t.Error("charlie should not be a member of public-ch")
+			}
+		}
 	}
-	if channels[0].Member {
-		t.Error("charlie should not be a member")
+	if !found {
+		t.Error("public-ch not found in channel list")
 	}
 }
 
@@ -228,25 +234,34 @@ func TestListChannelsPrivateNotVisible(t *testing.T) {
 
 	s.CreateChannel("secret", false, []string{aliceID, bobID}, "channel")
 
-	// Charlie should not see private channel
+	// Charlie should only see seeded "general" (not the private channel)
 	channels, err := s.ListChannelsForUser(charlieID)
 	if err != nil {
 		t.Fatalf("list channels: %v", err)
 	}
-	if len(channels) != 0 {
-		t.Errorf("len = %d, want 0 (private channel should be hidden)", len(channels))
+	if len(channels) != 1 {
+		t.Errorf("len = %d, want 1 (only seeded general)", len(channels))
 	}
 
-	// Alice should see it
+	// Alice should see "general" + "secret"
 	channels, err = s.ListChannelsForUser(aliceID)
 	if err != nil {
 		t.Fatalf("list channels: %v", err)
 	}
-	if len(channels) != 1 {
-		t.Errorf("len = %d, want 1", len(channels))
+	if len(channels) != 2 {
+		t.Errorf("len = %d, want 2", len(channels))
 	}
-	if !channels[0].Member {
-		t.Error("alice should be a member")
+	var secretFound bool
+	for _, ch := range channels {
+		if ch.Name == "secret" {
+			secretFound = true
+			if !ch.Member {
+				t.Error("alice should be a member of secret")
+			}
+		}
+	}
+	if !secretFound {
+		t.Error("secret channel not found for alice")
 	}
 }
 
@@ -258,12 +273,13 @@ func TestListAllChannelsWithMembership(t *testing.T) {
 	s.CreateChannel("public-ch", true, []string{aliceID}, "channel")
 	s.CreateChannel("secret", false, []string{aliceID}, "channel")
 
+	// Seeded "general" + "public-ch" + "secret" = 3
 	channels, err := s.ListAllChannelsWithMembership(bobID)
 	if err != nil {
 		t.Fatalf("list all channels: %v", err)
 	}
-	if len(channels) != 2 {
-		t.Fatalf("len = %d, want 2", len(channels))
+	if len(channels) != 3 {
+		t.Fatalf("len = %d, want 3", len(channels))
 	}
 }
 
@@ -311,7 +327,7 @@ func TestChannelMemberUsernames(t *testing.T) {
 	aliceID := upsertIdentity(t, s, "uuid-alice", "alice")
 	bobID := upsertIdentity(t, s, "uuid-bob", "bob")
 
-	chID, _ := s.CreateChannel("general", true, []string{aliceID, bobID}, "channel")
+	chID, _ := s.CreateChannel("dev", true, []string{aliceID, bobID}, "channel")
 
 	names, err := s.ChannelMemberUsernames(chID)
 	if err != nil {
@@ -330,7 +346,7 @@ func TestChannelMemberUsernames(t *testing.T) {
 func TestSendMessage(t *testing.T) {
 	s := newTestStore(t)
 	aliceID := upsertIdentity(t, s, "uuid-alice", "alice")
-	chID, _ := s.CreateChannel("general", true, []string{aliceID}, "channel")
+	chID, _ := s.CreateChannel("dev", true, []string{aliceID}, "channel")
 
 	msgID, err := s.SendMessage(chID, aliceID, "hello world", nil, nil)
 	if err != nil {
@@ -344,7 +360,7 @@ func TestSendMessage(t *testing.T) {
 func TestGetMessages(t *testing.T) {
 	s := newTestStore(t)
 	aliceID := upsertIdentity(t, s, "uuid-alice", "alice")
-	chID, _ := s.CreateChannel("general", true, []string{aliceID}, "channel")
+	chID, _ := s.CreateChannel("dev", true, []string{aliceID}, "channel")
 
 	for i := 0; i < 5; i++ {
 		s.SendMessage(chID, aliceID, fmt.Sprintf("msg%d", i), nil, nil)
@@ -370,7 +386,7 @@ func TestGetMessages(t *testing.T) {
 func TestGetMessagesBefore(t *testing.T) {
 	s := newTestStore(t)
 	aliceID := upsertIdentity(t, s, "uuid-alice", "alice")
-	chID, _ := s.CreateChannel("general", true, []string{aliceID}, "channel")
+	chID, _ := s.CreateChannel("dev", true, []string{aliceID}, "channel")
 
 	var ids []int64
 	for i := 0; i < 5; i++ {
@@ -393,7 +409,7 @@ func TestGetMessagesBefore(t *testing.T) {
 func TestGetMessagesAfter(t *testing.T) {
 	s := newTestStore(t)
 	aliceID := upsertIdentity(t, s, "uuid-alice", "alice")
-	chID, _ := s.CreateChannel("general", true, []string{aliceID}, "channel")
+	chID, _ := s.CreateChannel("dev", true, []string{aliceID}, "channel")
 
 	var ids []int64
 	for i := 0; i < 5; i++ {
@@ -416,7 +432,7 @@ func TestGetMessagesAfter(t *testing.T) {
 func TestGetMessagesLimit(t *testing.T) {
 	s := newTestStore(t)
 	aliceID := upsertIdentity(t, s, "uuid-alice", "alice")
-	chID, _ := s.CreateChannel("general", true, []string{aliceID}, "channel")
+	chID, _ := s.CreateChannel("dev", true, []string{aliceID}, "channel")
 
 	for i := 0; i < 10; i++ {
 		s.SendMessage(chID, aliceID, fmt.Sprintf("msg%d", i), nil, nil)
@@ -561,7 +577,7 @@ func TestUnreadExcludesOwnMessages(t *testing.T) {
 func TestSendMessageWithThread(t *testing.T) {
 	s := newTestStore(t)
 	aliceID := upsertIdentity(t, s, "uuid-alice", "alice")
-	chID, _ := s.CreateChannel("general", true, []string{aliceID}, "channel")
+	chID, _ := s.CreateChannel("dev", true, []string{aliceID}, "channel")
 
 	parentID, _ := s.SendMessage(chID, aliceID, "parent message", nil, nil)
 	replyID, err := s.SendMessage(chID, aliceID, "reply message", &parentID, nil)
@@ -576,7 +592,7 @@ func TestSendMessageWithThread(t *testing.T) {
 func TestSendMessageRejectNestedReply(t *testing.T) {
 	s := newTestStore(t)
 	aliceID := upsertIdentity(t, s, "uuid-alice", "alice")
-	chID, _ := s.CreateChannel("general", true, []string{aliceID}, "channel")
+	chID, _ := s.CreateChannel("dev", true, []string{aliceID}, "channel")
 
 	parentID, _ := s.SendMessage(chID, aliceID, "parent", nil, nil)
 	replyID, _ := s.SendMessage(chID, aliceID, "reply", &parentID, nil)
@@ -602,7 +618,7 @@ func TestSendMessageRejectCrossChannelThread(t *testing.T) {
 func TestGetMessagesThreadFilter(t *testing.T) {
 	s := newTestStore(t)
 	aliceID := upsertIdentity(t, s, "uuid-alice", "alice")
-	chID, _ := s.CreateChannel("general", true, []string{aliceID}, "channel")
+	chID, _ := s.CreateChannel("dev", true, []string{aliceID}, "channel")
 
 	parentID, _ := s.SendMessage(chID, aliceID, "parent", nil, nil)
 	s.SendMessage(chID, aliceID, "reply1", &parentID, nil)
@@ -627,7 +643,7 @@ func TestSendMessageWithMentions(t *testing.T) {
 	s := newTestStore(t)
 	aliceID := upsertIdentity(t, s, "uuid-alice", "alice")
 	bobID := upsertIdentity(t, s, "uuid-bob", "bob")
-	chID, _ := s.CreateChannel("general", true, []string{aliceID, bobID}, "channel")
+	chID, _ := s.CreateChannel("dev", true, []string{aliceID, bobID}, "channel")
 
 	_, err := s.SendMessage(chID, aliceID, "hey @bob", nil, []string{bobID})
 	if err != nil {
@@ -701,10 +717,10 @@ func TestUnreadCountsIncludesType(t *testing.T) {
 	aliceID := upsertIdentity(t, s, "uuid-alice", "alice")
 	bobID := upsertIdentity(t, s, "uuid-bob", "bob")
 
-	s.CreateChannel("general", true, []string{aliceID, bobID}, "channel")
+	s.CreateChannel("dev", true, []string{aliceID, bobID}, "channel")
 	s.OpenDM(aliceID, bobID, "bob")
 
-	ch, _ := s.GetChannelByName("general")
+	ch, _ := s.GetChannelByName("dev")
 	dm, _ := s.GetChannelByName("dm-alice-bob")
 
 	s.SendMessage(ch.ID, aliceID, "hello channel", nil, nil)
@@ -724,15 +740,15 @@ func TestUnreadCountsIncludesType(t *testing.T) {
 		typeMap[c.Channel] = c.Type
 		channelIDMap[c.Channel] = c.ChannelID
 	}
-	if typeMap["general"] != "channel" {
-		t.Errorf("general type = %q, want channel", typeMap["general"])
+	if typeMap["dev"] != "channel" {
+		t.Errorf("dev type = %q, want channel", typeMap["dev"])
 	}
 	if typeMap["dm-alice-bob"] != "dm" {
 		t.Errorf("dm type = %q, want dm", typeMap["dm-alice-bob"])
 	}
 	// Verify ChannelID is populated
-	if channelIDMap["general"] != ch.ID {
-		t.Errorf("general channel id = %d, want %d", channelIDMap["general"], ch.ID)
+	if channelIDMap["dev"] != ch.ID {
+		t.Errorf("dev channel id = %d, want %d", channelIDMap["dev"], ch.ID)
 	}
 	if channelIDMap["dm-alice-bob"] != dm.ID {
 		t.Errorf("dm channel id = %d, want %d", channelIDMap["dm-alice-bob"], dm.ID)
@@ -745,7 +761,7 @@ func TestMarkRead(t *testing.T) {
 	s := newTestStore(t)
 	aliceID := upsertIdentity(t, s, "uuid-alice", "alice")
 	bobID := upsertIdentity(t, s, "uuid-bob", "bob")
-	chID, _ := s.CreateChannel("general", true, []string{aliceID, bobID}, "channel")
+	chID, _ := s.CreateChannel("dev", true, []string{aliceID, bobID}, "channel")
 
 	msg1, _ := s.SendMessage(chID, aliceID, "msg1", nil, nil)
 	s.SendMessage(chID, aliceID, "msg2", nil, nil)
@@ -772,7 +788,7 @@ func TestMarkReadLatest(t *testing.T) {
 	s := newTestStore(t)
 	aliceID := upsertIdentity(t, s, "uuid-alice", "alice")
 	bobID := upsertIdentity(t, s, "uuid-bob", "bob")
-	chID, _ := s.CreateChannel("general", true, []string{aliceID, bobID}, "channel")
+	chID, _ := s.CreateChannel("dev", true, []string{aliceID, bobID}, "channel")
 
 	s.SendMessage(chID, aliceID, "msg1", nil, nil)
 	s.SendMessage(chID, aliceID, "msg2", nil, nil)
@@ -796,7 +812,7 @@ func TestMarkReadForwardOnly(t *testing.T) {
 	s := newTestStore(t)
 	aliceID := upsertIdentity(t, s, "uuid-alice", "alice")
 	bobID := upsertIdentity(t, s, "uuid-bob", "bob")
-	chID, _ := s.CreateChannel("general", true, []string{aliceID, bobID}, "channel")
+	chID, _ := s.CreateChannel("dev", true, []string{aliceID, bobID}, "channel")
 
 	msg1, _ := s.SendMessage(chID, aliceID, "msg1", nil, nil)
 	msg2, _ := s.SendMessage(chID, aliceID, "msg2", nil, nil)
@@ -1137,7 +1153,7 @@ func TestSetUserType(t *testing.T) {
 func TestImportMessage(t *testing.T) {
 	s := newTestStore(t)
 	uid := upsertIdentity(t, s, "uuid-alice", "alice")
-	chID, _ := s.CreateChannel("general", true, []string{uid}, "channel")
+	chID, _ := s.CreateChannel("dev", true, []string{uid}, "channel")
 	ts := time.Date(2025, 1, 15, 12, 0, 0, 0, time.UTC)
 	msgID, err := s.ImportMessage(chID, uid, "old message", nil, nil, ts)
 	if err != nil {
@@ -1159,7 +1175,7 @@ func TestImportMessageWithMentions(t *testing.T) {
 	s := newTestStore(t)
 	aliceID := upsertIdentity(t, s, "uuid-alice", "alice")
 	bobID := upsertIdentity(t, s, "uuid-bob", "bob")
-	chID, _ := s.CreateChannel("general", true, []string{aliceID, bobID}, "channel")
+	chID, _ := s.CreateChannel("dev", true, []string{aliceID, bobID}, "channel")
 	ts := time.Date(2025, 1, 15, 12, 0, 0, 0, time.UTC)
 	msgID, err := s.ImportMessage(chID, aliceID, "hey @bob", nil, []string{bobID}, ts)
 	if err != nil {

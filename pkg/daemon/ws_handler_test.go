@@ -123,6 +123,12 @@ func grantAdmin(t *testing.T, env *wsTestEnv, username string) {
 	}
 }
 
+// initUser is a test helper that upserts an identity directly in the store,
+// consuming the first-user auto-admin slot when called on an empty DB.
+func (env *wsTestEnv) initUser(authID, username, displayName string) {
+	env.store.UpsertIdentity(authID, username, displayName, "user", "user")
+}
+
 // --- Tests ---
 
 func TestWSPing(t *testing.T) {
@@ -171,7 +177,7 @@ func TestWSChannelCreate(t *testing.T) {
 	grantAdmin(t, env, "alice")
 
 	resp := wsReq(t, conn, "channel_create", map[string]interface{}{
-		"name":   "general",
+		"name":   "dev",
 		"public": true,
 	}, "c1")
 	if resp.OK == nil || !*resp.OK {
@@ -181,7 +187,8 @@ func TestWSChannelCreate(t *testing.T) {
 
 func TestWSChannelCreatePermissionDenied(t *testing.T) {
 	env := newWSTestEnv(t)
-	conn := connectUser(t, env, "alice") // "user" role lacks create_channel
+	env.initUser("admin-uuid", "setup-admin", "Setup Admin") // consume first-user auto-admin
+	conn := connectUser(t, env, "alice")                      // "user" role lacks create_channel
 
 	resp := wsReq(t, conn, "channel_create", map[string]interface{}{
 		"name":   "secret",
@@ -208,7 +215,7 @@ func TestWSChannelList(t *testing.T) {
 
 	// Create a channel first
 	wsReq(t, conn, "channel_create", map[string]interface{}{
-		"name": "general", "public": true,
+		"name": "dev", "public": true,
 	}, "c1")
 
 	resp := wsReq(t, conn, "channel_list", map[string]interface{}{}, "l1")
@@ -223,11 +230,18 @@ func TestWSChannelList(t *testing.T) {
 		} `json:"channels"`
 	}
 	json.Unmarshal(d, &result)
-	if len(result.Channels) == 0 {
-		t.Fatal("expected channels")
+	// Seeded "general" + "dev" = at least 2 channels
+	if len(result.Channels) < 2 {
+		t.Fatalf("expected at least 2 channels, got %d", len(result.Channels))
 	}
-	if result.Channels[0].Name != "general" {
-		t.Errorf("channel name = %q, want general", result.Channels[0].Name)
+	found := false
+	for _, ch := range result.Channels {
+		if ch.Name == "dev" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("expected dev in channel list")
 	}
 }
 
@@ -275,11 +289,11 @@ func TestWSSendMessage(t *testing.T) {
 	grantAdmin(t, env, "alice")
 
 	wsReq(t, conn, "channel_create", map[string]interface{}{
-		"name": "general", "public": true,
+		"name": "dev", "public": true,
 	}, "c1")
 
 	resp := wsReq(t, conn, "send_message", map[string]interface{}{
-		"channel": "general", "body": "hello world",
+		"channel": "dev", "body": "hello world",
 	}, "m1")
 	if resp.OK == nil || !*resp.OK {
 		t.Fatalf("expected ok, got %+v", resp)
@@ -320,18 +334,18 @@ func TestWSHistory(t *testing.T) {
 	grantAdmin(t, env, "alice")
 
 	wsReq(t, conn, "channel_create", map[string]interface{}{
-		"name": "general", "public": true,
+		"name": "dev", "public": true,
 	}, "c1")
 
 	// Send a few messages
 	for i := 0; i < 3; i++ {
 		wsReq(t, conn, "send_message", map[string]interface{}{
-			"channel": "general", "body": "msg",
+			"channel": "dev", "body": "msg",
 		}, "m")
 	}
 
 	resp := wsReq(t, conn, "history", map[string]interface{}{
-		"channel": "general",
+		"channel": "dev",
 	}, "h1")
 	if resp.OK == nil || !*resp.OK {
 		t.Fatalf("expected ok, got %+v", resp)
@@ -346,8 +360,8 @@ func TestWSHistory(t *testing.T) {
 		} `json:"messages"`
 	}
 	json.Unmarshal(d, &result)
-	if result.Channel != "general" {
-		t.Errorf("channel = %q, want general", result.Channel)
+	if result.Channel != "dev" {
+		t.Errorf("channel = %q, want dev", result.Channel)
 	}
 	if len(result.Messages) != 3 {
 		t.Errorf("got %d messages, want 3", len(result.Messages))
@@ -426,14 +440,14 @@ func TestWSSendMessageWithMentions(t *testing.T) {
 	bobConn := connectUser(t, env, "bob")
 
 	wsReq(t, aliceConn, "channel_create", map[string]interface{}{
-		"name": "general", "public": true,
+		"name": "dev", "public": true,
 	}, "c1")
 	wsReq(t, aliceConn, "channel_invite", map[string]interface{}{
-		"channel": "general", "username": "bob",
+		"channel": "dev", "username": "bob",
 	}, "inv1")
 
 	resp := wsReq(t, aliceConn, "send_message", map[string]interface{}{
-		"channel": "general",
+		"channel": "dev",
 		"body":    "hey @bob check this",
 	}, "m1")
 	if resp.OK == nil || !*resp.OK {
@@ -462,15 +476,15 @@ func TestWSSendMessageAutoMention(t *testing.T) {
 	bobConn := connectUser(t, env, "bob")
 
 	wsReq(t, aliceConn, "channel_create", map[string]interface{}{
-		"name": "general", "public": true,
+		"name": "dev", "public": true,
 	}, "c1")
 	wsReq(t, aliceConn, "channel_invite", map[string]interface{}{
-		"channel": "general", "username": "bob",
+		"channel": "dev", "username": "bob",
 	}, "inv1")
 
 	// No explicit mentions — server should extract @bob from body
 	resp := wsReq(t, aliceConn, "send_message", map[string]interface{}{
-		"channel": "general",
+		"channel": "dev",
 		"body":    "hey @bob check this",
 	}, "m1")
 	if resp.OK == nil || !*resp.OK {
@@ -499,15 +513,15 @@ func TestWSSendMessageWithThread(t *testing.T) {
 	bobConn := connectUser(t, env, "bob")
 
 	wsReq(t, aliceConn, "channel_create", map[string]interface{}{
-		"name": "general", "public": true,
+		"name": "dev", "public": true,
 	}, "c1")
 	wsReq(t, aliceConn, "channel_invite", map[string]interface{}{
-		"channel": "general", "username": "bob",
+		"channel": "dev", "username": "bob",
 	}, "inv1")
 
 	// Send parent message
 	parentResp := wsReq(t, aliceConn, "send_message", map[string]interface{}{
-		"channel": "general", "body": "parent msg",
+		"channel": "dev", "body": "parent msg",
 	}, "m1")
 	// Read bob's broadcast for parent
 	readWSEnvelope(t, bobConn)
@@ -520,7 +534,7 @@ func TestWSSendMessageWithThread(t *testing.T) {
 
 	// Reply in thread
 	resp := wsReq(t, aliceConn, "send_message", map[string]interface{}{
-		"channel":   "general",
+		"channel":   "dev",
 		"body":      "thread reply",
 		"thread_id": pr.ID,
 	}, "m2")
@@ -546,11 +560,11 @@ func TestWSSendMessageRejectNestedReply(t *testing.T) {
 	grantAdmin(t, env, "alice")
 
 	wsReq(t, conn, "channel_create", map[string]interface{}{
-		"name": "general", "public": true,
+		"name": "dev", "public": true,
 	}, "c1")
 
 	parentResp := wsReq(t, conn, "send_message", map[string]interface{}{
-		"channel": "general", "body": "parent",
+		"channel": "dev", "body": "parent",
 	}, "m1")
 	d, _ := json.Marshal(parentResp.D)
 	var pr struct {
@@ -559,7 +573,7 @@ func TestWSSendMessageRejectNestedReply(t *testing.T) {
 	json.Unmarshal(d, &pr)
 
 	replyResp := wsReq(t, conn, "send_message", map[string]interface{}{
-		"channel": "general", "body": "reply", "thread_id": pr.ID,
+		"channel": "dev", "body": "reply", "thread_id": pr.ID,
 	}, "m2")
 	d, _ = json.Marshal(replyResp.D)
 	var rr struct {
@@ -569,7 +583,7 @@ func TestWSSendMessageRejectNestedReply(t *testing.T) {
 
 	// Try nested reply — should fail
 	resp := wsReq(t, conn, "send_message", map[string]interface{}{
-		"channel": "general", "body": "nested", "thread_id": rr.ID,
+		"channel": "dev", "body": "nested", "thread_id": rr.ID,
 	}, "m3")
 	if resp.OK != nil && *resp.OK {
 		t.Error("expected error for nested reply")
@@ -582,11 +596,11 @@ func TestWSHistoryWithThreadFilter(t *testing.T) {
 	grantAdmin(t, env, "alice")
 
 	wsReq(t, conn, "channel_create", map[string]interface{}{
-		"name": "general", "public": true,
+		"name": "dev", "public": true,
 	}, "c1")
 
 	parentResp := wsReq(t, conn, "send_message", map[string]interface{}{
-		"channel": "general", "body": "parent",
+		"channel": "dev", "body": "parent",
 	}, "m1")
 	d, _ := json.Marshal(parentResp.D)
 	var pr struct {
@@ -595,14 +609,14 @@ func TestWSHistoryWithThreadFilter(t *testing.T) {
 	json.Unmarshal(d, &pr)
 
 	wsReq(t, conn, "send_message", map[string]interface{}{
-		"channel": "general", "body": "reply1", "thread_id": pr.ID,
+		"channel": "dev", "body": "reply1", "thread_id": pr.ID,
 	}, "m2")
 	wsReq(t, conn, "send_message", map[string]interface{}{
-		"channel": "general", "body": "other top-level",
+		"channel": "dev", "body": "other top-level",
 	}, "m3")
 
 	resp := wsReq(t, conn, "history", map[string]interface{}{
-		"channel": "general", "thread_id": pr.ID,
+		"channel": "dev", "thread_id": pr.ID,
 	}, "h1")
 	if resp.OK == nil || !*resp.OK {
 		t.Fatalf("expected ok, got %+v", resp)
@@ -629,12 +643,12 @@ func TestWSSendMessageMentionInvalidUser(t *testing.T) {
 	grantAdmin(t, env, "alice")
 
 	wsReq(t, conn, "channel_create", map[string]interface{}{
-		"name": "general", "public": true,
+		"name": "dev", "public": true,
 	}, "c1")
 
 	// Invalid mentions are silently ignored
 	resp := wsReq(t, conn, "send_message", map[string]interface{}{
-		"channel": "general",
+		"channel": "dev",
 		"body":    "hey @nobody",
 	}, "m1")
 	if resp.OK == nil || !*resp.OK {
@@ -649,14 +663,14 @@ func TestWSUnreadMessages(t *testing.T) {
 	bobConn := connectUser(t, env, "bob")
 
 	wsReq(t, aliceConn, "channel_create", map[string]interface{}{
-		"name": "general", "public": true,
+		"name": "dev", "public": true,
 	}, "c1")
 	wsReq(t, aliceConn, "channel_invite", map[string]interface{}{
-		"channel": "general", "username": "bob",
+		"channel": "dev", "username": "bob",
 	}, "inv1")
 
 	wsReq(t, aliceConn, "send_message", map[string]interface{}{
-		"channel": "general", "body": "hello bob",
+		"channel": "dev", "body": "hello bob",
 	}, "m1")
 	// Drain bob's broadcast
 	readWSEnvelope(t, bobConn)
@@ -679,8 +693,8 @@ func TestWSUnreadMessages(t *testing.T) {
 	if result.Messages[0].Body != "hello bob" {
 		t.Errorf("body = %q, want 'hello bob'", result.Messages[0].Body)
 	}
-	if result.Messages[0].Channel != "general" {
-		t.Errorf("channel = %q, want general", result.Messages[0].Channel)
+	if result.Messages[0].Channel != "dev" {
+		t.Errorf("channel = %q, want dev", result.Messages[0].Channel)
 	}
 }
 
@@ -703,15 +717,15 @@ func TestWSSendMessageWithMentionGroup(t *testing.T) {
 
 	// Create channel and invite bob.
 	wsReq(t, aliceConn, "channel_create", map[string]interface{}{
-		"name": "general", "public": true,
+		"name": "dev", "public": true,
 	}, "c1")
 	wsReq(t, aliceConn, "channel_invite", map[string]interface{}{
-		"channel": "general", "username": "bob",
+		"channel": "dev", "username": "bob",
 	}, "inv1")
 
 	// Send with group mention.
 	resp = wsReq(t, aliceConn, "send_message", map[string]interface{}{
-		"channel": "general",
+		"channel": "dev",
 		"body":    "hey @backend check this",
 	}, "m1")
 	if resp.OK == nil || !*resp.OK {

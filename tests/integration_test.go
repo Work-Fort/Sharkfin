@@ -548,6 +548,9 @@ func TestScenario3_ChannelVisibility(t *testing.T) {
 func TestScenario4_ChannelCreatePermissionDenied(t *testing.T) {
 	env := startTestServer(t)
 
+	// First user is auto-promoted to admin, so create a throwaway admin first.
+	_ = env.initUser("admin-uuid", "setup-admin", "Setup Admin")
+
 	alice := env.initUser("alice-uuid", "alice", "Alice")
 	// alice has "user" role which lacks create_channel permission.
 

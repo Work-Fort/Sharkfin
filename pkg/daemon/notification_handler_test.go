@@ -46,9 +46,9 @@ func TestClassifyNotification_Mention(t *testing.T) {
 func TestClassifyNotification_DM(t *testing.T) {
 	store, _, wh := notifTestSetup(t)
 
-	store.UpsertIdentity("uuid-alice", "alice", "Alice", "user", "user")
-	store.UpsertIdentity("uuid-bob", "bob", "Bob", "user", "user")
-	store.CreateChannel("dm-alice-bob", false, []string{"uuid-alice", "uuid-bob"}, "dm")
+	alice, _ := store.UpsertIdentity("uuid-alice", "alice", "Alice", "user", "user")
+	bob, _ := store.UpsertIdentity("uuid-bob", "bob", "Bob", "user", "user")
+	store.CreateChannel("dm-alice-bob", false, []string{alice.ID, bob.ID}, "dm")
 
 	msg := domain.MessageEvent{
 		ChannelName: "dm-alice-bob",
@@ -59,7 +59,7 @@ func TestClassifyNotification_DM(t *testing.T) {
 		SentAt:      time.Now(),
 	}
 
-	n := wh.classifyNotification(msg, "alice", "uuid-alice")
+	n := wh.classifyNotification(msg, "alice", alice.ID)
 	if n == nil {
 		t.Fatal("expected notification, got nil")
 	}
@@ -74,9 +74,9 @@ func TestClassifyNotification_DM(t *testing.T) {
 func TestClassifyNotification_RegularMessage(t *testing.T) {
 	store, _, wh := notifTestSetup(t)
 
-	store.UpsertIdentity("uuid-alice", "alice", "Alice", "user", "user")
-	store.UpsertIdentity("uuid-bob", "bob", "Bob", "user", "user")
-	store.CreateChannel("testchan", true, []string{"uuid-alice", "uuid-bob"}, "channel")
+	alice, _ := store.UpsertIdentity("uuid-alice", "alice", "Alice", "user", "user")
+	bob, _ := store.UpsertIdentity("uuid-bob", "bob", "Bob", "user", "user")
+	store.CreateChannel("testchan", true, []string{alice.ID, bob.ID}, "channel")
 
 	msg := domain.MessageEvent{
 		ChannelName: "testchan",
@@ -87,7 +87,7 @@ func TestClassifyNotification_RegularMessage(t *testing.T) {
 		SentAt:      time.Now(),
 	}
 
-	n := wh.classifyNotification(msg, "alice", "uuid-alice")
+	n := wh.classifyNotification(msg, "alice", alice.ID)
 	if n == nil {
 		t.Fatal("expected notification, got nil")
 	}

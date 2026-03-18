@@ -13,20 +13,20 @@ import (
 func populateSource(t *testing.T, s *sqlite.Store) {
 	t.Helper()
 
-	s.UpsertIdentity("uuid-alice", "alice", "Alice", "user", "user")
-	s.UpsertIdentity("uuid-bob", "bob", "Bob", "user", "user")
+	alice, _ := s.UpsertIdentity("uuid-alice", "alice", "Alice", "user", "user")
+	bob, _ := s.UpsertIdentity("uuid-bob", "bob", "Bob", "user", "user")
 	s.SetUserRole("alice", "admin")
 	s.SetUserType("bob", "agent")
 
-	genID, _ := s.CreateChannel("general", true, []string{"uuid-alice", "uuid-bob"}, "channel")
-	s.CreateChannel("secret", false, []string{"uuid-alice"}, "channel")
+	devID, _ := s.CreateChannel("dev", true, []string{alice.ID, bob.ID}, "channel")
+	s.CreateChannel("secret", false, []string{alice.ID}, "channel")
 
-	parentID, _ := s.SendMessage(genID, "uuid-alice", "hello @bob", nil, []string{"uuid-bob"})
-	s.SendMessage(genID, "uuid-bob", "reply to alice", &parentID, nil)
+	parentID, _ := s.SendMessage(devID, alice.ID, "hello @bob", nil, []string{bob.ID})
+	s.SendMessage(devID, bob.ID, "reply to alice", &parentID, nil)
 
-	s.OpenDM("uuid-alice", "uuid-bob", "bob")
+	s.OpenDM(alice.ID, bob.ID, "bob")
 	dm, _ := s.GetChannelByName("dm-alice-bob")
-	s.SendMessage(dm.ID, "uuid-alice", "dm message", nil, nil)
+	s.SendMessage(dm.ID, alice.ID, "dm message", nil, nil)
 
 	s.SetSetting("motd", "Welcome!")
 
@@ -45,8 +45,11 @@ func TestImportDataRoundtrip(t *testing.T) {
 	}
 
 	// --- Import to destination ---
+	// Seed a throwaway identity so IsEmpty() returns false, then force=true
+	// triggers WipeAll() which clears the auto-seeded "general" channel.
 	dst := newTestStore(t)
-	if err := backup.ImportData(dst, exported, false); err != nil {
+	dst.UpsertIdentity("throwaway", "throwaway", "Throwaway", "user", "user")
+	if err := backup.ImportData(dst, exported, true); err != nil {
 		t.Fatalf("import: %v", err)
 	}
 

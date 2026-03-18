@@ -22,24 +22,24 @@ func TestExportData(t *testing.T) {
 	s := newTestStore(t)
 
 	// --- Seed identities ---
-	s.UpsertIdentity("uuid-alice", "alice", "Alice", "user", "user")
-	s.UpsertIdentity("uuid-bob", "bob", "Bob", "user", "user")
+	alice, _ := s.UpsertIdentity("uuid-alice", "alice", "Alice", "user", "user")
+	bob, _ := s.UpsertIdentity("uuid-bob", "bob", "Bob", "user", "user")
 	s.SetUserRole("alice", "admin")
 	s.SetUserType("bob", "agent")
 
-	// --- Seed channels ---
-	genID, _ := s.CreateChannel("general", true, []string{"uuid-alice", "uuid-bob"}, "channel")
-	secretID, _ := s.CreateChannel("secret", false, []string{"uuid-alice"}, "channel")
+	// --- Seed channels (avoid "general" — already seeded by store) ---
+	devID, _ := s.CreateChannel("dev", true, []string{alice.ID, bob.ID}, "channel")
+	secretID, _ := s.CreateChannel("secret", false, []string{alice.ID}, "channel")
 
 	// --- Seed messages ---
-	parentID, _ := s.SendMessage(genID, "uuid-alice", "hello @bob", nil, []string{"uuid-bob"})
-	s.SendMessage(genID, "uuid-bob", "reply", &parentID, nil)
-	s.SendMessage(secretID, "uuid-alice", "secret msg", nil, nil)
+	parentID, _ := s.SendMessage(devID, alice.ID, "hello @bob", nil, []string{bob.ID})
+	s.SendMessage(devID, bob.ID, "reply", &parentID, nil)
+	s.SendMessage(secretID, alice.ID, "secret msg", nil, nil)
 
 	// --- Seed DM ---
-	s.OpenDM("uuid-alice", "uuid-bob", "bob")
+	s.OpenDM(alice.ID, bob.ID, "bob")
 	dm, _ := s.GetChannelByName("dm-alice-bob")
-	s.SendMessage(dm.ID, "uuid-alice", "dm msg", nil, nil)
+	s.SendMessage(dm.ID, alice.ID, "dm msg", nil, nil)
 
 	// --- Seed settings ---
 	s.SetSetting("motd", "Welcome!")
@@ -74,24 +74,24 @@ func TestExportData(t *testing.T) {
 		t.Errorf("bob type = %q, want agent", userMap["bob"].Type)
 	}
 
-	// Channels
-	if len(b.Channels) != 2 {
-		t.Fatalf("channels = %d, want 2", len(b.Channels))
+	// Channels (seeded "general" + "dev" + "secret" = 3)
+	if len(b.Channels) != 3 {
+		t.Fatalf("channels = %d, want 3", len(b.Channels))
 	}
 	chMap := make(map[string]backup.BackupChannel)
 	for _, ch := range b.Channels {
 		chMap[ch.Name] = ch
 	}
-	if !chMap["general"].Public {
-		t.Error("general should be public")
+	if !chMap["dev"].Public {
+		t.Error("dev should be public")
 	}
 	if chMap["secret"].Public {
 		t.Error("secret should not be public")
 	}
 
 	// Channel members
-	if members, ok := b.ChannelMembers["general"]; !ok || len(members) != 2 {
-		t.Errorf("general members = %v, want 2 members", members)
+	if members, ok := b.ChannelMembers["dev"]; !ok || len(members) != 2 {
+		t.Errorf("dev members = %v, want 2 members", members)
 	}
 	if members, ok := b.ChannelMembers["secret"]; !ok || len(members) != 1 {
 		t.Errorf("secret members = %v, want 1 member", members)
@@ -177,8 +177,9 @@ func TestExportDataEmptyStore(t *testing.T) {
 	if len(b.Users) != 0 {
 		t.Errorf("users = %d, want 0", len(b.Users))
 	}
-	if len(b.Channels) != 0 {
-		t.Errorf("channels = %d, want 0", len(b.Channels))
+	// Seeded "general" channel is always present
+	if len(b.Channels) != 1 {
+		t.Errorf("channels = %d, want 1 (seeded general)", len(b.Channels))
 	}
 	if len(b.Messages) != 0 {
 		t.Errorf("messages = %d, want 0", len(b.Messages))
