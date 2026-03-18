@@ -78,6 +78,9 @@ React MF remote providing CRUD for users, service keys, and agent keys. Blocked 
 - [ ] Hamburger menu content still visible alongside button on desktop (MutationObserver fix landed but needs verification)
 - [ ] Hamburger menu should be hidden on desktop — settings only show inside hamburger panel
 
+### Session / Auth
+- [ ] Login form flashes on refresh before session check completes — `needsAuth` defaults to `true`, shows sign-in form, then async `checkSession` hides it. Fix: delay render or default to loading state.
+
 ### Integration Issues
 - [ ] MCP bridge identity has no permissions (chicken-and-egg — [Issue 12](2026-03-16-shell-integration-issues.md))
 
