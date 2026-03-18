@@ -8,3 +8,15 @@ web/dist/
 /node_modules/
 .worktrees/
 build/aur-test/
+.mcp.json
+
+# Playwright / testing artifacts
+.playwright-mcp/
+web/playwright-report/
+web/test-results/
+
+# Module Federation temp
+web/.__mf__temp/
+
+# Screenshots (Playwright, debug)
+*.png
