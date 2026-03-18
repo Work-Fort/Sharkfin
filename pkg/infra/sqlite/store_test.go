@@ -21,31 +21,35 @@ func newTestStore(t *testing.T) *Store {
 }
 
 // upsertIdentity is a test helper that upserts an identity with sensible defaults.
-func upsertIdentity(t *testing.T, s *Store, id, username string) string {
+func upsertIdentity(t *testing.T, s *Store, authID, username string) string {
 	t.Helper()
-	if err := s.UpsertIdentity(id, username, username, "user", "user"); err != nil {
+	ident, err := s.UpsertIdentity(authID, username, username, "user", "user")
+	if err != nil {
 		t.Fatalf("upsert identity %s: %v", username, err)
 	}
-	return id
+	return ident.ID
 }
 
 // --- Identities ---
 
 func TestUpsertIdentity(t *testing.T) {
 	s := newTestStore(t)
-	err := s.UpsertIdentity("uuid-alice", "alice", "Alice", "user", "user")
+	ident, err := s.UpsertIdentity("uuid-alice", "alice", "Alice", "user", "user")
 	if err != nil {
 		t.Fatalf("upsert identity: %v", err)
 	}
-	ident, err := s.GetIdentityByUsername("alice")
-	if err != nil {
-		t.Fatalf("get identity: %v", err)
-	}
-	if ident.ID != "uuid-alice" {
-		t.Errorf("id = %q, want uuid-alice", ident.ID)
+	if ident.AuthID != "uuid-alice" {
+		t.Errorf("auth_id = %q, want uuid-alice", ident.AuthID)
 	}
 	if ident.Username != "alice" {
 		t.Errorf("username = %q, want alice", ident.Username)
+	}
+	if ident.ID == "" {
+		t.Error("expected non-empty internal ID")
+	}
+	// Internal ID should differ from auth_id (it's a generated hex UUID)
+	if ident.ID == "uuid-alice" {
+		t.Error("internal ID should not equal auth_id")
 	}
 }
 
@@ -53,26 +57,18 @@ func TestUpsertIdentityFirstUserAutoAdmin(t *testing.T) {
 	s := newTestStore(t)
 
 	// First user on empty DB should be auto-promoted to admin.
-	err := s.UpsertIdentity("uuid-first", "first", "First", "user", "user")
+	ident, err := s.UpsertIdentity("uuid-first", "first", "First", "user", "user")
 	if err != nil {
 		t.Fatalf("upsert first identity: %v", err)
-	}
-	ident, err := s.GetIdentityByUsername("first")
-	if err != nil {
-		t.Fatalf("get first identity: %v", err)
 	}
 	if ident.Role != "admin" {
 		t.Errorf("first user role = %q, want admin", ident.Role)
 	}
 
 	// Second user should NOT be auto-promoted.
-	err = s.UpsertIdentity("uuid-second", "second", "Second", "user", "user")
+	ident2, err := s.UpsertIdentity("uuid-second", "second", "Second", "user", "user")
 	if err != nil {
 		t.Fatalf("upsert second identity: %v", err)
-	}
-	ident2, err := s.GetIdentityByUsername("second")
-	if err != nil {
-		t.Fatalf("get second identity: %v", err)
 	}
 	if ident2.Role != "user" {
 		t.Errorf("second user role = %q, want user", ident2.Role)
@@ -81,22 +77,44 @@ func TestUpsertIdentityFirstUserAutoAdmin(t *testing.T) {
 
 func TestUpsertIdentityIdempotent(t *testing.T) {
 	s := newTestStore(t)
-	err := s.UpsertIdentity("uuid-alice", "alice", "Alice", "user", "user")
+	ident1, err := s.UpsertIdentity("uuid-alice", "alice", "Alice", "user", "user")
 	if err != nil {
 		t.Fatalf("first upsert: %v", err)
 	}
-	// Second upsert with same ID should update, not fail
-	err = s.UpsertIdentity("uuid-alice", "alice", "Alice Updated", "user", "user")
+	// Second upsert with same auth_id should update, not fail
+	ident2, err := s.UpsertIdentity("uuid-alice", "alice", "Alice Updated", "user", "user")
 	if err != nil {
 		t.Fatalf("second upsert: %v", err)
 	}
-	ident, err := s.GetIdentityByUsername("alice")
-	if err != nil {
-		t.Fatalf("get identity: %v", err)
+	if ident2.ID != ident1.ID {
+		t.Errorf("internal ID changed: %q -> %q", ident1.ID, ident2.ID)
 	}
-	if ident.DisplayName != "Alice Updated" {
-		t.Errorf("display_name = %q, want Alice Updated", ident.DisplayName)
+	if ident2.DisplayName != "Alice Updated" {
+		t.Errorf("display_name = %q, want Alice Updated", ident2.DisplayName)
 	}
+}
+
+func TestUpsertIdentityAuthIDChange(t *testing.T) {
+	store := newTestStore(t)
+
+	// First provision with auth_id "old-passport-id"
+	ident1, err := store.UpsertIdentity("old-passport-id", "alice", "Alice", "user", "user")
+	require.NoError(t, err)
+	require.Equal(t, "alice", ident1.Username)
+	require.Equal(t, "old-passport-id", ident1.AuthID)
+	internalID := ident1.ID
+
+	// Passport recreates user with new UUID
+	ident2, err := store.UpsertIdentity("new-passport-id", "alice", "Alice Updated", "user", "user")
+	require.NoError(t, err)
+	require.Equal(t, internalID, ident2.ID, "internal ID must not change")
+	require.Equal(t, "new-passport-id", ident2.AuthID)
+	require.Equal(t, "Alice Updated", ident2.DisplayName)
+
+	// FK references still work — lookup by internal ID
+	ident3, err := store.GetIdentityByID(internalID)
+	require.NoError(t, err)
+	require.Equal(t, "new-passport-id", ident3.AuthID)
 }
 
 func TestGetIdentityByUsernameNotFound(t *testing.T) {
