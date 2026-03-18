@@ -279,6 +279,9 @@ This needs investigation — check how the scope team's own MF remotes (if any) 
 | 7 | JWT aud/iss uses localhost | Low | Passport | No | Open |
 | 8 | BFF 404 on fort-scoped SPA routes | Medium | Scope | No (client nav works) | Open |
 | 9 | remoteEntry.js ESM format mismatch | **High** | Scope (shell) | **Yes** | **RESOLVED** — shell now loads remotes as ESM |
+| 10 | `wf-button` doesn't submit forms | Medium | Scope (`@workfort/ui`) | No (workaround) | Open |
+| 11 | WS constructor fails in browser | **High** | Sharkfin (client) | Yes | **RESOLVED** |
+| 12 | MCP bridge has no permissions | Medium | Sharkfin | No (testing only) | Open |
 
 ## Issue 10: `wf-button` with `type="submit"` does not trigger form submission
 
@@ -323,3 +326,29 @@ Shell at `/forts/local/chat` shows:
 - Sidebar: `wf-skeleton` loading placeholders (SidebarContent rendered)
 - Main: `wf-banner` "Chat service is unavailable." (`connected=false` from shell)
 - Zero console errors, zero MF load failures
+
+---
+
+## Issue 12: MCP bridge identity has no permissions (chicken-and-egg)
+
+**Step:** Connect Claude Code MCP bridge to Sharkfin daemon and attempt any tool call
+
+**What happened:** Every MCP tool call returns "permission denied". The `capabilities` tool returns `null` (empty permission set). The bridge identity was created when the API key was first used, but since other identities already existed in the database, it did not receive the auto-admin role (which only applies to the very first identity — `identities.go:17-18`).
+
+**Evidence:**
+```
+mcp__sharkfin__channel_list → "permission denied: channel_list"
+mcp__sharkfin__list_roles → "permission denied: manage_roles"
+mcp__sharkfin__capabilities → null
+```
+
+**Impact:** The MCP bridge cannot be used for integration testing or chat interaction. Admin tools (`set_role`, `grant_permission`, `list_roles`) also require `manage_roles` permission, so the bridge cannot bootstrap itself.
+
+**Root cause:** `mcp_server.go:28-47` — the `toolPermissions` map gates ALL tools including admin tools. `identities.go:16-18` — auto-admin only triggers when `COUNT(*) FROM identities` is 0. The API key in `.mcp.json` (`wf-svcbbt...`) is different from the seeded Passport Sharkfin key (`wf-svceEB...`), so it creates a new identity that gets the default (empty) role.
+
+**Owning service:** Sharkfin
+
+**Proposed fixes (ordered by correctness):**
+1. **Use the correct API key** — update `.mcp.json` to use the Passport-seeded Sharkfin service key (`wf-svceEB...`). That identity may already have admin role from being the first service identity. Needs verification.
+2. **CLI admin bootstrap** — add a `sharkfin admin grant` CLI command that operates directly on the database, bypassing the permission system. This is the standard pattern for admin bootstrapping.
+3. **Exempt admin tools from permission checks for the first admin** — if no identity has `manage_roles`, allow any authenticated identity to use admin tools (bootstrap mode).
