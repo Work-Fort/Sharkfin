@@ -42,6 +42,9 @@ func TestUIHealthReturnsManifest(t *testing.T) {
 	if len(health.WSPaths) != 2 || health.WSPaths[0] != "/ws" || health.WSPaths[1] != "/presence" {
 		t.Fatalf("expected ws_paths=[/ws, /presence], got %v", health.WSPaths)
 	}
+	if health.NotificationPath != "/notifications/subscribe" {
+		t.Fatalf("expected notification_path=/notifications/subscribe, got %s", health.NotificationPath)
+	}
 }
 
 func TestUIStaticFileServing(t *testing.T) {

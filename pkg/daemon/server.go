@@ -62,6 +62,7 @@ func NewServer(ctx context.Context, addr string, store domain.Store, pongTimeout
 	mux.Handle("/mcp", mw(mcpTransport))
 	mux.Handle("GET /presence", mw(presenceHandler))
 	mux.Handle("GET /ws", mw(wsHandler))
+	mux.Handle("GET /notifications/subscribe", mw(http.HandlerFunc(wsHandler.handleNotificationSubscribe)))
 
 	return &Server{
 		addr:    addr,

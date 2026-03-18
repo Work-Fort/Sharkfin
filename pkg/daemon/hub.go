@@ -137,6 +137,7 @@ func (h *Hub) BroadcastMessage(channelID int64, channelName string, channelType 
 				ChannelName: channelName,
 				ChannelType: channelType,
 				From:        msg.From,
+				Body:        msg.Body,
 				MessageID:   msg.ID,
 				SentAt:      msg.CreatedAt,
 				Mentions:    mentions,

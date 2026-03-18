@@ -81,6 +81,7 @@ type MessageEvent struct {
 	ChannelName string
 	ChannelType string // "channel" or "dm"
 	From        string
+	Body        string
 	MessageID   int64
 	SentAt      time.Time
 	Mentions    []string

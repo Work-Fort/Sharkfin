@@ -11,11 +11,12 @@ import (
 // from GET /ui/health. The tracker decodes this to discover the service's
 // frontend manifest and WebSocket paths for proxying.
 type uiHealthResponse struct {
-	Status  string   `json:"status"`
-	Name    string   `json:"name"`
-	Label   string   `json:"label"`
-	Route   string   `json:"route"`
-	WSPaths []string `json:"ws_paths"`
+	Status           string   `json:"status"`
+	Name             string   `json:"name"`
+	Label            string   `json:"label"`
+	Route            string   `json:"route"`
+	WSPaths          []string `json:"ws_paths"`
+	NotificationPath string   `json:"notification_path,omitempty"`
 }
 
 // registerUIRoutes adds the /ui/health probe and static file serving.
@@ -26,11 +27,12 @@ func registerUIRoutes(mux *http.ServeMux, uiDir string, embeddedFS fs.FS) {
 	mux.HandleFunc("GET /ui/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(uiHealthResponse{
-			Status:  "ok",
-			Name:    "sharkfin",
-			Label:   "Chat",
-			Route:   "/chat",
-			WSPaths: []string{"/ws", "/presence"},
+			Status:           "ok",
+			Name:             "sharkfin",
+			Label:            "Chat",
+			Route:            "/chat",
+			WSPaths:          []string{"/ws", "/presence"},
+			NotificationPath: "/notifications/subscribe",
 		})
 	})
 
