@@ -47,20 +47,18 @@ export function ChannelSidebar(props: SidebarProps) {
   };
 
   return (
-    <div class="sf-sidebar">
-      <div class="sf-sidebar__header">
-        <span class="sf-sidebar__title">Sharkfin</span>
-        <Show when={canCreateChannel()}>
-          <wf-button style="padding: var(--wf-space-xs) var(--wf-space-sm); font-size: var(--wf-text-sm);" title="New channel" on:click={() => props.onNewChannel?.()}>
-            +
-          </wf-button>
-        </Show>
-      </div>
-      <div class="sf-sidebar__search">
-        <wf-input placeholder="Search conversations…" on:input={(e: Event) => setSearchTerm((e.target as HTMLInputElement).value)} />
-      </div>
-      <div class="sf-channels">
-        <div class="sf-section-label">Channels</div>
+    <wf-nav-sidebar
+      heading="Sharkfin"
+      search-placeholder="Search conversations…"
+      on:wf-search={(e: CustomEvent) => setSearchTerm(e.detail.term)}
+    >
+      <Show when={canCreateChannel()}>
+        <wf-button slot="actions" style="padding: var(--wf-space-xs) var(--wf-space-sm); font-size: var(--wf-text-sm);" title="New channel" on:click={() => props.onNewChannel?.()}>
+          +
+        </wf-button>
+      </Show>
+
+      <wf-nav-section heading="Channels">
         <Show when={canChannelList()} fallback={
           <div style="padding: var(--wf-space-sm) var(--wf-space-md); font-size: var(--wf-text-xs); color: var(--wf-color-text-muted);">
             No channel access
@@ -92,14 +90,13 @@ export function ChannelSidebar(props: SidebarProps) {
             </For>
           </wf-list>
         </Show>
+      </wf-nav-section>
 
-        <Show when={canDmList()}>
-          <div class="sf-section-label" style="display: flex; justify-content: space-between; align-items: center;">
-            Direct Messages
-            <Show when={props.onNewDM && canDmOpen()}>
-              <wf-button style="padding: 0 var(--wf-space-xs); font-size: var(--wf-text-xs);" title="New DM" on:click={() => props.onNewDM!()}>+</wf-button>
-            </Show>
-          </div>
+      <Show when={canDmList()}>
+        <wf-nav-section heading="Direct Messages">
+          <Show when={props.onNewDM && canDmOpen()}>
+            <wf-button slot="section-actions" style="padding: 0 var(--wf-space-xs); font-size: var(--wf-text-xs);" title="New DM" on:click={() => props.onNewDM!()}>+</wf-button>
+          </Show>
           <wf-list>
             <For each={filteredDms()}>
               {(dm) => {
@@ -119,8 +116,8 @@ export function ChannelSidebar(props: SidebarProps) {
               }}
             </For>
           </wf-list>
-        </Show>
-      </div>
-    </div>
+        </wf-nav-section>
+      </Show>
+    </wf-nav-sidebar>
   );
 }

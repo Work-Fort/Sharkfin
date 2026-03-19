@@ -1,46 +1,6 @@
 /* Sharkfin Chat — structural layout only. All visual properties use --wf-* tokens. */
 
-/* Sidebar */
-.sf-sidebar {
-  background: var(--wf-color-bg);
-  border-right: 1px solid var(--wf-color-border);
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-}
-.sf-sidebar__header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: var(--wf-space-md) var(--wf-space-md) var(--wf-space-sm);
-}
-.sf-sidebar__title {
-  font-size: var(--wf-text-sm);
-  font-weight: var(--wf-weight-semibold);
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  color: var(--wf-color-text-secondary);
-}
-.sf-sidebar__search {
-  padding: 0 var(--wf-space-sm) var(--wf-space-sm);
-}
-
-.sf-section-label {
-  padding: var(--wf-space-sm) var(--wf-space-md) var(--wf-space-xs);
-  font-size: var(--wf-text-xs);
-  font-weight: var(--wf-weight-semibold);
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  color: var(--wf-color-text-muted);
-}
-
 /* Channel list items */
-.sf-channels {
-  flex: 1;
-  overflow-y: auto;
-  scrollbar-width: thin;
-  scrollbar-color: var(--wf-color-border) transparent;
-}
 .sf-channel {
   display: flex;
   align-items: center;
@@ -196,8 +156,6 @@
 
 /* Responsive — mobile viewport */
 @media (max-width: 640px) {
-  .sf-sidebar__search { display: none; }
-
   .sf-main__header {
     padding: var(--wf-space-xs) var(--wf-space-md);
   }
