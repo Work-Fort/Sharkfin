@@ -2,7 +2,7 @@
 
 /* Sidebar */
 .sf-sidebar {
-  background: var(--wf-color-bg-secondary);
+  background: var(--wf-color-bg);
   border-right: 1px solid var(--wf-color-border);
   display: flex;
   flex-direction: column;
