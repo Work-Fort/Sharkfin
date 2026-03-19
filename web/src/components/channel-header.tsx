@@ -20,7 +20,7 @@ export function ChannelHeader(props: ChannelHeaderProps) {
           <span class="sf-main__topic">{props.topic}</span>
         </Show>
         <Show when={canInvite()}>
-          <wf-button style="padding: 2px 8px; font-size: var(--wf-text-xs);" on:click={() => props.onInvite!()}>
+          <wf-button style="padding: var(--wf-space-xs) var(--wf-space-sm); font-size: var(--wf-text-xs);" on:click={() => props.onInvite!()}>
             Invite
           </wf-button>
         </Show>
