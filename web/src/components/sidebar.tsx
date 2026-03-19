@@ -52,13 +52,13 @@ export function ChannelSidebar(props: SidebarProps) {
       <div class="sf-sidebar__header">
         <span class="sf-sidebar__title">Sharkfin</span>
         <Show when={canCreateChannel()}>
-          <wf-button style="padding: 2px 6px; font-size: 14px;" title="New channel" on:click={() => props.onNewChannel?.()}>
+          <wf-button style="padding: var(--wf-space-xs) var(--wf-space-sm); font-size: var(--wf-text-sm);" title="New channel" on:click={() => props.onNewChannel?.()}>
             +
           </wf-button>
         </Show>
       </div>
       <div class="sf-sidebar__search">
-        <input type="text" placeholder="Search conversations…" on:input={(e: Event) => setSearchTerm((e.target as HTMLInputElement).value)} />
+        <wf-text-input placeholder="Search conversations…" on:input={(e: Event) => setSearchTerm((e.target as HTMLInputElement).value)} />
       </div>
       <div class="sf-channels">
         <div class="sf-section-label">Channels</div>
@@ -83,7 +83,7 @@ export function ChannelSidebar(props: SidebarProps) {
                     }}
                   >
                     <span class="sf-channel__hash">#</span>
-                    <span class="sf-channel__name" style={ch.member ? undefined : 'font-style: italic; opacity: 0.7;'}>{ch.name}</span>
+                    <span class="sf-channel__name" style={ch.member ? undefined : 'font-style: italic; color: var(--wf-color-text-muted);'}>{ch.name}</span>
                     <Show when={count() > 0}>
                       <wf-badge data-wf="trailing" count={count()} size="sm" />
                     </Show>
@@ -98,7 +98,7 @@ export function ChannelSidebar(props: SidebarProps) {
           <div class="sf-section-label" style="display: flex; justify-content: space-between; align-items: center;">
             Direct Messages
             <Show when={props.onNewDM && canDmOpen()}>
-              <wf-button style="padding: 1px 5px; font-size: 12px;" title="New DM" on:click={() => props.onNewDM!()}>+</wf-button>
+              <wf-button style="padding: 0 var(--wf-space-xs); font-size: var(--wf-text-xs);" title="New DM" on:click={() => props.onNewDM!()}>+</wf-button>
             </Show>
           </div>
           <wf-list>

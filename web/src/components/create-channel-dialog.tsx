@@ -28,10 +28,8 @@ export function CreateChannelDialog(props: CreateChannelDialogProps) {
   return (
     <wf-dialog ref={dialogRef} header="Create Channel" on:wf-close={props.onClose}>
       <div style="display: flex; flex-direction: column; gap: var(--wf-space-md); padding: var(--wf-space-sm);">
-        <input
-          type="text"
+        <wf-text-input
           placeholder="Channel name"
-          style="width: 100%; padding: var(--wf-space-xs) var(--wf-space-sm); border-radius: var(--wf-radius-sm); border: 1px solid var(--wf-color-border); background: var(--wf-color-bg); color: var(--wf-color-text); font-family: inherit; font-size: var(--wf-text-sm); outline: none; box-sizing: border-box;"
           value={name()}
           on:input={(e: Event) => setName((e.target as HTMLInputElement).value)}
           on:keydown={(e: KeyboardEvent) => { if (e.key === 'Enter') handleCreate(); }}

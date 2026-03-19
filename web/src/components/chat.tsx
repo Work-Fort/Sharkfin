@@ -53,7 +53,7 @@ export function SharkfinChat(props: SharkfinChatProps) {
       <Show when={!initFailed() && loading()}>
         <div style="padding: var(--wf-space-lg);">
           <wf-skeleton width="100%" height="2rem" />
-          <wf-skeleton width="100%" height="200px" style="margin-top: var(--wf-space-md);" />
+          <wf-skeleton width="100%" height="12rem" style="margin-top: var(--wf-space-md);" />
           <wf-skeleton width="60%" height="1rem" style="margin-top: var(--wf-space-md);" />
         </div>
       </Show>
