@@ -1,6 +1,5 @@
 import { createSignal, createMemo, For, Show } from 'solid-js';
 import type { Channel, DM, UnreadCount, User } from '@workfort/sharkfin-client';
-import { initials } from '@workfort/ui';
 
 interface SidebarProps {
   channels: Channel[];
@@ -113,13 +112,7 @@ export function ChannelSidebar(props: SidebarProps) {
                 };
                 return (
                   <wf-list-item on:wf-select={() => props.onSelectChannel(dm.channel)}>
-                    <div class="sf-dm__avatar">
-                      {initials(other())}
-                      <wf-status-dot
-                        status={presenceStatus()}
-                        style="position:absolute;bottom:-1px;right:-1px;"
-                      />
-                    </div>
+                    <wf-avatar class="sf-dm__avatar" username={other()} size="sm" status={presenceStatus()} />
                     <span>{other()}</span>
                   </wf-list-item>
                 );
