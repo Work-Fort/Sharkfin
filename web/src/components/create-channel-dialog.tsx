@@ -28,7 +28,7 @@ export function CreateChannelDialog(props: CreateChannelDialogProps) {
   return (
     <wf-dialog ref={dialogRef} header="Create Channel" on:wf-close={props.onClose}>
       <div style="display: flex; flex-direction: column; gap: var(--wf-space-md); padding: var(--wf-space-sm);">
-        <wf-text-input
+        <wf-input
           placeholder="Channel name"
           value={name()}
           on:input={(e: Event) => setName((e.target as HTMLInputElement).value)}

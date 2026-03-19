@@ -57,7 +57,7 @@ export function ChannelSidebar(props: SidebarProps) {
         </Show>
       </div>
       <div class="sf-sidebar__search">
-        <wf-text-input placeholder="Search conversations…" on:input={(e: Event) => setSearchTerm((e.target as HTMLInputElement).value)} />
+        <wf-input placeholder="Search conversations…" on:input={(e: Event) => setSearchTerm((e.target as HTMLInputElement).value)} />
       </div>
       <div class="sf-channels">
         <div class="sf-section-label">Channels</div>
