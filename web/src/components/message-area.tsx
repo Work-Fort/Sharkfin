@@ -31,11 +31,7 @@ export function MessageArea(props: MessageAreaProps) {
           return (
             <>
               {showDivider() && (
-                <div class="sf-divider">
-                  <div class="sf-divider__line" />
-                  <span class="sf-divider__text">{formatDateLabel(msg.sentAt)}</span>
-                  <div class="sf-divider__line" />
-                </div>
+                <wf-divider label={formatDateLabel(msg.sentAt)} />
               )}
               <Message
                 from={msg.from}

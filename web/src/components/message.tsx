@@ -1,5 +1,5 @@
 import { Show } from 'solid-js';
-import { initials, formatTime } from '@workfort/ui';
+import { formatTime } from '@workfort/ui';
 
 interface MessageProps {
   from: string;
@@ -11,9 +11,7 @@ interface MessageProps {
 export function Message(props: MessageProps) {
   return (
     <div class={`sf-msg${props.continuation ? ' sf-msg--cont' : ''}`}>
-      <div class={`sf-msg__avatar${props.continuation ? ' sf-msg__avatar--hidden' : ''}`}>
-        {initials(props.from)}
-      </div>
+      <wf-avatar class={`sf-msg__avatar${props.continuation ? ' sf-msg__avatar--hidden' : ''}`} username={props.from} size="md" />
       <div class="sf-msg__body">
         <Show when={!props.continuation}>
           <div class="sf-msg__header">
