@@ -6,62 +6,62 @@ Tracks all UI work across the platform. Items are roughly priority-ordered withi
 
 ## Active: Scope Rust Migration (scope-core)
 
-Replacing the Go BFF with a shared Rust library crate. This is the current top priority — it unblocks the Passport admin UI, cross-app notifications, and framework-agnostic MF remotes.
+Replacing the Go BFF with a shared Rust library crate. Phases 1-4, 6, and 7 are complete. Phase 5 (Tauri) is deferred.
 
 - [Design](2026-03-17-scope-core-design.md) · [Plan](plans/2026-03-17-scope-core-plan.md)
 
 ### Phase 1: Workspace + Domain
-- [ ] Cargo workspace setup (scope-core, scope-server, workfort-scope)
-- [ ] Remove all Go code from scope repo
-- [ ] Domain types and Store trait (ports)
+- [x] Cargo workspace setup (scope-core, scope-server, workfort-scope)
+- [x] Remove all Go code from scope repo
+- [x] Domain types and Store trait (ports)
 
 ### Phase 2: Store Adapters
-- [ ] SQLite store adapter (sqlx)
-- [ ] Postgres store adapter (sqlx, TIMESTAMPTZ, JSONB)
+- [x] SQLite store adapter (sqlx)
+- [x] Postgres store adapter (sqlx, TIMESTAMPTZ, JSONB)
 
 ### Phase 3: Infrastructure
-- [ ] HTTP/WS reverse proxy
-- [ ] Service discovery + health polling
-- [ ] Notification subscriber (connects to service `/notifications/subscribe` WS)
-- [ ] YAML config parsing (XDG paths)
+- [x] HTTP/WS reverse proxy
+- [x] Service discovery + health polling
+- [x] Notification subscriber (connects to service `/notifications/subscribe` WS)
+- [x] YAML config parsing (XDG paths)
 
 ### Phase 4: scope-server (axum)
-- [ ] API endpoints (forts, session, services, notifications, preferences)
-- [ ] Proxy routes + SPA fallback
-- [ ] Shell WebSocket (real-time push to browser)
+- [x] API endpoints (forts, session, services, notifications, preferences)
+- [x] Proxy routes + SPA fallback
+- [x] Shell WebSocket (real-time push to browser)
 
 ### Phase 5: Tauri Refactor
 - [ ] Refactor workfort-scope to use scope-core
 - [ ] Native OS notifications via tauri-plugin-notification
 
 ### Phase 6: Shell SPA
-- [ ] Framework-agnostic service module contract (mount/unmount)
-- [ ] Update Sharkfin entry point to mount/unmount
-- [ ] Notification bell UI + unread badge
-- [ ] Menu display type (hamburger links vs nav tabs)
-- [ ] Switch services store from polling to shell WS
+- [x] Framework-agnostic service module contract (mount/unmount)
+- [x] Update Sharkfin entry point to mount/unmount
+- [x] Notification bell UI + unread badge
+- [x] Menu display type (hamburger links vs nav tabs)
+- [x] Switch services store from polling to shell WS
 
 ### Phase 7: Integration
-- [ ] Sharkfin `/notifications/subscribe` endpoint
-- [ ] End-to-end verification
+- [x] Sharkfin `/notifications/subscribe` endpoint
+- [x] End-to-end verification
 
 ---
 
-## Blocked by scope-core: Passport Admin UI
+## Passport Admin UI
 
-React MF remote providing CRUD for users, service keys, and agent keys. Blocked because it needs admin-only service filtering and the framework-agnostic service mount — both delivered by scope-core.
+React MF remote providing CRUD for users, service keys, and agent keys. Functional and deployed — uses scope-core's service mount and admin-only filtering.
 
 - [Design](plans/2026-03-17-passport-admin-ui-design.md) · [Plan](plans/2026-03-17-passport-admin-ui-plan.md)
 
-- [ ] Passport: last-admin guard
-- [ ] Passport: custom admin API key listing route
-- [ ] Passport: /ui/health update (route: "/admin", admin_only: true)
-- [ ] Passport: static UI serving at /ui/*
-- [ ] Passport: React MF remote scaffold (Vite + Module Federation)
-- [ ] Passport: Users page (list, create, edit role, deactivate, delete)
-- [ ] Passport: Service Keys page (create, revoke)
-- [ ] Passport: Agent Keys page (create, revoke)
-- [ ] Sharkfin: identity type → role mapping in auth middleware
+- [x] Passport: last-admin guard
+- [x] Passport: custom admin API key listing route
+- [x] Passport: /ui/health update (route: "/admin", admin_only: true)
+- [x] Passport: static UI serving at /ui/*
+- [x] Passport: React MF remote scaffold (Vite + Module Federation)
+- [x] Passport: Users page (list, create, edit role, deactivate, delete)
+- [x] Passport: Service Keys page (create, revoke)
+- [x] Passport: Agent Keys page (create, revoke)
+- [ ] ⚠️ **NEEDS DESIGN + PLAN** Sharkfin: service identity permissions — service-to-service auth requires its own RBAC role with cross-user operation support, distinct from user/agent row-level scoping. Currently `identity.Type` maps directly to role name, which breaks for "service" type (no matching role). Needs design doc covering permission set, "on behalf of" semantics, and scoping rules.
 
 ---
 
@@ -87,16 +87,21 @@ React MF remote providing CRUD for users, service keys, and agent keys. Blocked 
 
 ---
 
+---
+
 ## Deferred: Storybook (Plan 10)
 
-On hold until scope-core migration is complete and service module contract is finalized.
+Storybook lives in `~/Work/WorkFort/documentation/storybook/` (Lit on port 6006, Solid on port 6007, React on port 6008). Component extraction is complete — these stories can now be written.
 
 - [ ] Utility documentation page (initials, time, throttle)
 - [ ] ComposeInput stories
 - [ ] UserPicker stories
+- [ ] Avatar stories (sm, md, with/without status dot)
 - [ ] NavBar stories at multiple viewports
+- [ ] NavSidebar stories (with sections, search, badges)
+- [ ] Hamburger stories
 - [ ] Shell chrome layout stories
-- [ ] Sharkfin chat stories (updated with extracted components)
+- [~] Sharkfin chat stories — `SharkfinChat.stories.ts` exists as the original UI prototype; needs updating with extracted components (`wf-avatar`, `wf-divider label`, `wf-nav-sidebar`)
 - [ ] Hook documentation pages (IdleDetector, Permissions per framework)
 
 ---
@@ -147,10 +152,49 @@ On hold until scope-core migration is complete and service module contract is fi
 - [x] Passport: BETTER_AUTH_SECRET startup guard, sign-up admin role check, DB error handling, log sanitization
 - [x] Scope: WS origin validation, HTTP server timeouts, cookie HttpOnly/SameSite, token cache eviction, UI asset whitelist
 
+### Infrastructure (2026-03-19)
+- [x] Passport VM recreated with persistent `/data` drive — SQLite DB survives image upgrades
+- [x] Passport restart policy set to `always`
+
+### UI Cleanup + Component Extraction (Plans A/B/C, 2026-03-19)
+- [x] Token cleanup: `--wf-text-2xs`, all hardcoded styles replaced with tokens, raw inputs → `wf-input`
+- [x] `wf-avatar` component: initials + optional status dot (sm/md sizes)
+- [x] `wf-divider` label extension: optional centered text between lines
+- [x] `wf-nav-sidebar` + `wf-nav-section` components: slot-based navigation sidebar with collapsible sections and search
+- [x] Sharkfin refactored to use all extracted components
+- [x] `wf-user-picker` refactored to use `wf-avatar`
+
+### Bug Fixes (2026-03-19)
+- [x] Sidebar not unmounted when navigating away from service — `ServicePage.onCleanup` now clears sidebar signal; `ShellLayout` tracks previous sidebar and calls `unmount()` on transition, not just on full layout teardown
+
+### Bug Fixes (2026-03-18)
+- [x] Login form flash on refresh — `sessionChecked` gate signal shows "Loading…" until session probe resolves
+- [x] Hamburger visible on desktop — `wf-hamburger[hidden] { display: none }` CSS fix
+- [x] Message input enabled when not joined — membership check + "Join to send" placeholder
+- [x] Connection lost banner flashing ~1/sec — debounced disconnect signal (2s stability before hide)
+- [x] `\u2026` rendering literally in banner — replaced with real `…` character
+- [x] Debug console.log in permissions effect — removed
+- [x] Cache-Control headers on sharkfin UI assets — `no-cache` for entry, `immutable` for hashed assets
+- [x] Sidebar background color mismatch — changed from `--wf-color-bg-secondary` to `--wf-color-bg`
+
+### Stable Identity ID (2026-03-18)
+- [x] Migration 008: `auth_id` column on identities table (SQLite + Postgres)
+- [x] `UpsertIdentity` resolves by `auth_id` first, then `username` fallback
+- [x] Internal UUID generation — Passport ID changes no longer break FK references
+- [x] Warning log when Passport auth_id changes for existing user
+- [x] Daemon handlers (WS, MCP, notifications) updated to use returned `*Identity`
+- [x] Backup import updated for new `UpsertIdentity` signature
+- [x] Test suite fixed for seeded "general" channel and first-user auto-admin
+
 ### Design Documents (2026-03-17)
 - [x] Passport admin UI design — React MF remote, CRUD for users/service keys/agent keys, bootstrap flow
 - [x] Scope-core design — Rust migration, shared library crate, notification system, service module contract
 - [x] Scope-core implementation plan — 16 tasks across 7 phases
+
+### Design Documents (2026-03-19)
+- [x] Token cleanup plan — replace hardcoded styles with design tokens
+- [x] Component extraction plan — `wf-avatar`, `wf-divider` label extension
+- [x] Nav sidebar extraction plan — `wf-nav-sidebar` + `wf-nav-section` for shared use across MF remotes
 
 ---
 
@@ -165,6 +209,11 @@ On hold until scope-core migration is complete and service module contract is fi
 - [ ] `setSetting` / `getSettings` exposed in UI
 - [ ] User preferences (notification sounds, etc.)
 
+### Sharkfin: Service Identity Permissions
+- [ ] Design doc: service-to-service authorization model (cross-user operations, "on behalf of" semantics, permission scoping)
+- [ ] New "service" RBAC role with dedicated permission set
+- [ ] Identity type → role mapping in auth middleware (user→user, agent→agent, service→service)
+
 ### Passport: Auth Enhancements
 - [ ] Sign-in page improvements (social providers when configured)
 - [ ] User self-service profile management
@@ -172,4 +221,3 @@ On hold until scope-core migration is complete and service module contract is fi
 ### Infrastructure
 - [ ] Fort-isolated storage (per-fort AES-256-GCM encryption for localStorage)
 - [ ] Gateway architecture (single entry point, scope-core connects to gateway instead of individual services)
-- [ ] Sharkfin: proper Cache-Control headers matching scope's `frontend.Handler` pattern
