@@ -111,9 +111,6 @@ func (h *Hub) BroadcastMessage(channelID int64, channelName string, channelType 
 	h.mu.RLock()
 	targets := make([]target, 0, len(h.clients))
 	for _, client := range h.clients {
-		if client.username == msg.From {
-			continue // don't echo to sender
-		}
 		targets = append(targets, target{username: client.username, identityID: client.identityID})
 	}
 	h.mu.RUnlock()

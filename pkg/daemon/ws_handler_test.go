@@ -310,6 +310,48 @@ func TestWSSendMessage(t *testing.T) {
 	}
 }
 
+func TestWSSendMessageSenderReceivesBroadcast(t *testing.T) {
+	env := newWSTestEnv(t)
+	conn := connectUser(t, env, "alice")
+	grantAdmin(t, env, "alice")
+
+	wsReq(t, conn, "channel_create", map[string]interface{}{
+		"name": "dev", "public": true,
+	}, "c1")
+
+	// Send a message — wsReq waits for the reply (ref match).
+	wsReq(t, conn, "send_message", map[string]interface{}{
+		"channel": "dev", "body": "hello from alice",
+	}, "m1")
+
+	// The sender should also receive a message.new broadcast for their own message.
+	conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	_, raw, err := conn.ReadMessage()
+	if err != nil {
+		t.Fatal("sender did not receive broadcast for own message")
+	}
+
+	var env2 wsEnvelope
+	json.Unmarshal(raw, &env2)
+	if env2.Type != "message.new" {
+		t.Fatalf("expected message.new broadcast, got type=%q", env2.Type)
+	}
+
+	var payload struct {
+		Body    string `json:"body"`
+		From    string `json:"from"`
+		Channel string `json:"channel"`
+	}
+	d, _ := json.Marshal(env2.D)
+	json.Unmarshal(d, &payload)
+	if payload.Body != "hello from alice" {
+		t.Errorf("broadcast body = %q, want %q", payload.Body, "hello from alice")
+	}
+	if payload.From != "alice" {
+		t.Errorf("broadcast from = %q, want %q", payload.From, "alice")
+	}
+}
+
 func TestWSSendMessageNonParticipant(t *testing.T) {
 	env := newWSTestEnv(t)
 	aliceConn := connectUser(t, env, "alice")
