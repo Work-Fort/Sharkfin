@@ -68,7 +68,7 @@ React MF remote providing CRUD for users, service keys, and agent keys. Function
 ## Immediate: Bugs to Fix
 
 ### Sharkfin Chat
-- [ ] ⚠️ **NEEDS PLAN** Message rendering after send — messages saved to DB but not rendering in the UI until page refresh. Broadcast handler may not be appending to the reactive message list, or the message area isn't updating. Needs systematic debugging of the WS message handler → SolidJS signal update → DOM render pipeline.
+- [x] Message rendering after send — hub skipped broadcasting to the sender; removed the sender-skip guard so the existing message.new → signal → render pipeline works for all clients.
 - [x] "Connection lost" banner flashing ~1/sec — debounced: banner shows immediately on disconnect, hides only after connection stable for 2s. Fixed `\u2026` literal rendering (now real `…` character).
 - [x] Message input should be disabled when user hasn't joined the selected channel — check membership state, disable input + show "Join to send messages" placeholder.
 - [x] Auto-join public channels on click — when user clicks a public channel they're not a member of, auto-join if they have `join_channel` permission, then select it.
