@@ -4,6 +4,7 @@ package client
 import (
 	"context"
 	"encoding/json"
+	"net/http"
 )
 
 // --- Users ---
@@ -76,6 +77,9 @@ func (c *Client) SendMessage(ctx context.Context, channel, body string, opts *Se
 	}
 	if opts != nil && opts.ThreadID != nil {
 		d["thread_id"] = *opts.ThreadID
+	}
+	if opts != nil && opts.Metadata != nil {
+		d["metadata"] = *opts.Metadata
 	}
 	raw, err := c.request(ctx, "send_message", d)
 	if err != nil {
@@ -345,5 +349,42 @@ func (c *Client) RemoveMentionGroupMember(ctx context.Context, slug, username st
 		"slug":     slug,
 		"username": username,
 	})
+	return err
+}
+
+// --- REST: Webhooks ---
+
+// RegisterWebhook registers a webhook URL for the calling identity.
+// Returns the webhook ID.
+func (c *Client) RegisterWebhook(ctx context.Context, url string) (string, error) {
+	var out struct {
+		ID string `json:"id"`
+	}
+	if _, err := c.httpDo(ctx, http.MethodPost, "/api/v1/webhooks", map[string]string{"url": url}, &out); err != nil {
+		return "", err
+	}
+	return out.ID, nil
+}
+
+// UnregisterWebhook removes a registered webhook by ID.
+func (c *Client) UnregisterWebhook(ctx context.Context, id string) error {
+	_, err := c.httpDo(ctx, http.MethodDelete, "/api/v1/webhooks/"+id, nil, nil)
+	return err
+}
+
+// ListWebhooks returns all active webhooks for the calling identity.
+func (c *Client) ListWebhooks(ctx context.Context) ([]Webhook, error) {
+	var out []Webhook
+	if _, err := c.httpDo(ctx, http.MethodGet, "/api/v1/webhooks", nil, &out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// --- REST: Identity ---
+
+// Register registers the calling identity as a service bot.
+func (c *Client) Register(ctx context.Context) error {
+	_, err := c.httpDo(ctx, http.MethodPost, "/api/v1/auth/register", nil, nil)
 	return err
 }

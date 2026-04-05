@@ -31,6 +31,22 @@ func mockServer(t *testing.T, handler func(*websocket.Conn)) (*httptest.Server, 
 	return srv, wsURL
 }
 
+// mockServerWithREST creates a test server that handles both WS (on /ws) and REST routes.
+func mockServerWithREST(t *testing.T, wsHandler func(*websocket.Conn), mux *http.ServeMux) (*httptest.Server, string) {
+	t.Helper()
+	mux.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			t.Fatalf("upgrade: %v", err)
+		}
+		defer conn.Close()
+		wsHandler(conn)
+	})
+	srv := httptest.NewServer(mux)
+	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http") + "/ws"
+	return srv, wsURL
+}
+
 func readReqAndReply(t *testing.T, conn *websocket.Conn, response any) {
 	t.Helper()
 	_, msg, err := conn.ReadMessage()
@@ -776,5 +792,136 @@ func TestAPIKeyHeader(t *testing.T) {
 
 	if gotAuth != "Bearer sk-test-key" {
 		t.Errorf("Authorization = %q, want %q", gotAuth, "Bearer sk-test-key")
+	}
+}
+
+func TestRESTRegisterWebhook(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /api/v1/webhooks", func(w http.ResponseWriter, r *http.Request) {
+		var req struct{ URL string `json:"url"` }
+		json.NewDecoder(r.Body).Decode(&req)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		json.NewEncoder(w).Encode(map[string]any{"id": "hook-123", "url": req.URL, "active": true})
+	})
+
+	srv, wsURL := mockServerWithREST(t, func(conn *websocket.Conn) {
+		// keep WS open for the client lifecycle
+		for {
+			if _, _, err := conn.ReadMessage(); err != nil {
+				return
+			}
+		}
+	}, mux)
+	defer srv.Close()
+
+	c, err := Dial(context.Background(), wsURL, WithToken("tok"))
+	if err != nil {
+		t.Fatalf("Dial: %v", err)
+	}
+	defer c.Close()
+
+	id, err := c.RegisterWebhook(context.Background(), "http://example.com/hook")
+	if err != nil {
+		t.Fatalf("RegisterWebhook: %v", err)
+	}
+	if id != "hook-123" {
+		t.Errorf("id = %q, want hook-123", id)
+	}
+}
+
+func TestRESTUnregisterWebhook(t *testing.T) {
+	var deletedID string
+	mux := http.NewServeMux()
+	mux.HandleFunc("DELETE /api/v1/webhooks/{id}", func(w http.ResponseWriter, r *http.Request) {
+		deletedID = r.PathValue("id")
+		w.WriteHeader(http.StatusNoContent)
+	})
+
+	srv, wsURL := mockServerWithREST(t, func(conn *websocket.Conn) {
+		for {
+			if _, _, err := conn.ReadMessage(); err != nil {
+				return
+			}
+		}
+	}, mux)
+	defer srv.Close()
+
+	c, err := Dial(context.Background(), wsURL, WithToken("tok"))
+	if err != nil {
+		t.Fatalf("Dial: %v", err)
+	}
+	defer c.Close()
+
+	if err := c.UnregisterWebhook(context.Background(), "hook-abc"); err != nil {
+		t.Fatalf("UnregisterWebhook: %v", err)
+	}
+	if deletedID != "hook-abc" {
+		t.Errorf("deleted id = %q, want hook-abc", deletedID)
+	}
+}
+
+func TestRESTListWebhooks(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /api/v1/webhooks", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode([]map[string]any{
+			{"id": "hook-1", "url": "http://a.example/hook", "active": true},
+			{"id": "hook-2", "url": "http://b.example/hook", "active": true},
+		})
+	})
+
+	srv, wsURL := mockServerWithREST(t, func(conn *websocket.Conn) {
+		for {
+			if _, _, err := conn.ReadMessage(); err != nil {
+				return
+			}
+		}
+	}, mux)
+	defer srv.Close()
+
+	c, err := Dial(context.Background(), wsURL, WithToken("tok"))
+	if err != nil {
+		t.Fatalf("Dial: %v", err)
+	}
+	defer c.Close()
+
+	hooks, err := c.ListWebhooks(context.Background())
+	if err != nil {
+		t.Fatalf("ListWebhooks: %v", err)
+	}
+	if len(hooks) != 2 || hooks[0].ID != "hook-1" || hooks[1].ID != "hook-2" {
+		t.Errorf("unexpected hooks: %v", hooks)
+	}
+}
+
+func TestRESTRegisterIdentity(t *testing.T) {
+	called := false
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /api/v1/auth/register", func(w http.ResponseWriter, r *http.Request) {
+		called = true
+		w.WriteHeader(http.StatusCreated)
+	})
+
+	srv, wsURL := mockServerWithREST(t, func(conn *websocket.Conn) {
+		for {
+			if _, _, err := conn.ReadMessage(); err != nil {
+				return
+			}
+		}
+	}, mux)
+	defer srv.Close()
+
+	c, err := Dial(context.Background(), wsURL, WithToken("tok"))
+	if err != nil {
+		t.Fatalf("Dial: %v", err)
+	}
+	defer c.Close()
+
+	if err := c.Register(context.Background()); err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+	if !called {
+		t.Error("expected POST /api/v1/auth/register to be called")
 	}
 }

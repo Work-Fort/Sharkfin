@@ -75,11 +75,19 @@ type MentionGroup struct {
 	Members   []string `json:"members,omitempty"`
 }
 
+// Webhook represents a registered per-identity webhook.
+type Webhook struct {
+	ID     string `json:"id"`
+	URL    string `json:"url"`
+	Active bool   `json:"active"`
+}
+
 // Option structs for methods with optional parameters.
 
 // SendOpts are optional parameters for SendMessage.
 type SendOpts struct {
 	ThreadID *int64
+	Metadata *string // JSON string
 }
 
 // HistoryOpts are optional parameters for History.
