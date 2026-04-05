@@ -1106,7 +1106,7 @@ func TestGetUserPermissions(t *testing.T) {
 func TestHasPermission(t *testing.T) {
 	s := newTestStore(t)
 	upsertIdentity(t, s, "uuid-admin-seed", "admin-seed") // first user auto-promoted to admin
-	upsertIdentity(t, s, "uuid-alice", "alice")            // second user keeps "user" role
+	upsertIdentity(t, s, "uuid-alice", "alice")           // second user keeps "user" role
 
 	has, err := s.HasPermission("alice", "send_message")
 	if err != nil {

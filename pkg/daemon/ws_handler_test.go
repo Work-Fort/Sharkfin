@@ -188,7 +188,7 @@ func TestWSChannelCreate(t *testing.T) {
 func TestWSChannelCreatePermissionDenied(t *testing.T) {
 	env := newWSTestEnv(t)
 	env.initUser("admin-uuid", "setup-admin", "Setup Admin") // consume first-user auto-admin
-	conn := connectUser(t, env, "alice")                      // "user" role lacks create_channel
+	conn := connectUser(t, env, "alice")                     // "user" role lacks create_channel
 
 	resp := wsReq(t, conn, "channel_create", map[string]interface{}{
 		"name":   "secret",

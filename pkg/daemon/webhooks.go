@@ -36,7 +36,7 @@ type WebhookEvent struct {
 	ChannelName string
 	ChannelType string
 	From        string
-	FromType    string  // identity type of sender
+	FromType    string // identity type of sender
 	Body        string
 	Metadata    *string
 	MessageID   int64
