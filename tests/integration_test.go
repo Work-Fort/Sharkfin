@@ -659,6 +659,218 @@ func TestScenario7_NonParticipantRejection(t *testing.T) {
 	}
 }
 
+// restRequest sends an authenticated HTTP request to the test server.
+func (e *testEnv) restRequest(method, path, token string, body interface{}) (*http.Response, []byte) {
+	e.t.Helper()
+	var bodyReader io.Reader
+	if body != nil {
+		b, _ := json.Marshal(body)
+		bodyReader = bytes.NewReader(b)
+	}
+	req, err := http.NewRequest(method, fmt.Sprintf("http://%s%s", e.addr, path), bodyReader)
+	if err != nil {
+		e.t.Fatalf("create request: %v", err)
+	}
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		e.t.Fatalf("do request: %v", err)
+	}
+	defer resp.Body.Close()
+	b, _ := io.ReadAll(resp.Body)
+	return resp, b
+}
+
+func TestRESTMessages(t *testing.T) {
+	env := startTestServer(t)
+
+	alice := env.initUser("alice-uuid", "alice", "Alice")
+	env.grantAdmin("alice")
+
+	// Create a channel via MCP first.
+	_, chResp := env.toolCall(alice.sessionID, alice.token, 10, "channel_create", map[string]interface{}{
+		"name": "rest-test", "public": true,
+	})
+	toolResultText(t, chResp)
+
+	// POST /api/v1/channels/{channel}/messages → 201 with message id.
+	resp, body := env.restRequest("POST", "/api/v1/channels/rest-test/messages", alice.token, map[string]any{
+		"body": "hello rest",
+	})
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", resp.StatusCode, body)
+	}
+	var msgResult map[string]any
+	if err := json.Unmarshal(body, &msgResult); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if msgResult["id"] == nil {
+		t.Fatal("expected id in response")
+	}
+
+	// GET /api/v1/channels/{channel}/messages → 200 with messages array.
+	resp2, body2 := env.restRequest("GET", "/api/v1/channels/rest-test/messages", alice.token, nil)
+	if resp2.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", resp2.StatusCode, body2)
+	}
+	var msgs []map[string]any
+	if err := json.Unmarshal(body2, &msgs); err != nil {
+		t.Fatalf("unmarshal messages: %v", err)
+	}
+	if len(msgs) == 0 {
+		t.Fatal("expected at least one message")
+	}
+	if msgs[0]["body"] != "hello rest" {
+		t.Fatalf("expected 'hello rest', got %v", msgs[0]["body"])
+	}
+
+	// GET on unknown channel → 404.
+	resp3, _ := env.restRequest("GET", "/api/v1/channels/nonexistent/messages", alice.token, nil)
+	if resp3.StatusCode != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d", resp3.StatusCode)
+	}
+}
+
+func TestRESTChannels(t *testing.T) {
+	env := startTestServer(t)
+
+	alice := env.initUser("alice-uuid", "alice", "Alice")
+	env.grantAdmin("alice")
+
+	// POST /api/v1/channels → 201 with channel object.
+	resp, body := env.restRequest("POST", "/api/v1/channels", alice.token, map[string]any{
+		"name": "rest-chan", "public": true,
+	})
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", resp.StatusCode, body)
+	}
+	var ch map[string]any
+	if err := json.Unmarshal(body, &ch); err != nil {
+		t.Fatalf("unmarshal channel: %v", err)
+	}
+	if ch["id"] == nil || ch["name"] != "rest-chan" {
+		t.Fatalf("unexpected channel: %v", ch)
+	}
+
+	// GET /api/v1/channels → 200 with channels array.
+	resp2, body2 := env.restRequest("GET", "/api/v1/channels", alice.token, nil)
+	if resp2.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", resp2.StatusCode, body2)
+	}
+	var channels []map[string]any
+	if err := json.Unmarshal(body2, &channels); err != nil {
+		t.Fatalf("unmarshal channels: %v", err)
+	}
+	found := false
+	for _, c := range channels {
+		if c["name"] == "rest-chan" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("rest-chan not found in channels: %v", channels)
+	}
+
+	// POST /api/v1/channels/{channel}/join → 200.
+	bob := env.initUser("bob-uuid", "bob", "Bob")
+	resp3, _ := env.restRequest("POST", "/api/v1/channels/rest-chan/join", bob.token, nil)
+	if resp3.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp3.StatusCode)
+	}
+}
+
+func TestRESTWebhooks(t *testing.T) {
+	env := startTestServer(t)
+
+	botToken := env.jwks.signJWT("bot-uuid", "flow-bot", "Flow Bot", "service")
+	httpResp, _ := env.mcpRequest("", botToken, "initialize", 1, map[string]interface{}{
+		"protocolVersion": "2025-03-26",
+		"capabilities":    map[string]interface{}{},
+		"clientInfo":      map[string]string{"name": "flow-bot", "version": "0.1"},
+	})
+	botSessionID := httpResp.Header.Get("Mcp-Session-Id")
+	if botSessionID == "" {
+		t.Fatal("no session ID for bot")
+	}
+	env.toolCall(botSessionID, botToken, 2, "user_list", map[string]interface{}{})
+
+	// POST /api/v1/webhooks → 201 with webhook object (id, url, active).
+	resp, body := env.restRequest("POST", "/api/v1/webhooks", botToken, map[string]any{
+		"url": "http://flow.internal/hook",
+	})
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", resp.StatusCode, body)
+	}
+	var hook map[string]any
+	if err := json.Unmarshal(body, &hook); err != nil {
+		t.Fatalf("unmarshal webhook: %v", err)
+	}
+	if hook["id"] == nil || hook["url"] != "http://flow.internal/hook" || hook["active"] != true {
+		t.Fatalf("unexpected webhook: %v", hook)
+	}
+	hookID := hook["id"].(string)
+
+	// GET /api/v1/webhooks → 200 with webhooks array.
+	resp2, body2 := env.restRequest("GET", "/api/v1/webhooks", botToken, nil)
+	if resp2.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", resp2.StatusCode, body2)
+	}
+	var hooks []map[string]any
+	if err := json.Unmarshal(body2, &hooks); err != nil {
+		t.Fatalf("unmarshal webhooks: %v", err)
+	}
+	if len(hooks) == 0 {
+		t.Fatal("expected at least one webhook")
+	}
+
+	// DELETE /api/v1/webhooks/{id} → 204.
+	resp3, _ := env.restRequest("DELETE", "/api/v1/webhooks/"+hookID, botToken, nil)
+	if resp3.StatusCode != http.StatusNoContent {
+		t.Fatalf("expected 204, got %d", resp3.StatusCode)
+	}
+
+	// Confirm it's gone.
+	resp4, body4 := env.restRequest("GET", "/api/v1/webhooks", botToken, nil)
+	if resp4.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", resp4.StatusCode, body4)
+	}
+	var hooks2 []map[string]any
+	json.Unmarshal(body4, &hooks2)
+	if len(hooks2) != 0 {
+		t.Fatalf("expected empty webhooks after delete, got: %v", hooks2)
+	}
+}
+
+func TestRESTIdentityRegister(t *testing.T) {
+	env := startTestServer(t)
+
+	botToken := env.jwks.signJWT("bot-uuid", "flow-bot", "Flow Bot", "service")
+
+	// POST /api/v1/auth/register → 201 with identity object.
+	resp, body := env.restRequest("POST", "/api/v1/auth/register", botToken, nil)
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", resp.StatusCode, body)
+	}
+	var identity map[string]any
+	if err := json.Unmarshal(body, &identity); err != nil {
+		t.Fatalf("unmarshal identity: %v", err)
+	}
+	if identity["id"] == nil || identity["username"] != "flow-bot" {
+		t.Fatalf("unexpected identity: %v", identity)
+	}
+
+	// Unauthenticated request to any endpoint returns 401.
+	resp2, _ := env.restRequest("POST", "/api/v1/auth/register", "", nil)
+	if resp2.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("expected 401, got %d", resp2.StatusCode)
+	}
+}
+
 func TestScenario_BotRegistrationFlow(t *testing.T) {
 	// Capture webhook POSTs.
 	var mu sync.Mutex

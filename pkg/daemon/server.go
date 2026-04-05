@@ -64,6 +64,17 @@ func NewServer(ctx context.Context, addr string, store domain.Store, pongTimeout
 	mux.Handle("GET /ws", mw(wsHandler))
 	mux.Handle("GET /notifications/subscribe", mw(http.HandlerFunc(wsHandler.handleNotificationSubscribe)))
 
+	rest := NewRESTHandler(store, hub, bus)
+	mux.Handle("POST /api/v1/auth/register", mw(http.HandlerFunc(rest.handleRegisterIdentity)))
+	mux.Handle("GET /api/v1/channels", mw(http.HandlerFunc(rest.handleListChannels)))
+	mux.Handle("POST /api/v1/channels", mw(http.HandlerFunc(rest.handleCreateChannel)))
+	mux.Handle("POST /api/v1/channels/{channel}/join", mw(http.HandlerFunc(rest.handleJoinChannel)))
+	mux.Handle("POST /api/v1/channels/{channel}/messages", mw(http.HandlerFunc(rest.handleSendMessage)))
+	mux.Handle("GET /api/v1/channels/{channel}/messages", mw(http.HandlerFunc(rest.handleListMessages)))
+	mux.Handle("POST /api/v1/webhooks", mw(http.HandlerFunc(rest.handleRegisterWebhook)))
+	mux.Handle("GET /api/v1/webhooks", mw(http.HandlerFunc(rest.handleListWebhooks)))
+	mux.Handle("DELETE /api/v1/webhooks/{id}", mw(http.HandlerFunc(rest.handleDeleteWebhook)))
+
 	return &Server{
 		addr:    addr,
 		store:   store,
