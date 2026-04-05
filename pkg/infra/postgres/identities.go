@@ -143,6 +143,7 @@ func (s *Store) WipeAll() error {
 		"channel_members",
 		"channels",
 		"settings",
+		"identity_webhooks",
 		"identities",
 	}
 	for _, t := range tables {

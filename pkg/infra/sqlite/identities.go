@@ -142,6 +142,7 @@ var validWipeTables = map[string]bool{
 	"channel_members":       true,
 	"channels":              true,
 	"settings":              true,
+	"identity_webhooks":     true,
 	"identities":            true,
 }
 
@@ -156,6 +157,7 @@ func (s *Store) WipeAll() error {
 		"channel_members",
 		"channels",
 		"settings",
+		"identity_webhooks",
 		"identities",
 	}
 	for _, t := range tables {
