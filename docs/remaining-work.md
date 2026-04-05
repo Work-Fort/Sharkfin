@@ -1,6 +1,6 @@
-# Remaining UI Work — WorkFort Platform
+# Remaining Work — Sharkfin
 
-Tracks all UI work across the platform. Items are roughly priority-ordered within each section.
+Tracks remaining work for the sharkfin project. Items are roughly priority-ordered within each section.
 
 ---
 
@@ -61,7 +61,7 @@ React MF remote providing CRUD for users, service keys, and agent keys. Function
 - [x] Passport: Users page (list, create, edit role, deactivate, delete)
 - [x] Passport: Service Keys page (create, revoke)
 - [x] Passport: Agent Keys page (create, revoke)
-- [ ] ⚠️ **NEEDS DESIGN + PLAN** Sharkfin: service identity permissions — service-to-service auth requires its own RBAC role with cross-user operation support, distinct from user/agent row-level scoping. Currently `identity.Type` maps directly to role name, which breaks for "service" type (no matching role). Needs design doc covering permission set, "on behalf of" semantics, and scoping rules.
+- [x] Sharkfin: service identity permissions — `bot` role with scoped permissions, auto-assigned when `identity.Type == "service"`. Per-identity webhook registration, dispatch to service channel members, message metadata. Remaining cross-user "on behalf of" delegation deferred.
 
 ---
 
@@ -83,7 +83,7 @@ React MF remote providing CRUD for users, service keys, and agent keys. Function
 - [x] Login form flashes on refresh before session check completes — added `sessionChecked` gate signal; shows "Loading…" until session probe resolves.
 
 ### Integration Issues
-- [ ] MCP bridge identity has no permissions (chicken-and-egg — [Issue 12](2026-03-16-shell-integration-issues.md)). Now solvable via the admin UI (create agent key), but the bootstrap flow needs documenting.
+- [ ] MCP bridge identity has no permissions (chicken-and-egg — [Issue 12](2026-03-16-shell-integration-issues.md)). Now solvable via the admin UI (create agent key), but the bootstrap flow needs documenting. Note: likely won't be implemented as manual docs — the process is being fully automated soon.
 
 ---
 
@@ -152,6 +152,17 @@ Storybook lives in `~/Work/WorkFort/documentation/storybook/` (Lit on port 6006,
 - [x] Passport: BETTER_AUTH_SECRET startup guard, sign-up admin role check, DB error handling, log sanitization
 - [x] Scope: WS origin validation, HTTP server timeouts, cookie HttpOnly/SameSite, token cache eviction, UI asset whitelist
 
+### Bot/Service Identity (2026-04-05)
+- [x] `bot` role migration with scoped permissions (send_message, create_channel, join_channel, history, channel_list, unread_messages, unread_counts, mark_read, dm_list, dm_open, user_list)
+- [x] Auto-assign `bot` role when `identity.Type == "service"` in `UpsertIdentity`
+- [x] Per-identity webhook registration (`register_webhook`, `unregister_webhook`, `list_webhooks` MCP tools)
+- [x] `identity_webhooks` table with UNIQUE(identity_id, url) deduplication
+- [x] Webhook dispatch to service channel members (`GetWebhooksForChannel`, `GetServiceMemberUsernames`)
+- [x] `WebhookPayload` extended with `channel_id`, `channel_name`, `from_type`, `metadata`
+- [x] Message metadata — optional `metadata TEXT` column, threaded through store → handler → broadcast → webhook
+- [x] Integration test for full bot registration flow with threading convention
+- [x] Requirements doc updated: replaced `kind` enum with metadata JSON sidecar (Slack-informed design)
+
 ### Infrastructure (2026-03-19)
 - [x] Passport VM recreated with persistent `/data` drive — SQLite DB survives image upgrades
 - [x] Passport restart policy set to `always`
@@ -205,19 +216,18 @@ Storybook lives in `~/Work/WorkFort/documentation/storybook/` (Lit on port 6006,
 - [ ] Add/remove members
 - [ ] Display in message rendering (@group mentions)
 
+### Sharkfin: Identity Username Decoupling
+- [ ] Service/bot identities are tracked by username throughout webhook dispatch, channel membership, and recipient resolution. Username changes would break these associations. Track by internal identity ID instead, so usernames can be renamed in sharkfin without reissuing Passport service keys or updating external config.
+
 ### Sharkfin: Settings UI
 - [ ] `setSetting` / `getSettings` exposed in UI
 - [ ] User preferences (notification sounds, etc.)
 
-### Sharkfin: Service Identity Permissions
-- [ ] Design doc: service-to-service authorization model (cross-user operations, "on behalf of" semantics, permission scoping)
-- [ ] New "service" RBAC role with dedicated permission set
-- [ ] Identity type → role mapping in auth middleware (user→user, agent→agent, service→service)
 
-### Passport: Auth Enhancements
-- [ ] Sign-in page improvements (social providers when configured)
-- [ ] User self-service profile management
+---
 
-### Infrastructure
-- [ ] Fort-isolated storage (per-fort AES-256-GCM encryption for localStorage)
-- [ ] Gateway architecture (single entry point, scope-core connects to gateway instead of individual services)
+## Deferred
+
+### Service "On Behalf Of" Authorization
+- [ ] Design doc: mechanism for services to act on behalf of a specific user (e.g., send a message as User X, access a private channel scoped to User Y). The `bot` role and type→role mapping are implemented; this is the remaining cross-user delegation model. No concrete use case yet — defer until a service needs it.
+
