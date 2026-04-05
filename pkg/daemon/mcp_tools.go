@@ -203,3 +203,18 @@ func newMentionGroupRemoveMemberTool() mcp.Tool {
 		mcp.WithString("username", mcp.Required(), mcp.Description("Username to remove")),
 	)
 }
+
+func newRegisterWebhookTool() mcp.Tool {
+	return mcp.NewTool("register_webhook",
+		mcp.WithDescription("Register a webhook callback URL for this identity"),
+		mcp.WithString("url", mcp.Required(), mcp.Description("Callback URL to POST message.new events to")),
+		mcp.WithString("secret", mcp.Description("Optional HMAC secret for signature verification")),
+	)
+}
+
+func newUnregisterWebhookTool() mcp.Tool {
+	return mcp.NewTool("unregister_webhook",
+		mcp.WithDescription("Remove a webhook registration"),
+		mcp.WithString("webhook_id", mcp.Required(), mcp.Description("ID of the webhook to remove")),
+	)
+}

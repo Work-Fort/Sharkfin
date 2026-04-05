@@ -94,6 +94,8 @@ func NewSharkfinMCP(store domain.Store, hub *Hub, presence *PresenceHandler, ver
 		server.ServerTool{Tool: newMentionGroupListTool(), Handler: s.handleMentionGroupList},
 		server.ServerTool{Tool: newMentionGroupAddMemberTool(), Handler: s.handleMentionGroupAddMember},
 		server.ServerTool{Tool: newMentionGroupRemoveMemberTool(), Handler: s.handleMentionGroupRemoveMember},
+		server.ServerTool{Tool: newRegisterWebhookTool(), Handler: s.handleRegisterWebhook},
+		server.ServerTool{Tool: newUnregisterWebhookTool(), Handler: s.handleUnregisterWebhook},
 	)
 
 	return s
@@ -806,4 +808,43 @@ func (s *SharkfinMCP) handleMentionGroupRemoveMember(ctx context.Context, req mc
 		return mcp.NewToolResultError(err.Error()), nil
 	}
 	return mcp.NewToolResultText(fmt.Sprintf("removed %s from @%s", username, slug)), nil
+}
+
+// --- Webhook handlers ---
+
+func (s *SharkfinMCP) handleRegisterWebhook(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	url := req.GetString("url", "")
+	if url == "" {
+		return mcp.NewToolResultError("url is required"), nil
+	}
+	secret := req.GetString("secret", "")
+
+	identity, err := s.store.GetIdentityByUsername(usernameFromCtx(ctx))
+	if err != nil {
+		return nil, fmt.Errorf("get identity: %w", err)
+	}
+
+	if err := s.store.RegisterWebhook(identity.ID, url, secret); err != nil {
+		return nil, fmt.Errorf("register webhook: %w", err)
+	}
+
+	return mcp.NewToolResultText("webhook registered"), nil
+}
+
+func (s *SharkfinMCP) handleUnregisterWebhook(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	webhookID := req.GetString("webhook_id", "")
+	if webhookID == "" {
+		return mcp.NewToolResultError("webhook_id is required"), nil
+	}
+
+	identity, err := s.store.GetIdentityByUsername(usernameFromCtx(ctx))
+	if err != nil {
+		return nil, fmt.Errorf("get identity: %w", err)
+	}
+
+	if err := s.store.UnregisterWebhook(identity.ID, webhookID); err != nil {
+		return nil, fmt.Errorf("unregister webhook: %w", err)
+	}
+
+	return mcp.NewToolResultText("webhook unregistered"), nil
 }
