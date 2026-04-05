@@ -4,6 +4,9 @@ name: Release
 on:
   push:
     branches: [master]
+    paths-ignore:
+      - 'client/**'
+      - 'clients/ts/**'
 
 permissions:
   contents: write

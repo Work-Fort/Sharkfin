@@ -3,7 +3,9 @@ name: Release Go Client
 
 on:
   push:
-    tags: ['client/v*']
+    branches: [master]
+    paths:
+      - 'client/**'
 
 permissions:
   contents: write
@@ -16,9 +18,42 @@ jobs:
       - uses: jdx/mise-action@v3
       - run: cd client && go test -v -race -count=1 ./...
 
-  release:
+  tag:
+    name: Create Client Version Tag
     runs-on: ubuntu-latest
     needs: test
+    outputs:
+      new_tag: ${{ steps.tag_version.outputs.new_tag }}
+      changelog: ${{ steps.tag_version.outputs.changelog }}
+      should_release: ${{ steps.check_tag.outputs.should_release }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Bump version and create tag
+        id: tag_version
+        uses: Work-Fort/github-tag-action@v6.3
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          default_bump: false
+          release_branches: master
+          tag_prefix: client/v
+          paths: client/**
+
+      - name: Check if new tag was created
+        id: check_tag
+        run: |
+          if [ -n "${{ steps.tag_version.outputs.new_tag }}" ]; then
+            echo "should_release=true" >> $GITHUB_OUTPUT
+          else
+            echo "should_release=false" >> $GITHUB_OUTPUT
+          fi
+
+  release:
+    runs-on: ubuntu-latest
+    needs: tag
+    if: needs.tag.outputs.should_release == 'true'
     steps:
       - uses: actions/checkout@v6
       - name: Extract version
@@ -27,13 +62,15 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: client/${{ steps.version.outputs.version }}
-          name: Go Client ${{ steps.version.outputs.version }}
+          tag_name: ${{ needs.tag.outputs.new_tag }}
+          name: Go Client ${{ needs.tag.outputs.new_tag }}
           body: |
-            ## Go Client ${{ steps.version.outputs.version }}
+            ## Go Client ${{ needs.tag.outputs.new_tag }}
+
+            ${{ needs.tag.outputs.changelog }}
 
             ```bash
-            go get github.com/Work-Fort/sharkfin/client@${{ steps.version.outputs.version }}
+            go get github.com/Work-Fort/sharkfin/client@${{ needs.tag.outputs.new_tag }}
             ```
           draft: false
           prerelease: false
