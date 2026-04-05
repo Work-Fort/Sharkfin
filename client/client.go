@@ -23,9 +23,9 @@ const (
 
 // Client is a WebSocket client for the Sharkfin messaging server.
 type Client struct {
-	conn    *websocket.Conn
-	url     string
-	baseURL    string      // e.g. "http://localhost:16000"
+	conn       *websocket.Conn
+	url        string
+	baseURL    string // e.g. "http://localhost:16000"
 	httpClient *http.Client
 
 	events chan Event

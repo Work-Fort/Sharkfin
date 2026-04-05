@@ -798,7 +798,9 @@ func TestAPIKeyHeader(t *testing.T) {
 func TestRESTRegisterWebhook(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /api/v1/webhooks", func(w http.ResponseWriter, r *http.Request) {
-		var req struct{ URL string `json:"url"` }
+		var req struct {
+			URL string `json:"url"`
+		}
 		json.NewDecoder(r.Body).Decode(&req)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusCreated)

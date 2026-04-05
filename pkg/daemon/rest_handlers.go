@@ -205,10 +205,10 @@ func (h *RESTHandler) handleSendMessage(w http.ResponseWriter, r *http.Request) 
 	}
 
 	writeJSON(w, http.StatusCreated, map[string]any{
-		"id":      msgID,
-		"body":    req.Body,
+		"id":       msgID,
+		"body":     req.Body,
 		"metadata": req.Metadata,
-		"sent_at": sentAt.UTC().Format(time.RFC3339),
+		"sent_at":  sentAt.UTC().Format(time.RFC3339),
 	})
 }
 
