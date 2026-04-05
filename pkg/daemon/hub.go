@@ -97,6 +97,9 @@ func (h *Hub) BroadcastMessage(channelID int64, channelName string, channelType 
 	if len(mentions) > 0 {
 		d["mentions"] = mentions
 	}
+	if msg.Metadata != nil {
+		d["metadata"] = *msg.Metadata
+	}
 	event := wsEnvelope{
 		Type: "message.new",
 		D:    d,
@@ -139,6 +142,7 @@ func (h *Hub) BroadcastMessage(channelID int64, channelName string, channelType 
 				SentAt:      msg.CreatedAt,
 				Mentions:    mentions,
 				ThreadID:    threadID,
+				Metadata:    msg.Metadata,
 			},
 		})
 	}

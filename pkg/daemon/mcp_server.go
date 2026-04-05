@@ -321,8 +321,9 @@ func (s *SharkfinMCP) handleSendMessage(ctx context.Context, req mcp.CallToolReq
 	}
 
 	mentionIdentityIDs, mentionUsernames := resolveMentions(s.store, message)
+	metadata := optionalString(req, "metadata")
 
-	msgID, err := s.store.SendMessage(ch.ID, sender.ID, message, threadID, mentionIdentityIDs)
+	msgID, err := s.store.SendMessage(ch.ID, sender.ID, message, threadID, mentionIdentityIDs, metadata)
 	if err != nil {
 		return nil, fmt.Errorf("send message: %w", err)
 	}
@@ -335,6 +336,7 @@ func (s *SharkfinMCP) handleSendMessage(ctx context.Context, req mcp.CallToolReq
 		Body:       message,
 		CreatedAt:  time.Now(),
 		From:       usernameFromCtx(ctx),
+		Metadata:   metadata,
 	}
 	s.hub.BroadcastMessage(ch.ID, channel, ch.Type, msg, mentionUsernames, threadID, s.store)
 
@@ -373,6 +375,7 @@ func (s *SharkfinMCP) handleUnreadMessages(ctx context.Context, req mcp.CallTool
 		SentAt   string   `json:"sent_at"`
 		ThreadID *int64   `json:"thread_id,omitempty"`
 		Mentions []string `json:"mentions,omitempty"`
+		Metadata *string  `json:"metadata,omitempty"`
 	}
 	var list []msgInfo
 	for _, m := range messages {
@@ -390,6 +393,7 @@ func (s *SharkfinMCP) handleUnreadMessages(ctx context.Context, req mcp.CallTool
 			SentAt:   m.CreatedAt.UTC().Format(time.RFC3339),
 			ThreadID: m.ThreadID,
 			Mentions: m.Mentions,
+			Metadata: m.Metadata,
 		})
 	}
 
@@ -499,6 +503,7 @@ func (s *SharkfinMCP) handleHistory(ctx context.Context, req mcp.CallToolRequest
 		SentAt   string   `json:"sent_at"`
 		ThreadID *int64   `json:"thread_id,omitempty"`
 		Mentions []string `json:"mentions,omitempty"`
+		Metadata *string  `json:"metadata,omitempty"`
 	}
 	var list []msgInfo
 	for _, m := range messages {
@@ -510,6 +515,7 @@ func (s *SharkfinMCP) handleHistory(ctx context.Context, req mcp.CallToolRequest
 			SentAt:   m.CreatedAt.UTC().Format(time.RFC3339),
 			ThreadID: m.ThreadID,
 			Mentions: m.Mentions,
+			Metadata: m.Metadata,
 		})
 	}
 
@@ -712,6 +718,15 @@ func optionalInt64(req mcp.CallToolRequest, key string) *int64 {
 		return &i
 	}
 	return nil
+}
+
+// optionalString extracts an optional string argument, returning nil if absent or empty.
+func optionalString(req mcp.CallToolRequest, key string) *string {
+	v := req.GetString(key, "")
+	if v == "" {
+		return nil
+	}
+	return &v
 }
 
 // --- Mention group handlers ---

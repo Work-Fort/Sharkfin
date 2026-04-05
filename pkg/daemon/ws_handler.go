@@ -453,9 +453,10 @@ func (h *WSHandler) handleWSChannelJoin(sendCh chan<- []byte, ref string, rawD j
 
 func (h *WSHandler) handleWSSendMessage(sendCh chan<- []byte, ref string, rawD json.RawMessage, username string, identityID string) {
 	var d struct {
-		Channel  string `json:"channel"`
-		Body     string `json:"body"`
-		ThreadID *int64 `json:"thread_id"`
+		Channel  string  `json:"channel"`
+		Body     string  `json:"body"`
+		ThreadID *int64  `json:"thread_id"`
+		Metadata *string `json:"metadata"` // JSON string
 	}
 	if err := json.Unmarshal(rawD, &d); err != nil {
 		sendError(sendCh, ref, "invalid arguments")
@@ -480,7 +481,7 @@ func (h *WSHandler) handleWSSendMessage(sendCh chan<- []byte, ref string, rawD j
 
 	mentionIDs, mentionUsernames := resolveMentions(h.store, d.Body)
 
-	msgID, err := h.store.SendMessage(ch.ID, identityID, d.Body, d.ThreadID, mentionIDs)
+	msgID, err := h.store.SendMessage(ch.ID, identityID, d.Body, d.ThreadID, mentionIDs, d.Metadata)
 	if err != nil {
 		sendError(sendCh, ref, err.Error())
 		return
@@ -496,6 +497,7 @@ func (h *WSHandler) handleWSSendMessage(sendCh chan<- []byte, ref string, rawD j
 		Body:       d.Body,
 		CreatedAt:  time.Now(),
 		From:       username,
+		Metadata:   d.Metadata,
 	}
 	h.hub.BroadcastMessage(ch.ID, ch.Name, ch.Type, msg, mentionUsernames, d.ThreadID, h.store)
 }
@@ -546,6 +548,7 @@ func (h *WSHandler) handleWSHistory(sendCh chan<- []byte, ref string, rawD json.
 		SentAt   string   `json:"sent_at"`
 		ThreadID *int64   `json:"thread_id,omitempty"`
 		Mentions []string `json:"mentions,omitempty"`
+		Metadata *string  `json:"metadata,omitempty"`
 	}
 	var list []msgInfo
 	for _, m := range messages {
@@ -556,6 +559,7 @@ func (h *WSHandler) handleWSHistory(sendCh chan<- []byte, ref string, rawD json.
 			SentAt:   m.CreatedAt.UTC().Format(time.RFC3339),
 			ThreadID: m.ThreadID,
 			Mentions: m.Mentions,
+			Metadata: m.Metadata,
 		})
 	}
 	sendReply(sendCh, ref, true, map[string]interface{}{"channel": d.Channel, "messages": list})
@@ -595,6 +599,7 @@ func (h *WSHandler) handleWSUnreadMessages(sendCh chan<- []byte, ref string, raw
 		SentAt   string   `json:"sent_at"`
 		ThreadID *int64   `json:"thread_id,omitempty"`
 		Mentions []string `json:"mentions,omitempty"`
+		Metadata *string  `json:"metadata,omitempty"`
 	}
 	var list []msgInfo
 	for _, m := range messages {
@@ -612,6 +617,7 @@ func (h *WSHandler) handleWSUnreadMessages(sendCh chan<- []byte, ref string, raw
 			SentAt:   m.CreatedAt.UTC().Format(time.RFC3339),
 			ThreadID: m.ThreadID,
 			Mentions: m.Mentions,
+			Metadata: m.Metadata,
 		})
 	}
 	sendReply(sendCh, ref, true, map[string]interface{}{"messages": list})

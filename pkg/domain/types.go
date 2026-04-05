@@ -34,6 +34,7 @@ type Message struct {
 	Body       string
 	ThreadID   *int64
 	Mentions   []string
+	Metadata   *string // JSON string, nullable
 	CreatedAt  time.Time
 }
 

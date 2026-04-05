@@ -10,8 +10,8 @@ import (
 	"github.com/Work-Fort/sharkfin/pkg/domain"
 )
 
-// SendMessage inserts a message into a channel with optional thread and mentions.
-func (s *Store) SendMessage(channelID int64, identityID string, body string, threadID *int64, mentionIdentityIDs []string) (int64, error) {
+// SendMessage inserts a message into a channel with optional thread, mentions, and metadata.
+func (s *Store) SendMessage(channelID int64, identityID string, body string, threadID *int64, mentionIdentityIDs []string, metadata *string) (int64, error) {
 	tx, err := s.db.Begin()
 	if err != nil {
 		return 0, fmt.Errorf("begin tx: %w", err)
@@ -37,8 +37,8 @@ func (s *Store) SendMessage(channelID int64, identityID string, body string, thr
 
 	var msgID int64
 	err = tx.QueryRow(
-		"INSERT INTO messages (channel_id, identity_id, body, thread_id) VALUES ($1, $2, $3, $4) RETURNING id",
-		channelID, identityID, body, threadID,
+		"INSERT INTO messages (channel_id, identity_id, body, thread_id, metadata) VALUES ($1, $2, $3, $4, $5) RETURNING id",
+		channelID, identityID, body, threadID, metadata,
 	).Scan(&msgID)
 	if err != nil {
 		return 0, fmt.Errorf("send message: %w", err)
@@ -122,7 +122,7 @@ func (s *Store) GetMessages(channelID int64, before *int64, after *int64, limit 
 		lPh := ph()
 		query = fmt.Sprintf(`
 			SELECT * FROM (
-				SELECT m.id, m.channel_id, m.identity_id, m.body, m.created_at, i.username, m.thread_id
+				SELECT m.id, m.channel_id, m.identity_id, m.body, m.created_at, i.username, m.thread_id, m.metadata
 				FROM messages m
 				JOIN identities i ON m.identity_id = i.id
 				WHERE m.channel_id = %s AND m.id < %s%s
@@ -135,7 +135,7 @@ func (s *Store) GetMessages(channelID int64, before *int64, after *int64, limit 
 		aPh := ph()
 		lPh := ph()
 		query = fmt.Sprintf(`
-			SELECT m.id, m.channel_id, m.identity_id, m.body, m.created_at, i.username, m.thread_id
+			SELECT m.id, m.channel_id, m.identity_id, m.body, m.created_at, i.username, m.thread_id, m.metadata
 			FROM messages m
 			JOIN identities i ON m.identity_id = i.id
 			WHERE m.channel_id = %s AND m.id > %s%s
@@ -147,7 +147,7 @@ func (s *Store) GetMessages(channelID int64, before *int64, after *int64, limit 
 		lPh := ph()
 		query = fmt.Sprintf(`
 			SELECT * FROM (
-				SELECT m.id, m.channel_id, m.identity_id, m.body, m.created_at, i.username, m.thread_id
+				SELECT m.id, m.channel_id, m.identity_id, m.body, m.created_at, i.username, m.thread_id, m.metadata
 				FROM messages m
 				JOIN identities i ON m.identity_id = i.id
 				WHERE m.channel_id = %s%s
@@ -166,7 +166,7 @@ func (s *Store) GetMessages(channelID int64, before *int64, after *int64, limit 
 	var messages []domain.Message
 	for rows.Next() {
 		var m domain.Message
-		if err := rows.Scan(&m.ID, &m.ChannelID, &m.IdentityID, &m.Body, &m.CreatedAt, &m.From, &m.ThreadID); err != nil {
+		if err := rows.Scan(&m.ID, &m.ChannelID, &m.IdentityID, &m.Body, &m.CreatedAt, &m.From, &m.ThreadID, &m.Metadata); err != nil {
 			return nil, fmt.Errorf("scan message: %w", err)
 		}
 		messages = append(messages, m)
@@ -249,7 +249,7 @@ func fetchUnreadForChannel(tx *sql.Tx, identityID string, channelID int64, menti
 	}
 
 	query := fmt.Sprintf(`
-		SELECT m.id, m.channel_id, m.identity_id, m.body, m.created_at, i.username, m.thread_id
+		SELECT m.id, m.channel_id, m.identity_id, m.body, m.created_at, i.username, m.thread_id, m.metadata
 		FROM messages m
 		JOIN identities i ON m.identity_id = i.id%s
 		WHERE m.channel_id = %s
@@ -269,7 +269,7 @@ func fetchUnreadForChannel(tx *sql.Tx, identityID string, channelID int64, menti
 	var maxID int64
 	for rows.Next() {
 		var m domain.Message
-		if err := rows.Scan(&m.ID, &m.ChannelID, &m.IdentityID, &m.Body, &m.CreatedAt, &m.From, &m.ThreadID); err != nil {
+		if err := rows.Scan(&m.ID, &m.ChannelID, &m.IdentityID, &m.Body, &m.CreatedAt, &m.From, &m.ThreadID, &m.Metadata); err != nil {
 			return nil, fmt.Errorf("scan message: %w", err)
 		}
 		if m.ID > maxID {

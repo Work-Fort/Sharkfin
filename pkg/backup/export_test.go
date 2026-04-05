@@ -32,14 +32,14 @@ func TestExportData(t *testing.T) {
 	secretID, _ := s.CreateChannel("secret", false, []string{alice.ID}, "channel")
 
 	// --- Seed messages ---
-	parentID, _ := s.SendMessage(devID, alice.ID, "hello @bob", nil, []string{bob.ID})
-	s.SendMessage(devID, bob.ID, "reply", &parentID, nil)
-	s.SendMessage(secretID, alice.ID, "secret msg", nil, nil)
+	parentID, _ := s.SendMessage(devID, alice.ID, "hello @bob", nil, []string{bob.ID}, nil)
+	s.SendMessage(devID, bob.ID, "reply", &parentID, nil, nil)
+	s.SendMessage(secretID, alice.ID, "secret msg", nil, nil, nil)
 
 	// --- Seed DM ---
 	s.OpenDM(alice.ID, bob.ID, "bob")
 	dm, _ := s.GetChannelByName("dm-alice-bob")
-	s.SendMessage(dm.ID, alice.ID, "dm msg", nil, nil)
+	s.SendMessage(dm.ID, alice.ID, "dm msg", nil, nil, nil)
 
 	// --- Seed settings ---
 	s.SetSetting("motd", "Welcome!")

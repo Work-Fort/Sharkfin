@@ -45,6 +45,7 @@ func newSendMessageTool() mcp.Tool {
 		mcp.WithString("channel", mcp.Required(), mcp.Description("Channel name")),
 		mcp.WithString("message", mcp.Required(), mcp.Description("Message text (UTF-8)")),
 		mcp.WithNumber("thread_id", mcp.Description("Message ID of the parent message to reply to (creates a thread)")),
+		mcp.WithString("metadata", mcp.Description("Optional JSON metadata string (e.g. {\"event_type\":\"task_transitioned\",...})")),
 	)
 }
 

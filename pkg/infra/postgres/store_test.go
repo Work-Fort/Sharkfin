@@ -360,7 +360,7 @@ func TestSendMessage(t *testing.T) {
 	aliceID := upsertTestIdentity(t, s, "alice")
 	chID, _ := s.CreateChannel("general", true, []string{aliceID}, "channel")
 
-	msgID, err := s.SendMessage(chID, aliceID, "hello world", nil, nil)
+	msgID, err := s.SendMessage(chID, aliceID, "hello world", nil, nil, nil)
 	if err != nil {
 		t.Fatalf("send message: %v", err)
 	}
@@ -375,7 +375,7 @@ func TestGetMessages(t *testing.T) {
 	chID, _ := s.CreateChannel("general", true, []string{aliceID}, "channel")
 
 	for i := 0; i < 5; i++ {
-		s.SendMessage(chID, aliceID, fmt.Sprintf("msg%d", i), nil, nil)
+		s.SendMessage(chID, aliceID, fmt.Sprintf("msg%d", i), nil, nil, nil)
 	}
 
 	msgs, err := s.GetMessages(chID, nil, nil, 50, nil)
@@ -402,7 +402,7 @@ func TestGetMessagesBefore(t *testing.T) {
 
 	var ids []int64
 	for i := 0; i < 5; i++ {
-		id, _ := s.SendMessage(chID, aliceID, fmt.Sprintf("msg%d", i), nil, nil)
+		id, _ := s.SendMessage(chID, aliceID, fmt.Sprintf("msg%d", i), nil, nil, nil)
 		ids = append(ids, id)
 	}
 
@@ -425,7 +425,7 @@ func TestGetMessagesAfter(t *testing.T) {
 
 	var ids []int64
 	for i := 0; i < 5; i++ {
-		id, _ := s.SendMessage(chID, aliceID, fmt.Sprintf("msg%d", i), nil, nil)
+		id, _ := s.SendMessage(chID, aliceID, fmt.Sprintf("msg%d", i), nil, nil, nil)
 		ids = append(ids, id)
 	}
 
@@ -447,7 +447,7 @@ func TestGetMessagesLimit(t *testing.T) {
 	chID, _ := s.CreateChannel("general", true, []string{aliceID}, "channel")
 
 	for i := 0; i < 10; i++ {
-		s.SendMessage(chID, aliceID, fmt.Sprintf("msg%d", i), nil, nil)
+		s.SendMessage(chID, aliceID, fmt.Sprintf("msg%d", i), nil, nil, nil)
 	}
 
 	msgs, err := s.GetMessages(chID, nil, nil, 3, nil)
@@ -469,8 +469,8 @@ func TestUnreadMessagesFirstRead(t *testing.T) {
 	bobID := upsertTestIdentity(t, s, "bob")
 	chID, _ := s.CreateChannel("dm", false, []string{aliceID, bobID}, "channel")
 
-	s.SendMessage(chID, aliceID, "msg1", nil, nil)
-	s.SendMessage(chID, aliceID, "msg2", nil, nil)
+	s.SendMessage(chID, aliceID, "msg1", nil, nil, nil)
+	s.SendMessage(chID, aliceID, "msg2", nil, nil, nil)
 
 	msgs, err := s.GetUnreadMessages(bobID, nil, false, nil)
 	if err != nil {
@@ -490,7 +490,7 @@ func TestUnreadMessagesAdvancesCursor(t *testing.T) {
 	bobID := upsertTestIdentity(t, s, "bob")
 	chID, _ := s.CreateChannel("dm", false, []string{aliceID, bobID}, "channel")
 
-	s.SendMessage(chID, aliceID, "msg1", nil, nil)
+	s.SendMessage(chID, aliceID, "msg1", nil, nil, nil)
 	s.GetUnreadMessages(bobID, nil, false, nil)
 
 	// Second call should return nothing
@@ -503,7 +503,7 @@ func TestUnreadMessagesAdvancesCursor(t *testing.T) {
 	}
 
 	// New message should appear
-	s.SendMessage(chID, aliceID, "msg2", nil, nil)
+	s.SendMessage(chID, aliceID, "msg2", nil, nil, nil)
 	msgs, err = s.GetUnreadMessages(bobID, nil, false, nil)
 	if err != nil {
 		t.Fatalf("get unread: %v", err)
@@ -523,8 +523,8 @@ func TestUnreadMessagesFilterByChannel(t *testing.T) {
 	ch1, _ := s.CreateChannel("ch1", false, []string{aliceID, bobID}, "channel")
 	ch2, _ := s.CreateChannel("ch2", false, []string{aliceID, bobID}, "channel")
 
-	s.SendMessage(ch1, aliceID, "in ch1", nil, nil)
-	s.SendMessage(ch2, aliceID, "in ch2", nil, nil)
+	s.SendMessage(ch1, aliceID, "in ch1", nil, nil, nil)
+	s.SendMessage(ch2, aliceID, "in ch2", nil, nil, nil)
 
 	msgs, err := s.GetUnreadMessages(bobID, &ch1, false, nil)
 	if err != nil {
@@ -553,9 +553,9 @@ func TestUnreadExcludesOwnMessages(t *testing.T) {
 	bobID := upsertTestIdentity(t, s, "bob")
 	chID, _ := s.CreateChannel("dm", false, []string{aliceID, bobID}, "channel")
 
-	s.SendMessage(chID, aliceID, "from alice", nil, nil)
-	s.SendMessage(chID, bobID, "from bob", nil, nil)
-	s.SendMessage(chID, aliceID, "from alice again", nil, nil)
+	s.SendMessage(chID, aliceID, "from alice", nil, nil, nil)
+	s.SendMessage(chID, bobID, "from bob", nil, nil, nil)
+	s.SendMessage(chID, aliceID, "from alice again", nil, nil, nil)
 
 	msgs, err := s.GetUnreadMessages(bobID, nil, false, nil)
 	if err != nil {
@@ -569,8 +569,8 @@ func TestUnreadExcludesOwnMessages(t *testing.T) {
 	}
 
 	// Cursor should have advanced past all 3 messages (including bob's own).
-	s.SendMessage(chID, aliceID, "new from alice", nil, nil)
-	s.SendMessage(chID, bobID, "new from bob", nil, nil)
+	s.SendMessage(chID, aliceID, "new from alice", nil, nil, nil)
+	s.SendMessage(chID, bobID, "new from bob", nil, nil, nil)
 
 	msgs, err = s.GetUnreadMessages(bobID, nil, false, nil)
 	if err != nil {
@@ -591,8 +591,8 @@ func TestSendMessageWithThread(t *testing.T) {
 	aliceID := upsertTestIdentity(t, s, "alice")
 	chID, _ := s.CreateChannel("general", true, []string{aliceID}, "channel")
 
-	parentID, _ := s.SendMessage(chID, aliceID, "parent message", nil, nil)
-	replyID, err := s.SendMessage(chID, aliceID, "reply message", &parentID, nil)
+	parentID, _ := s.SendMessage(chID, aliceID, "parent message", nil, nil, nil)
+	replyID, err := s.SendMessage(chID, aliceID, "reply message", &parentID, nil, nil)
 	if err != nil {
 		t.Fatalf("send reply: %v", err)
 	}
@@ -606,9 +606,9 @@ func TestSendMessageRejectNestedReply(t *testing.T) {
 	aliceID := upsertTestIdentity(t, s, "alice")
 	chID, _ := s.CreateChannel("general", true, []string{aliceID}, "channel")
 
-	parentID, _ := s.SendMessage(chID, aliceID, "parent", nil, nil)
-	replyID, _ := s.SendMessage(chID, aliceID, "reply", &parentID, nil)
-	_, err := s.SendMessage(chID, aliceID, "nested reply", &replyID, nil)
+	parentID, _ := s.SendMessage(chID, aliceID, "parent", nil, nil, nil)
+	replyID, _ := s.SendMessage(chID, aliceID, "reply", &parentID, nil, nil)
+	_, err := s.SendMessage(chID, aliceID, "nested reply", &replyID, nil, nil)
 	if err == nil {
 		t.Error("expected error for nested reply")
 	}
@@ -620,8 +620,8 @@ func TestSendMessageRejectCrossChannelThread(t *testing.T) {
 	ch1, _ := s.CreateChannel("ch1", true, []string{aliceID}, "channel")
 	ch2, _ := s.CreateChannel("ch2", true, []string{aliceID}, "channel")
 
-	parentID, _ := s.SendMessage(ch1, aliceID, "parent in ch1", nil, nil)
-	_, err := s.SendMessage(ch2, aliceID, "reply in ch2", &parentID, nil)
+	parentID, _ := s.SendMessage(ch1, aliceID, "parent in ch1", nil, nil, nil)
+	_, err := s.SendMessage(ch2, aliceID, "reply in ch2", &parentID, nil, nil)
 	if err == nil {
 		t.Error("expected error for cross-channel thread")
 	}
@@ -632,10 +632,10 @@ func TestGetMessagesThreadFilter(t *testing.T) {
 	aliceID := upsertTestIdentity(t, s, "alice")
 	chID, _ := s.CreateChannel("general", true, []string{aliceID}, "channel")
 
-	parentID, _ := s.SendMessage(chID, aliceID, "parent", nil, nil)
-	s.SendMessage(chID, aliceID, "reply1", &parentID, nil)
-	s.SendMessage(chID, aliceID, "reply2", &parentID, nil)
-	s.SendMessage(chID, aliceID, "unrelated", nil, nil)
+	parentID, _ := s.SendMessage(chID, aliceID, "parent", nil, nil, nil)
+	s.SendMessage(chID, aliceID, "reply1", &parentID, nil, nil)
+	s.SendMessage(chID, aliceID, "reply2", &parentID, nil, nil)
+	s.SendMessage(chID, aliceID, "unrelated", nil, nil, nil)
 
 	msgs, err := s.GetMessages(chID, nil, nil, 50, &parentID)
 	if err != nil {
@@ -657,7 +657,7 @@ func TestSendMessageWithMentions(t *testing.T) {
 	bobID := upsertTestIdentity(t, s, "bob")
 	chID, _ := s.CreateChannel("general", true, []string{aliceID, bobID}, "channel")
 
-	_, err := s.SendMessage(chID, aliceID, "hey @bob", nil, []string{bobID})
+	_, err := s.SendMessage(chID, aliceID, "hey @bob", nil, []string{bobID}, nil)
 	if err != nil {
 		t.Fatalf("send message with mention: %v", err)
 	}
@@ -677,8 +677,8 @@ func TestUnreadMessagesMentionsOnly(t *testing.T) {
 	bobID := upsertTestIdentity(t, s, "bob")
 	chID, _ := s.CreateChannel("dm", false, []string{aliceID, bobID}, "channel")
 
-	s.SendMessage(chID, aliceID, "no mention", nil, nil)
-	s.SendMessage(chID, aliceID, "hey @bob", nil, []string{bobID})
+	s.SendMessage(chID, aliceID, "no mention", nil, nil, nil)
+	s.SendMessage(chID, aliceID, "hey @bob", nil, []string{bobID}, nil)
 
 	msgs, err := s.GetUnreadMessages(bobID, nil, true, nil)
 	if err != nil {
@@ -698,16 +698,16 @@ func TestUnreadMessagesThreadFilter(t *testing.T) {
 	bobID := upsertTestIdentity(t, s, "bob")
 	chID, _ := s.CreateChannel("dm", false, []string{aliceID, bobID}, "channel")
 
-	parentID, _ := s.SendMessage(chID, aliceID, "parent", nil, nil)
-	s.SendMessage(chID, aliceID, "reply", &parentID, nil)
-	s.SendMessage(chID, aliceID, "top-level", nil, nil)
+	parentID, _ := s.SendMessage(chID, aliceID, "parent", nil, nil, nil)
+	s.SendMessage(chID, aliceID, "reply", &parentID, nil, nil)
+	s.SendMessage(chID, aliceID, "top-level", nil, nil, nil)
 
 	// Read all first to advance cursor
 	s.GetUnreadMessages(bobID, nil, false, nil)
 
 	// Now send new messages
-	s.SendMessage(chID, aliceID, "new reply", &parentID, nil)
-	s.SendMessage(chID, aliceID, "new top-level", nil, nil)
+	s.SendMessage(chID, aliceID, "new reply", &parentID, nil, nil)
+	s.SendMessage(chID, aliceID, "new top-level", nil, nil, nil)
 
 	// Filter by thread -- should not advance cursor
 	msgs, err := s.GetUnreadMessages(bobID, nil, false, &parentID)
@@ -735,8 +735,8 @@ func TestUnreadCountsIncludesType(t *testing.T) {
 	ch, _ := s.GetChannelByName("general")
 	dm, _ := s.GetChannelByName("dm-alice-bob")
 
-	s.SendMessage(ch.ID, aliceID, "hello channel", nil, nil)
-	s.SendMessage(dm.ID, aliceID, "hello dm", nil, nil)
+	s.SendMessage(ch.ID, aliceID, "hello channel", nil, nil, nil)
+	s.SendMessage(dm.ID, aliceID, "hello dm", nil, nil, nil)
 
 	counts, err := s.GetUnreadCounts(bobID)
 	if err != nil {
@@ -775,8 +775,8 @@ func TestMarkRead(t *testing.T) {
 	bobID := upsertTestIdentity(t, s, "bob")
 	chID, _ := s.CreateChannel("general", true, []string{aliceID, bobID}, "channel")
 
-	msg1, _ := s.SendMessage(chID, aliceID, "msg1", nil, nil)
-	s.SendMessage(chID, aliceID, "msg2", nil, nil)
+	msg1, _ := s.SendMessage(chID, aliceID, "msg1", nil, nil, nil)
+	s.SendMessage(chID, aliceID, "msg2", nil, nil, nil)
 
 	// Mark read up to msg1
 	if err := s.MarkRead(bobID, chID, &msg1); err != nil {
@@ -802,8 +802,8 @@ func TestMarkReadLatest(t *testing.T) {
 	bobID := upsertTestIdentity(t, s, "bob")
 	chID, _ := s.CreateChannel("general", true, []string{aliceID, bobID}, "channel")
 
-	s.SendMessage(chID, aliceID, "msg1", nil, nil)
-	s.SendMessage(chID, aliceID, "msg2", nil, nil)
+	s.SendMessage(chID, aliceID, "msg1", nil, nil, nil)
+	s.SendMessage(chID, aliceID, "msg2", nil, nil, nil)
 
 	// Mark read to latest (nil messageID)
 	if err := s.MarkRead(bobID, chID, nil); err != nil {
@@ -826,9 +826,9 @@ func TestMarkReadForwardOnly(t *testing.T) {
 	bobID := upsertTestIdentity(t, s, "bob")
 	chID, _ := s.CreateChannel("general", true, []string{aliceID, bobID}, "channel")
 
-	msg1, _ := s.SendMessage(chID, aliceID, "msg1", nil, nil)
-	msg2, _ := s.SendMessage(chID, aliceID, "msg2", nil, nil)
-	s.SendMessage(chID, aliceID, "msg3", nil, nil)
+	msg1, _ := s.SendMessage(chID, aliceID, "msg1", nil, nil, nil)
+	msg2, _ := s.SendMessage(chID, aliceID, "msg2", nil, nil, nil)
+	s.SendMessage(chID, aliceID, "msg3", nil, nil, nil)
 
 	// Mark read to msg2
 	s.MarkRead(bobID, chID, &msg2)

@@ -21,12 +21,12 @@ func populateSource(t *testing.T, s *sqlite.Store) {
 	devID, _ := s.CreateChannel("dev", true, []string{alice.ID, bob.ID}, "channel")
 	s.CreateChannel("secret", false, []string{alice.ID}, "channel")
 
-	parentID, _ := s.SendMessage(devID, alice.ID, "hello @bob", nil, []string{bob.ID})
-	s.SendMessage(devID, bob.ID, "reply to alice", &parentID, nil)
+	parentID, _ := s.SendMessage(devID, alice.ID, "hello @bob", nil, []string{bob.ID}, nil)
+	s.SendMessage(devID, bob.ID, "reply to alice", &parentID, nil, nil)
 
 	s.OpenDM(alice.ID, bob.ID, "bob")
 	dm, _ := s.GetChannelByName("dm-alice-bob")
-	s.SendMessage(dm.ID, alice.ID, "dm message", nil, nil)
+	s.SendMessage(dm.ID, alice.ID, "dm message", nil, nil, nil)
 
 	s.SetSetting("motd", "Welcome!")
 

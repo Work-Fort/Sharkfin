@@ -23,7 +23,7 @@ type ChannelStore interface {
 }
 
 type MessageStore interface {
-	SendMessage(channelID int64, identityID string, body string, threadID *int64, mentionIdentityIDs []string) (int64, error)
+	SendMessage(channelID int64, identityID string, body string, threadID *int64, mentionIdentityIDs []string, metadata *string) (int64, error)
 	GetMessages(channelID int64, before *int64, after *int64, limit int, threadID *int64) ([]Message, error)
 	GetUnreadMessages(identityID string, channelID *int64, mentionsOnly bool, threadID *int64) ([]Message, error)
 	GetUnreadCounts(identityID string) ([]UnreadCount, error)
