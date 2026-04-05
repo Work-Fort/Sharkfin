@@ -200,6 +200,52 @@ func TestWebhookSubscriberNoWebhookURL(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 }
 
+func TestFirePerIdentityWebhooks_PostsToRegisteredURL(t *testing.T) {
+	var mu sync.Mutex
+	var received []map[string]interface{}
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var p map[string]interface{}
+		json.NewDecoder(r.Body).Decode(&p)
+		mu.Lock()
+		received = append(received, p)
+		mu.Unlock()
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	hook := domain.IdentityWebhook{
+		ID:         "hook-1",
+		IdentityID: "svc-id-1",
+		URL:        srv.URL,
+		Secret:     "",
+		Active:     true,
+	}
+
+	firePerIdentityWebhook(hook, WebhookPayload{
+		Event:       "message.new",
+		ChannelID:   1,
+		Channel:     "general",
+		ChannelType: "channel",
+		From:        "alice",
+		FromType:    "user",
+		MessageID:   42,
+		Body:        "hello",
+		SentAt:      "2026-04-05T00:00:00Z",
+	})
+
+	time.Sleep(200 * time.Millisecond)
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(received) != 1 {
+		t.Fatalf("expected 1 POST, got %d", len(received))
+	}
+	if received[0]["event"] != "message.new" {
+		t.Errorf("unexpected event: %v", received[0]["event"])
+	}
+}
+
 func TestWebhookSubscriberExcludesSender(t *testing.T) {
 	var received []WebhookPayload
 	var mu sync.Mutex

@@ -95,4 +95,5 @@ type MessageEvent struct {
 	SentAt      time.Time
 	Mentions    []string
 	ThreadID    *int64
+	Metadata    *string // JSON string, opaque
 }

@@ -14,23 +14,34 @@ import (
 
 // WebhookPayload is the JSON body POSTed to the webhook URL.
 type WebhookPayload struct {
-	Event       string `json:"event"`
-	Recipient   string `json:"recipient"`
-	Channel     string `json:"channel"`
-	ChannelType string `json:"channel_type"`
-	From        string `json:"from"`
-	MessageID   int64  `json:"message_id"`
-	SentAt      string `json:"sent_at"`
+	Event       string  `json:"event"`
+	ChannelID   int64   `json:"channel_id"`
+	ChannelName string  `json:"channel_name"`
+	ChannelType string  `json:"channel_type"`
+	From        string  `json:"from"`
+	FromType    string  `json:"from_type"`
+	MessageID   int64   `json:"message_id"`
+	Body        string  `json:"body"`
+	Metadata    *string `json:"metadata"`
+	SentAt      string  `json:"sent_at"`
+
+	// Legacy fields — kept for global webhook_url backwards compatibility.
+	Recipient string `json:"recipient,omitempty"`
+	Channel   string `json:"channel,omitempty"`
 }
 
 // WebhookEvent contains the data needed to fire webhooks for a message.
 type WebhookEvent struct {
+	ChannelID   int64
 	ChannelName string
 	ChannelType string
 	From        string
+	FromType    string  // identity type of sender
+	Body        string
+	Metadata    *string
 	MessageID   int64
 	SentAt      time.Time
-	Recipients  []string
+	Recipients  []string // for legacy global webhook
 }
 
 var webhookClient = &http.Client{Timeout: 5 * time.Second}
@@ -67,30 +78,73 @@ func fireWebhooks(webhookURL string, evt WebhookEvent) {
 	}
 }
 
+// firePerIdentityWebhook POSTs a per-identity webhook payload.
+// Runs in its own goroutine. Failures are logged and ignored.
+func firePerIdentityWebhook(hook domain.IdentityWebhook, payload WebhookPayload) {
+	go func() {
+		body, err := json.Marshal(payload)
+		if err != nil {
+			log.Error("webhook: marshal per-identity payload", "err", err)
+			return
+		}
+		resp, err := webhookClient.Post(hook.URL, "application/json", bytes.NewReader(body))
+		if err != nil {
+			log.Warn("webhook: per-identity post failed", "identity_id", hook.IdentityID, "url", hook.URL, "err", err)
+			return
+		}
+		resp.Body.Close()
+		if resp.StatusCode >= 400 {
+			log.Warn("webhook: per-identity bad status", "identity_id", hook.IdentityID, "status", resp.StatusCode)
+		}
+	}()
+}
+
 // computeRecipients returns the list of users who should be notified:
-// mentioned users + DM members, minus the sender.
+// mentioned users + DM members + service channel members, minus the sender.
 func computeRecipients(msg domain.MessageEvent, store domain.Store) []string {
 	seen := make(map[string]bool)
 	var recipients []string
+
+	// Mentioned users
 	for _, m := range msg.Mentions {
 		if m != msg.From && !seen[m] {
 			seen[m] = true
 			recipients = append(recipients, m)
 		}
 	}
+
+	ch, err := store.GetChannelByName(msg.ChannelName)
+	if err != nil {
+		return recipients
+	}
+
+	// DM participants
 	if msg.ChannelType == "dm" {
-		ch, err := store.GetChannelByName(msg.ChannelName)
-		if err == nil {
-			if members, err := store.ChannelMemberUsernames(ch.ID); err == nil {
-				for _, m := range members {
-					if m != msg.From && !seen[m] {
-						seen[m] = true
-						recipients = append(recipients, m)
-					}
+		if members, err := store.ChannelMemberUsernames(ch.ID); err == nil {
+			for _, m := range members {
+				if m != msg.From && !seen[m] {
+					seen[m] = true
+					recipients = append(recipients, m)
 				}
 			}
 		}
 	}
+
+	// Service members of any channel type
+	members, err := store.ChannelMemberUsernames(ch.ID)
+	if err == nil {
+		for _, m := range members {
+			if m == msg.From || seen[m] {
+				continue
+			}
+			ident, err := store.GetIdentityByUsername(m)
+			if err == nil && ident.Type == "service" {
+				seen[m] = true
+				recipients = append(recipients, m)
+			}
+		}
+	}
+
 	return recipients
 }
 
@@ -118,21 +172,55 @@ func (ws *WebhookSubscriber) run() {
 }
 
 func (ws *WebhookSubscriber) handleMessage(msg domain.MessageEvent) {
+	// 1. Legacy global webhook
 	webhookURL, err := ws.store.GetSetting("webhook_url")
-	if err != nil || webhookURL == "" {
+	if err == nil && webhookURL != "" {
+		recipients := computeRecipients(msg, ws.store)
+		if len(recipients) > 0 {
+			fireWebhooks(webhookURL, WebhookEvent{
+				ChannelName: msg.ChannelName,
+				ChannelType: msg.ChannelType,
+				From:        msg.From,
+				MessageID:   msg.MessageID,
+				SentAt:      msg.SentAt,
+				Recipients:  recipients,
+			})
+		}
+	}
+
+	// 2. Per-identity webhooks for all service members of the channel.
+	ch, err := ws.store.GetChannelByName(msg.ChannelName)
+	if err != nil {
+		return
+	}
+	hooks, err := ws.store.GetWebhooksForChannel(ch.ID)
+	if err != nil {
+		log.Warn("webhook: get channel hooks", "channel", msg.ChannelName, "err", err)
 		return
 	}
 
-	recipients := computeRecipients(msg, ws.store)
-	if len(recipients) > 0 {
-		fireWebhooks(webhookURL, WebhookEvent{
-			ChannelName: msg.ChannelName,
-			ChannelType: msg.ChannelType,
-			From:        msg.From,
-			MessageID:   msg.MessageID,
-			SentAt:      msg.SentAt,
-			Recipients:  recipients,
-		})
+	// Lookup sender identity type.
+	senderIdent, err := ws.store.GetIdentityByUsername(msg.From)
+	fromType := "user"
+	if err == nil {
+		fromType = senderIdent.Type
+	}
+
+	payload := WebhookPayload{
+		Event:       "message.new",
+		ChannelID:   ch.ID,
+		ChannelName: msg.ChannelName,
+		ChannelType: msg.ChannelType,
+		From:        msg.From,
+		FromType:    fromType,
+		MessageID:   msg.MessageID,
+		Body:        msg.Body,
+		Metadata:    msg.Metadata,
+		SentAt:      msg.SentAt.UTC().Format(time.RFC3339),
+	}
+
+	for _, hook := range hooks {
+		firePerIdentityWebhook(hook, payload)
 	}
 }
 
