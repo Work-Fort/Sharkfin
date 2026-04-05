@@ -218,7 +218,6 @@ func TestFirePerIdentityWebhooks_PostsToRegisteredURL(t *testing.T) {
 		ID:         "hook-1",
 		IdentityID: "svc-id-1",
 		URL:        srv.URL,
-		Secret:     "",
 		Active:     true,
 	}
 

@@ -15,14 +15,15 @@ func TestRegisterAndListWebhooks(t *testing.T) {
 	svcIdent, err := s.UpsertIdentity("uuid-svc", "flow-bot", "Flow", "service", "")
 	require.NoError(t, err)
 
-	err = s.RegisterWebhook(svcIdent.ID, "https://flow.internal/hook", "mysecret")
+	id, err := s.RegisterWebhook(svcIdent.ID, "https://flow.internal/hook")
 	require.NoError(t, err)
+	require.NotEmpty(t, id)
 
 	hooks, err := s.GetActiveWebhooksForIdentity(svcIdent.ID)
 	require.NoError(t, err)
 	require.Len(t, hooks, 1)
 	require.Equal(t, "https://flow.internal/hook", hooks[0].URL)
-	require.Equal(t, "mysecret", hooks[0].Secret)
+	require.Equal(t, id, hooks[0].ID)
 }
 
 func TestUnregisterWebhook(t *testing.T) {
@@ -31,7 +32,7 @@ func TestUnregisterWebhook(t *testing.T) {
 	s.UpsertIdentity("uuid-admin", "admin", "Admin", "user", "user")
 	svcIdent, _ := s.UpsertIdentity("uuid-svc", "flow-bot", "Flow", "service", "")
 
-	s.RegisterWebhook(svcIdent.ID, "https://flow.internal/hook", "")
+	s.RegisterWebhook(svcIdent.ID, "https://flow.internal/hook")
 
 	hooks, _ := s.GetActiveWebhooksForIdentity(svcIdent.ID)
 	require.Len(t, hooks, 1)

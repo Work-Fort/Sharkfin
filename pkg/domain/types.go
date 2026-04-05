@@ -42,7 +42,6 @@ type IdentityWebhook struct {
 	ID         string
 	IdentityID string
 	URL        string
-	Secret     string
 	Active     bool
 }
 

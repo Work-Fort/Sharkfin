@@ -9,22 +9,23 @@ import (
 	"github.com/Work-Fort/sharkfin/pkg/domain"
 )
 
-func (s *Store) RegisterWebhook(identityID, url, secret string) error {
+func (s *Store) RegisterWebhook(identityID, url string) (string, error) {
 	buf := make([]byte, 16)
 	if _, err := rand.Read(buf); err != nil {
-		return fmt.Errorf("generate webhook id: %w", err)
+		return "", fmt.Errorf("generate webhook id: %w", err)
 	}
 	id := hex.EncodeToString(buf)
-	// ON CONFLICT: re-enable and update secret if (identity_id, url) already exists.
-	_, err := s.db.Exec(`
-		INSERT INTO identity_webhooks (id, identity_id, url, secret)
-		VALUES ($1, $2, $3, $4)
-		ON CONFLICT (identity_id, url) DO UPDATE SET active = true, secret = EXCLUDED.secret
-	`, id, identityID, url, secret)
+	var returnedID string
+	err := s.db.QueryRow(`
+		INSERT INTO identity_webhooks (id, identity_id, url)
+		VALUES ($1, $2, $3)
+		ON CONFLICT (identity_id, url) DO UPDATE SET active = true
+		RETURNING id
+	`, id, identityID, url).Scan(&returnedID)
 	if err != nil {
-		return fmt.Errorf("register webhook: %w", err)
+		return "", fmt.Errorf("register webhook: %w", err)
 	}
-	return nil
+	return returnedID, nil
 }
 
 func (s *Store) UnregisterWebhook(identityID, webhookID string) error {
@@ -40,7 +41,7 @@ func (s *Store) UnregisterWebhook(identityID, webhookID string) error {
 
 func (s *Store) GetActiveWebhooksForIdentity(identityID string) ([]domain.IdentityWebhook, error) {
 	rows, err := s.db.Query(
-		`SELECT id, identity_id, url, secret FROM identity_webhooks WHERE identity_id = $1 AND active = true`,
+		`SELECT id, identity_id, url FROM identity_webhooks WHERE identity_id = $1 AND active = true`,
 		identityID,
 	)
 	if err != nil {
@@ -50,7 +51,7 @@ func (s *Store) GetActiveWebhooksForIdentity(identityID string) ([]domain.Identi
 	var hooks []domain.IdentityWebhook
 	for rows.Next() {
 		var h domain.IdentityWebhook
-		if err := rows.Scan(&h.ID, &h.IdentityID, &h.URL, &h.Secret); err != nil {
+		if err := rows.Scan(&h.ID, &h.IdentityID, &h.URL); err != nil {
 			return nil, fmt.Errorf("scan webhook: %w", err)
 		}
 		h.Active = true
@@ -60,9 +61,8 @@ func (s *Store) GetActiveWebhooksForIdentity(identityID string) ([]domain.Identi
 }
 
 func (s *Store) GetWebhooksForChannel(channelID int64) ([]domain.IdentityWebhook, error) {
-	// Returns active webhooks for all service-type identities who are members of channelID.
 	rows, err := s.db.Query(`
-		SELECT iw.id, iw.identity_id, iw.url, iw.secret
+		SELECT iw.id, iw.identity_id, iw.url
 		FROM identity_webhooks iw
 		JOIN identities i ON iw.identity_id = i.id
 		JOIN channel_members cm ON cm.identity_id = i.id AND cm.channel_id = $1
@@ -76,7 +76,7 @@ func (s *Store) GetWebhooksForChannel(channelID int64) ([]domain.IdentityWebhook
 	var hooks []domain.IdentityWebhook
 	for rows.Next() {
 		var h domain.IdentityWebhook
-		if err := rows.Scan(&h.ID, &h.IdentityID, &h.URL, &h.Secret); err != nil {
+		if err := rows.Scan(&h.ID, &h.IdentityID, &h.URL); err != nil {
 			return nil, fmt.Errorf("scan webhook: %w", err)
 		}
 		h.Active = true

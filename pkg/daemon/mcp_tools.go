@@ -209,7 +209,6 @@ func newRegisterWebhookTool() mcp.Tool {
 	return mcp.NewTool("register_webhook",
 		mcp.WithDescription("Register a webhook callback URL for this identity"),
 		mcp.WithString("url", mcp.Required(), mcp.Description("Callback URL to POST message.new events to")),
-		mcp.WithString("secret", mcp.Description("Optional HMAC secret for signature verification")),
 	)
 }
 

@@ -62,7 +62,7 @@ type SettingsStore interface {
 }
 
 type WebhookStore interface {
-	RegisterWebhook(identityID, url, secret string) error
+	RegisterWebhook(identityID, url string) (string, error)
 	UnregisterWebhook(identityID, webhookID string) error
 	GetActiveWebhooksForIdentity(identityID string) ([]IdentityWebhook, error)
 	// GetWebhooksForChannel returns active webhooks for all service members of a channel.

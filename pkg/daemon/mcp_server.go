@@ -834,14 +834,13 @@ func (s *SharkfinMCP) handleRegisterWebhook(ctx context.Context, req mcp.CallToo
 	if url == "" {
 		return mcp.NewToolResultError("url is required"), nil
 	}
-	secret := req.GetString("secret", "")
 
 	identity, err := s.store.GetIdentityByUsername(usernameFromCtx(ctx))
 	if err != nil {
 		return nil, fmt.Errorf("get identity: %w", err)
 	}
 
-	if err := s.store.RegisterWebhook(identity.ID, url, secret); err != nil {
+	if _, err := s.store.RegisterWebhook(identity.ID, url); err != nil {
 		return nil, fmt.Errorf("register webhook: %w", err)
 	}
 
