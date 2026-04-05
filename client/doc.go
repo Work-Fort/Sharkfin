@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-// Package client provides a typed Go WebSocket client for the Sharkfin
-// messaging server. It connects to the /ws endpoint, handles the hello
-// handshake and heartbeat automatically, and delivers server-pushed
-// events via a channel.
+// Package client provides a typed Go client for the Sharkfin messaging
+// server. It connects via WebSocket for real-time events and provides
+// REST methods for service-to-service operations (webhooks, identity
+// registration, channel management).
 //
 // Usage:
 //
