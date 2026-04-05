@@ -246,6 +246,56 @@ func TestFirePerIdentityWebhooks_PostsToRegisteredURL(t *testing.T) {
 	}
 }
 
+func TestComputeRecipients_IncludesServiceMembers(t *testing.T) {
+	store, err := sqlite.Open(":memory:")
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer store.Close()
+
+	// Create identities
+	store.UpsertIdentity("uuid-admin", "admin", "Admin", "user", "admin")
+	store.UpsertIdentity("uuid-alice", "alice", "Alice", "user", "user")
+	store.UpsertIdentity("uuid-bot", "flow-bot", "Flow Bot", "service", "")
+
+	// sqlite.Open seeds a "general" channel — use it directly.
+	ch, err := store.GetChannelByName("general")
+	if err != nil {
+		t.Fatalf("get general channel: %v", err)
+	}
+	chID := ch.ID
+
+	aliceIdent, _ := store.GetIdentityByUsername("alice")
+	botIdent, _ := store.GetIdentityByUsername("flow-bot")
+	store.AddChannelMember(chID, aliceIdent.ID)
+	store.AddChannelMember(chID, botIdent.ID)
+
+	msg := domain.MessageEvent{
+		ChannelName: "general",
+		ChannelType: "channel",
+		From:        "alice",
+		Mentions:    []string{},
+	}
+
+	recipients := computeRecipients(msg, store)
+
+	found := false
+	for _, r := range recipients {
+		if r == "flow-bot" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected flow-bot in recipients, got: %v", recipients)
+	}
+	// alice (sender) should not be in recipients
+	for _, r := range recipients {
+		if r == "alice" {
+			t.Errorf("sender alice should not be in recipients")
+		}
+	}
+}
+
 func TestWebhookSubscriberExcludesSender(t *testing.T) {
 	var received []WebhookPayload
 	var mu sync.Mutex
