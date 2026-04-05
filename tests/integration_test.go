@@ -11,6 +11,8 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/http/httptest"
+	"sync"
 	"testing"
 	"time"
 
@@ -20,6 +22,7 @@ import (
 	"github.com/lestrrat-go/jwx/v2/jwt"
 
 	pkgdaemon "github.com/Work-Fort/sharkfin/pkg/daemon"
+	"github.com/Work-Fort/sharkfin/pkg/domain"
 	"github.com/Work-Fort/sharkfin/pkg/infra/sqlite"
 )
 
@@ -160,7 +163,8 @@ func startTestServer(t *testing.T) *testEnv {
 	}
 
 	ctx := context.Background()
-	srv, err := pkgdaemon.NewServer(ctx, addr, store, 20*time.Second, "", nil, "test", jwks.passportURL(), "")
+	bus := domain.NewEventBus()
+	srv, err := pkgdaemon.NewServer(ctx, addr, store, 20*time.Second, "", bus, "test", jwks.passportURL(), "")
 	if err != nil {
 		t.Fatalf("create server: %v", err)
 	}
@@ -652,5 +656,143 @@ func TestScenario7_NonParticipantRejection(t *testing.T) {
 	}
 	if msg != "you are not a participant of this channel" {
 		t.Fatalf("unexpected error: %s", msg)
+	}
+}
+
+func TestScenario_BotRegistrationFlow(t *testing.T) {
+	// Capture webhook POSTs.
+	var mu sync.Mutex
+	var received []map[string]interface{}
+	hookSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var p map[string]interface{}
+		json.NewDecoder(r.Body).Decode(&p)
+		mu.Lock()
+		received = append(received, p)
+		mu.Unlock()
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer hookSrv.Close()
+
+	env := startTestServer(t)
+
+	// Step 1: Admin user (first identity → auto-promoted to admin).
+	// Creates the "general" channel that the bot will join.
+	alice := env.initUser("alice-uuid", "alice", "Alice")
+	_, chResp := env.toolCall(alice.sessionID, alice.token, 10, "channel_create", map[string]interface{}{
+		"name": "bot-test-chan", "public": true,
+	})
+	toolResultText(t, chResp) // panics on tool error
+
+	// Step 2: Provision bot identity via a service-type JWT.
+	botToken := env.jwks.signJWT("bot-uuid", "flow-bot", "Flow Bot", "service")
+	httpResp, _ := env.mcpRequest("", botToken, "initialize", 1, map[string]interface{}{
+		"protocolVersion": "2025-03-26",
+		"capabilities":    map[string]interface{}{},
+		"clientInfo":      map[string]string{"name": "flow-bot", "version": "0.1"},
+	})
+	botSessionID := httpResp.Header.Get("Mcp-Session-Id")
+	if botSessionID == "" {
+		t.Fatal("no session ID for bot")
+	}
+	// First tool call auto-provisions the identity with role=bot.
+	_, ulResp := env.toolCall(botSessionID, botToken, 2, "user_list", map[string]interface{}{})
+	toolResultText(t, ulResp)
+
+	// Verify role=bot via store.
+	botIdent, err := env.srv.Store().GetIdentityByUsername("flow-bot")
+	if err != nil {
+		t.Fatalf("get bot identity: %v", err)
+	}
+	if botIdent.Role != "bot" {
+		t.Errorf("expected role=bot, got %q", botIdent.Role)
+	}
+	if botIdent.Type != "service" {
+		t.Errorf("expected type=service, got %q", botIdent.Type)
+	}
+
+	// Step 3: Bot registers its webhook.
+	_, regResp := env.toolCall(botSessionID, botToken, 3, "register_webhook", map[string]interface{}{
+		"url": hookSrv.URL,
+	})
+	toolResultText(t, regResp)
+
+	// Step 4: Bot joins "bot-test-chan".
+	_, joinResp := env.toolCall(botSessionID, botToken, 4, "channel_join", map[string]interface{}{
+		"channel": "bot-test-chan",
+	})
+	toolResultText(t, joinResp)
+
+	// Step 5: Alice sends a message in "bot-test-chan".
+	_, sendResp2 := env.toolCall(alice.sessionID, alice.token, 5, "send_message", map[string]interface{}{
+		"channel": "bot-test-chan",
+		"message": "hello from alice",
+	})
+	toolResultText(t, sendResp2)
+
+	// Step 6: Wait for async webhook delivery and assert payload.
+	time.Sleep(300 * time.Millisecond)
+
+	mu.Lock()
+	if len(received) == 0 {
+		mu.Unlock()
+		t.Fatal("expected webhook POST, got none")
+	}
+	payload := received[0]
+	if payload["event"] != "message.new" {
+		t.Errorf("event = %v, want message.new", payload["event"])
+	}
+	if payload["channel_name"] != "bot-test-chan" {
+		t.Errorf("channel_name = %v, want bot-test-chan", payload["channel_name"])
+	}
+	if payload["from"] != "alice" {
+		t.Errorf("from = %v, want alice", payload["from"])
+	}
+	if payload["body"] != "hello from alice" {
+		t.Errorf("body = %v, want 'hello from alice'", payload["body"])
+	}
+	// message_id is JSON number → float64 in Go map
+	msgIDFloat, ok := payload["message_id"].(float64)
+	if !ok || msgIDFloat == 0 {
+		mu.Unlock()
+		t.Fatalf("expected non-zero message_id in webhook payload, got %v", payload["message_id"])
+	}
+	msgID := int64(msgIDFloat)
+	mu.Unlock()
+
+	// Step 7: Bot replies using message_id as thread_id (threading convention).
+	_, replyResp := env.toolCall(botSessionID, botToken, 6, "send_message", map[string]interface{}{
+		"channel":   "bot-test-chan",
+		"message":   "hello back from bot",
+		"thread_id": msgID,
+	})
+	toolResultText(t, replyResp)
+
+	// Step 8: Verify the reply is threaded (thread_id matches the anchor message).
+	ch, err := env.srv.Store().GetChannelByName("bot-test-chan")
+	if err != nil {
+		t.Fatalf("GetChannelByName: %v", err)
+	}
+	msgs, err := env.srv.Store().GetMessages(ch.ID, nil, nil, 50, nil)
+	if err != nil {
+		t.Fatalf("GetMessages: %v", err)
+	}
+	var botReply *struct {
+		From     string
+		ThreadID *int64
+	}
+	for _, m := range msgs {
+		if m.From == "flow-bot" {
+			botReply = &struct {
+				From     string
+				ThreadID *int64
+			}{From: m.From, ThreadID: m.ThreadID}
+			break
+		}
+	}
+	if botReply == nil {
+		t.Fatal("bot reply message not found in store")
+	}
+	if botReply.ThreadID == nil || *botReply.ThreadID != msgID {
+		t.Errorf("bot reply thread_id = %v, want %d", botReply.ThreadID, msgID)
 	}
 }

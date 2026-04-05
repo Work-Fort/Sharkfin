@@ -19,7 +19,7 @@ func (s *Store) UpsertIdentity(authID, username, displayName, identityType, role
 	s.db.QueryRow("SELECT COUNT(*) FROM identities").Scan(&count)
 	if count == 0 {
 		role = "admin"
-	} else if identityType == "service" && role == "user" {
+	} else if identityType == "service" && role != "admin" {
 		role = "bot"
 	}
 
