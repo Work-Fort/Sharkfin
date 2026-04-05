@@ -96,6 +96,7 @@ func NewSharkfinMCP(store domain.Store, hub *Hub, presence *PresenceHandler, ver
 		server.ServerTool{Tool: newMentionGroupRemoveMemberTool(), Handler: s.handleMentionGroupRemoveMember},
 		server.ServerTool{Tool: newRegisterWebhookTool(), Handler: s.handleRegisterWebhook},
 		server.ServerTool{Tool: newUnregisterWebhookTool(), Handler: s.handleUnregisterWebhook},
+		server.ServerTool{Tool: newListWebhooksTool(), Handler: s.handleListWebhooks},
 	)
 
 	return s
@@ -721,6 +722,7 @@ func optionalInt64(req mcp.CallToolRequest, key string) *int64 {
 }
 
 // optionalString extracts an optional string argument, returning nil if absent or empty.
+// Empty string treated as absent; metadata must be valid JSON if provided.
 func optionalString(req mcp.CallToolRequest, key string) *string {
 	v := req.GetString(key, "")
 	if v == "" {
@@ -862,4 +864,27 @@ func (s *SharkfinMCP) handleUnregisterWebhook(ctx context.Context, req mcp.CallT
 	}
 
 	return mcp.NewToolResultText("webhook unregistered"), nil
+}
+
+func (s *SharkfinMCP) handleListWebhooks(ctx context.Context, _ mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	identity, err := s.store.GetIdentityByUsername(usernameFromCtx(ctx))
+	if err != nil {
+		return nil, fmt.Errorf("get identity: %w", err)
+	}
+
+	hooks, err := s.store.GetActiveWebhooksForIdentity(identity.ID)
+	if err != nil {
+		return nil, fmt.Errorf("list webhooks: %w", err)
+	}
+
+	type hookInfo struct {
+		ID  string `json:"id"`
+		URL string `json:"url"`
+	}
+	list := make([]hookInfo, 0, len(hooks))
+	for _, h := range hooks {
+		list = append(list, hookInfo{ID: h.ID, URL: h.URL})
+	}
+	data, _ := json.Marshal(list)
+	return mcp.NewToolResultText(string(data)), nil
 }

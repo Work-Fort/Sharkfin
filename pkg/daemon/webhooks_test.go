@@ -277,7 +277,7 @@ func TestComputeRecipients_IncludesServiceMembers(t *testing.T) {
 		Mentions:    []string{},
 	}
 
-	recipients := computeRecipients(msg, store)
+	recipients := computeRecipients(msg, chID, store)
 
 	found := false
 	for _, r := range recipients {

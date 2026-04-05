@@ -17,6 +17,7 @@ type ChannelStore interface {
 	AddChannelMember(channelID int64, identityID string) error
 	ChannelMemberUsernames(channelID int64) ([]string, error)
 	IsChannelMember(channelID int64, identityID string) (bool, error)
+	GetServiceMemberUsernames(channelID int64) ([]string, error)
 	ListDMsForUser(identityID string) ([]DMInfo, error)
 	ListAllDMs() ([]AllDMInfo, error)
 	OpenDM(identityID string, otherIdentityID string, otherUsername string) (string, bool, error)

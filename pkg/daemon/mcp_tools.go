@@ -219,3 +219,9 @@ func newUnregisterWebhookTool() mcp.Tool {
 		mcp.WithString("webhook_id", mcp.Required(), mcp.Description("ID of the webhook to remove")),
 	)
 }
+
+func newListWebhooksTool() mcp.Tool {
+	return mcp.NewTool("list_webhooks",
+		mcp.WithDescription("List your registered webhooks"),
+	)
+}

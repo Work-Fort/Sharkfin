@@ -164,6 +164,30 @@ func (s *Store) ChannelMemberUsernames(channelID int64) ([]string, error) {
 	return names, rows.Err()
 }
 
+// GetServiceMemberUsernames returns usernames of service-type members of a channel.
+func (s *Store) GetServiceMemberUsernames(channelID int64) ([]string, error) {
+	rows, err := s.db.Query(`
+		SELECT i.username FROM channel_members cm
+		JOIN identities i ON cm.identity_id = i.id
+		WHERE cm.channel_id = ? AND i.type = 'service'
+		ORDER BY i.username
+	`, channelID)
+	if err != nil {
+		return nil, fmt.Errorf("service member usernames: %w", err)
+	}
+	defer rows.Close()
+
+	var names []string
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return nil, fmt.Errorf("scan username: %w", err)
+		}
+		names = append(names, name)
+	}
+	return names, rows.Err()
+}
+
 // IsChannelMember returns true if the identity is a member of the channel.
 func (s *Store) IsChannelMember(channelID int64, identityID string) (bool, error) {
 	var count int

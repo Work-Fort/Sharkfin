@@ -15,10 +15,12 @@ func (s *Store) RegisterWebhook(identityID, url, secret string) error {
 		return fmt.Errorf("generate webhook id: %w", err)
 	}
 	id := hex.EncodeToString(buf)
-	_, err := s.db.Exec(
-		`INSERT INTO identity_webhooks (id, identity_id, url, secret) VALUES ($1, $2, $3, $4)`,
-		id, identityID, url, secret,
-	)
+	// ON CONFLICT: re-enable and update secret if (identity_id, url) already exists.
+	_, err := s.db.Exec(`
+		INSERT INTO identity_webhooks (id, identity_id, url, secret)
+		VALUES ($1, $2, $3, $4)
+		ON CONFLICT (identity_id, url) DO UPDATE SET active = true, secret = EXCLUDED.secret
+	`, id, identityID, url, secret)
 	if err != nil {
 		return fmt.Errorf("register webhook: %w", err)
 	}

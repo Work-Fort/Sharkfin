@@ -31,7 +31,11 @@ func (pn *PresenceNotifier) run() {
 }
 
 func (pn *PresenceNotifier) handleMessage(msg domain.MessageEvent) {
-	recipients := computeRecipients(msg, pn.store)
+	ch, err := pn.store.GetChannelByName(msg.ChannelName)
+	if err != nil {
+		return
+	}
+	recipients := computeRecipients(msg, ch.ID, pn.store)
 
 	envelope, _ := json.Marshal(map[string]any{
 		"type": "message.new",

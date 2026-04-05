@@ -15,8 +15,9 @@ func (s *Store) RegisterWebhook(identityID, url, secret string) error {
 		return fmt.Errorf("generate webhook id: %w", err)
 	}
 	id := hex.EncodeToString(buf)
+	// INSERT OR IGNORE: if (identity_id, url) already exists, leave it unchanged.
 	_, err := s.db.Exec(
-		`INSERT INTO identity_webhooks (id, identity_id, url, secret) VALUES (?, ?, ?, ?)`,
+		`INSERT OR IGNORE INTO identity_webhooks (id, identity_id, url, secret) VALUES (?, ?, ?, ?)`,
 		id, identityID, url, secret,
 	)
 	if err != nil {

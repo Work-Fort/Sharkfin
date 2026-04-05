@@ -101,7 +101,8 @@ func firePerIdentityWebhook(hook domain.IdentityWebhook, payload WebhookPayload)
 
 // computeRecipients returns the list of users who should be notified:
 // mentioned users + DM members + service channel members, minus the sender.
-func computeRecipients(msg domain.MessageEvent, store domain.Store) []string {
+// channelID must already be resolved by the caller to avoid a redundant lookup.
+func computeRecipients(msg domain.MessageEvent, channelID int64, store domain.Store) []string {
 	seen := make(map[string]bool)
 	var recipients []string
 
@@ -113,14 +114,9 @@ func computeRecipients(msg domain.MessageEvent, store domain.Store) []string {
 		}
 	}
 
-	ch, err := store.GetChannelByName(msg.ChannelName)
-	if err != nil {
-		return recipients
-	}
-
-	// DM participants
+	// DM participants — fetch member list once and reuse for both DM and service scan.
 	if msg.ChannelType == "dm" {
-		if members, err := store.ChannelMemberUsernames(ch.ID); err == nil {
+		if members, err := store.ChannelMemberUsernames(channelID); err == nil {
 			for _, m := range members {
 				if m != msg.From && !seen[m] {
 					seen[m] = true
@@ -130,15 +126,10 @@ func computeRecipients(msg domain.MessageEvent, store domain.Store) []string {
 		}
 	}
 
-	// Service members of any channel type
-	members, err := store.ChannelMemberUsernames(ch.ID)
-	if err == nil {
-		for _, m := range members {
-			if m == msg.From || seen[m] {
-				continue
-			}
-			ident, err := store.GetIdentityByUsername(m)
-			if err == nil && ident.Type == "service" {
+	// Service members of any channel type — single SQL JOIN, no N+1.
+	if serviceMembers, err := store.GetServiceMemberUsernames(channelID); err == nil {
+		for _, m := range serviceMembers {
+			if m != msg.From && !seen[m] {
 				seen[m] = true
 				recipients = append(recipients, m)
 			}
@@ -172,10 +163,16 @@ func (ws *WebhookSubscriber) run() {
 }
 
 func (ws *WebhookSubscriber) handleMessage(msg domain.MessageEvent) {
+	// Resolve channel once; used by both the legacy and per-identity paths.
+	ch, err := ws.store.GetChannelByName(msg.ChannelName)
+	if err != nil {
+		return
+	}
+
 	// 1. Legacy global webhook
 	webhookURL, err := ws.store.GetSetting("webhook_url")
 	if err == nil && webhookURL != "" {
-		recipients := computeRecipients(msg, ws.store)
+		recipients := computeRecipients(msg, ch.ID, ws.store)
 		if len(recipients) > 0 {
 			fireWebhooks(webhookURL, WebhookEvent{
 				ChannelName: msg.ChannelName,
@@ -189,10 +186,6 @@ func (ws *WebhookSubscriber) handleMessage(msg domain.MessageEvent) {
 	}
 
 	// 2. Per-identity webhooks for all service members of the channel.
-	ch, err := ws.store.GetChannelByName(msg.ChannelName)
-	if err != nil {
-		return
-	}
 	hooks, err := ws.store.GetWebhooksForChannel(ch.ID)
 	if err != nil {
 		log.Warn("webhook: get channel hooks", "channel", msg.ChannelName, "err", err)
