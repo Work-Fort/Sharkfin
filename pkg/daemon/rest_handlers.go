@@ -54,6 +54,7 @@ func NewRESTHandler(store domain.Store, hub *Hub, bus domain.EventBus) *RESTHand
 // --- POST /api/v1/auth/register ---
 
 func (h *RESTHandler) handleRegisterIdentity(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20) // 1 MiB
 	identity := restIdentity(w, r, h.store)
 	if identity == nil {
 		return
@@ -98,6 +99,7 @@ func (h *RESTHandler) handleListChannels(w http.ResponseWriter, r *http.Request)
 // --- POST /api/v1/channels ---
 
 func (h *RESTHandler) handleCreateChannel(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20) // 1 MiB
 	identity := restIdentity(w, r, h.store)
 	if identity == nil {
 		return
@@ -147,6 +149,7 @@ func (h *RESTHandler) handleJoinChannel(w http.ResponseWriter, r *http.Request) 
 // --- POST /api/v1/channels/{channel}/messages ---
 
 func (h *RESTHandler) handleSendMessage(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20) // 1 MiB
 	identity := restIdentity(w, r, h.store)
 	if identity == nil {
 		return
@@ -274,6 +277,7 @@ func (h *RESTHandler) handleListMessages(w http.ResponseWriter, r *http.Request)
 // --- POST /api/v1/webhooks ---
 
 func (h *RESTHandler) handleRegisterWebhook(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20) // 1 MiB
 	identity := restIdentity(w, r, h.store)
 	if identity == nil {
 		return
