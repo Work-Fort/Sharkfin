@@ -37,6 +37,14 @@ type Message struct {
 	CreatedAt  time.Time
 }
 
+type IdentityWebhook struct {
+	ID         string
+	IdentityID string
+	URL        string
+	Secret     string
+	Active     bool
+}
+
 type UnreadCount struct {
 	ChannelID    int64
 	Channel      string

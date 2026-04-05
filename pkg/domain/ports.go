@@ -60,6 +60,14 @@ type SettingsStore interface {
 	ListSettings() (map[string]string, error)
 }
 
+type WebhookStore interface {
+	RegisterWebhook(identityID, url, secret string) error
+	UnregisterWebhook(identityID, webhookID string) error
+	GetActiveWebhooksForIdentity(identityID string) ([]IdentityWebhook, error)
+	// GetWebhooksForChannel returns active webhooks for all service members of a channel.
+	GetWebhooksForChannel(channelID int64) ([]IdentityWebhook, error)
+}
+
 // Store is the composite interface for convenient wiring.
 type Store interface {
 	IdentityStore
@@ -68,6 +76,7 @@ type Store interface {
 	RoleStore
 	MentionGroupStore
 	SettingsStore
+	WebhookStore
 	Close() error
 }
 
