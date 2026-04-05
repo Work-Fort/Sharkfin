@@ -75,6 +75,21 @@ func TestUpsertIdentityFirstUserAutoAdmin(t *testing.T) {
 	}
 }
 
+func TestUpsertIdentityServiceAutoBot(t *testing.T) {
+	s := newTestStore(t)
+
+	// First identity is auto-admin regardless — use a throwaway first.
+	s.UpsertIdentity("uuid-admin", "admin-user", "Admin", "user", "user")
+
+	ident, err := s.UpsertIdentity("uuid-flow", "flow-bot", "Flow Bot", "service", "")
+	if err != nil {
+		t.Fatalf("upsert service identity: %v", err)
+	}
+	if ident.Role != "bot" {
+		t.Errorf("service identity role = %q, want bot", ident.Role)
+	}
+}
+
 func TestUpsertIdentityIdempotent(t *testing.T) {
 	s := newTestStore(t)
 	ident1, err := s.UpsertIdentity("uuid-alice", "alice", "Alice", "user", "user")
