@@ -5,8 +5,8 @@ on:
   push:
     branches: [master]
     paths-ignore:
-      - 'client/**'
-      - 'clients/ts/**'
+      - 'client/go/**'
+      - 'client/ts/**'
 
 permissions:
   contents: write

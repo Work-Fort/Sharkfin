@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 import { Show } from 'solid-js';
 import { formatTime } from '@workfort/ui';
 

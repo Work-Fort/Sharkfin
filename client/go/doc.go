@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: Apache-2.0
 
 // Package client provides a typed Go client for the Sharkfin messaging
 // server. It connects via WebSocket for real-time events and provides

@@ -5,7 +5,7 @@ on:
   push:
     branches: [master]
     paths:
-      - 'client/**'
+      - 'client/go/**'
 
 permissions:
   contents: write
@@ -16,7 +16,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - uses: jdx/mise-action@v3
-      - run: cd client && go test -v -race -count=1 ./...
+      - run: cd client/go && go test -v -race -count=1 ./...
 
   tag:
     name: Create Client Version Tag
@@ -38,8 +38,8 @@ jobs:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           default_bump: false
           release_branches: master
-          tag_prefix: client/v
-          paths: client/**
+          tag_prefix: client/go/v
+          paths: client/go/**
 
       - name: Check if new tag was created
         id: check_tag
@@ -56,9 +56,6 @@ jobs:
     if: needs.tag.outputs.should_release == 'true'
     steps:
       - uses: actions/checkout@v6
-      - name: Extract version
-        id: version
-        run: echo "version=${GITHUB_REF#refs/tags/client/}" >> $GITHUB_OUTPUT
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
@@ -70,7 +67,7 @@ jobs:
             ${{ needs.tag.outputs.changelog }}
 
             ```bash
-            go get github.com/Work-Fort/sharkfin/client@${{ needs.tag.outputs.new_tag }}
+            go get github.com/Work-Fort/sharkfin/client/go@${{ needs.tag.outputs.new_tag }}
             ```
           draft: false
           prerelease: false

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 import { createSignal, createRoot } from 'solid-js';
 import { getClient } from '../client';
 import { createChannelStore } from './channels';

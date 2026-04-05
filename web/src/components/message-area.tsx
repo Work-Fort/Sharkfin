@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 import { For, createEffect, on } from 'solid-js';
 import type { Message as Msg } from '@workfort/sharkfin-client';
 import { formatDateLabel, isSameDay } from '@workfort/ui';

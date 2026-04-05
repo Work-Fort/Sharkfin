@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 import { createSignal, createMemo, For, Show } from 'solid-js';
 import type { Channel, DM, UnreadCount, User } from '@workfort/sharkfin-client';
 

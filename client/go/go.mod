@@ -1,4 +1,4 @@
-module github.com/Work-Fort/sharkfin/client
+module github.com/Work-Fort/sharkfin/client/go
 
 go 1.25.0
 

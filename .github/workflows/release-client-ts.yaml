@@ -5,7 +5,7 @@ on:
   push:
     branches: [master]
     paths:
-      - 'clients/ts/**'
+      - 'client/ts/**'
 
 permissions:
   contents: write
@@ -19,9 +19,9 @@ jobs:
         with:
           node-version: '22'
           registry-url: 'https://registry.npmjs.org'
-      - run: cd clients/ts && npm ci
-      - run: cd clients/ts && npm run typecheck
-      - run: cd clients/ts && npm test
+      - run: cd client/ts && npm ci
+      - run: cd client/ts && npm run typecheck
+      - run: cd client/ts && npm test
 
   tag:
     name: Create Client Version Tag
@@ -43,8 +43,8 @@ jobs:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           default_bump: false
           release_branches: master
-          tag_prefix: clients/ts/v
-          paths: clients/ts/**
+          tag_prefix: client/ts/v
+          paths: client/ts/**
 
       - name: Check if new tag was created
         id: check_tag
@@ -67,9 +67,9 @@ jobs:
         with:
           node-version: '22'
           registry-url: 'https://registry.npmjs.org'
-      - run: cd clients/ts && npm ci
-      - run: cd clients/ts && npm run build
-      - run: cd clients/ts && npm publish --access public
+      - run: cd client/ts && npm ci
+      - run: cd client/ts && npm run build
+      - run: cd client/ts && npm publish --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 

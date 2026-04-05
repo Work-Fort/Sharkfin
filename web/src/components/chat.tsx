@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 import { Show, createEffect, createMemo, createSignal, onMount, onCleanup } from 'solid-js';
 import '../styles/chat.css';
 import { initApp, getStores, connectionState, disconnected, loading } from '../stores';

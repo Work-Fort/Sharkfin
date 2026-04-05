@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: Apache-2.0
 export { SharkfinClient } from "./client.js";
 export { SharkfinError } from "./errors.js";
 export type {

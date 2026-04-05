@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 import { createSignal, createEffect } from 'solid-js';
 
 interface CreateChannelDialogProps {

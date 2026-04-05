@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 import { createSignal, onCleanup } from 'solid-js';
 import type { SharkfinClient, User, PresenceUpdate } from '@workfort/sharkfin-client';
 
