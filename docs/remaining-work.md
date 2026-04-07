@@ -4,88 +4,11 @@ Tracks remaining work for the sharkfin project. Items are roughly priority-order
 
 ---
 
-## Active: Scope Rust Migration (scope-core)
+## Open
 
-Replacing the Go BFF with a shared Rust library crate. Phases 1-4, 6, and 7 are complete. Phase 5 (Tauri) is deferred.
-
-- [Design](2026-03-17-scope-core-design.md) · [Plan](plans/2026-03-17-scope-core-plan.md)
-
-### Phase 1: Workspace + Domain
-- [x] Cargo workspace setup (scope-core, scope-server, workfort-scope)
-- [x] Remove all Go code from scope repo
-- [x] Domain types and Store trait (ports)
-
-### Phase 2: Store Adapters
-- [x] SQLite store adapter (sqlx)
-- [x] Postgres store adapter (sqlx, TIMESTAMPTZ, JSONB)
-
-### Phase 3: Infrastructure
-- [x] HTTP/WS reverse proxy
-- [x] Service discovery + health polling
-- [x] Notification subscriber (connects to service `/notifications/subscribe` WS)
-- [x] YAML config parsing (XDG paths)
-
-### Phase 4: scope-server (axum)
-- [x] API endpoints (forts, session, services, notifications, preferences)
-- [x] Proxy routes + SPA fallback
-- [x] Shell WebSocket (real-time push to browser)
-
-### Phase 5: Tauri Refactor
-- [ ] Refactor workfort-scope to use scope-core
-- [ ] Native OS notifications via tauri-plugin-notification
-
-### Phase 6: Shell SPA
-- [x] Framework-agnostic service module contract (mount/unmount)
-- [x] Update Sharkfin entry point to mount/unmount
-- [x] Notification bell UI + unread badge
-- [x] Menu display type (hamburger links vs nav tabs)
-- [x] Switch services store from polling to shell WS
-
-### Phase 7: Integration
-- [x] Sharkfin `/notifications/subscribe` endpoint
-- [x] End-to-end verification
-
----
-
-## Passport Admin UI
-
-React MF remote providing CRUD for users, service keys, and agent keys. Functional and deployed — uses scope-core's service mount and admin-only filtering.
-
-- [Design](plans/2026-03-17-passport-admin-ui-design.md) · [Plan](plans/2026-03-17-passport-admin-ui-plan.md)
-
-- [x] Passport: last-admin guard
-- [x] Passport: custom admin API key listing route
-- [x] Passport: /ui/health update (route: "/admin", admin_only: true)
-- [x] Passport: static UI serving at /ui/*
-- [x] Passport: React MF remote scaffold (Vite + Module Federation)
-- [x] Passport: Users page (list, create, edit role, deactivate, delete)
-- [x] Passport: Service Keys page (create, revoke)
-- [x] Passport: Agent Keys page (create, revoke)
-- [x] Sharkfin: service identity permissions — `bot` role with scoped permissions, auto-assigned when `identity.Type == "service"`. Per-identity webhook registration, dispatch to service channel members, message metadata. Remaining cross-user "on behalf of" delegation deferred.
-
----
-
-## Immediate: Bugs to Fix
-
-### Sharkfin Chat
-- [x] Message rendering after send — hub skipped broadcasting to the sender; removed the sender-skip guard so the existing message.new → signal → render pipeline works for all clients.
-- [x] "Connection lost" banner flashing ~1/sec — debounced: banner shows immediately on disconnect, hides only after connection stable for 2s. Fixed `\u2026` literal rendering (now real `…` character).
-- [x] Message input should be disabled when user hasn't joined the selected channel — check membership state, disable input + show "Join to send messages" placeholder.
-- [x] Auto-join public channels on click — when user clicks a public channel they're not a member of, auto-join if they have `join_channel` permission, then select it.
+### Bugs
 - [ ] ⚠️ **NEEDS PLAN** `read_public` permission — new RBAC permission, migration, seed, UI changes for read-only mode with join prompt. Touches daemon, client, and web UI.
-- [x] Remove debug logging from permissions store and chat component (temporary `console.log` calls).
-- [x] Sharkfin daemon should set proper `Cache-Control` headers on UI assets (`no-cache` on `remoteEntry.js`, immutable on content-hashed `assets/*`).
-
-### Shell Chrome
-- [x] Hamburger menu content still visible alongside button on desktop — `wf-hamburger[hidden] { display: none }` added (CSS `display: block` was overriding `hidden` attribute).
-
-### Session / Auth
-- [x] Login form flashes on refresh before session check completes — added `sessionChecked` gate signal; shows "Loading…" until session probe resolves.
-
-### Integration Issues
-- [ ] MCP bridge identity has no permissions (chicken-and-egg — [Issue 12](2026-03-16-shell-integration-issues.md)). Now solvable via the admin UI (create agent key), but the bootstrap flow needs documenting. Note: likely won't be implemented as manual docs — the process is being fully automated soon.
-
----
+- [ ] MCP bridge identity has no permissions (chicken-and-egg). Now solvable via the admin UI (create agent key). Note: likely not needed as manual docs — the process is being fully automated soon.
 
 ---
 
@@ -152,6 +75,17 @@ Storybook lives in `~/Work/WorkFort/documentation/storybook/` (Lit on port 6006,
 - [x] Passport: BETTER_AUTH_SECRET startup guard, sign-up admin role check, DB error handling, log sanitization
 - [x] Scope: WS origin validation, HTTP server timeouts, cookie HttpOnly/SameSite, token cache eviction, UI asset whitelist
 
+### Flow Adapter REST API + Client Reorg (2026-04-05)
+- [x] REST API endpoints: 9 routes for service-to-service communication (messages, channels, webhooks, identity)
+- [x] Go client library: REST methods for webhooks, identity registration, metadata on SendOpts
+- [x] Webhook `secret` field removed (migration 013 + code cleanup)
+- [x] Request body size limits (1 MiB MaxBytesReader) on all REST handlers
+- [x] Client directory reorganized: `client/go/`, `client/ts/` (was `client/` + `clients/ts/`)
+- [x] Go module path: `github.com/Work-Fort/sharkfin/client/go`
+- [x] Apache-2.0 licensing on client/go, client/ts, and web (SPDX headers + LICENSE.md)
+- [x] Auto-tag release workflows for both Go and TS clients (path-based triggers, mirrors Passport pattern)
+- [x] Main release workflow excludes client paths to prevent double-triggering
+
 ### Bot/Service Identity (2026-04-05)
 - [x] `bot` role migration with scoped permissions (send_message, create_channel, join_channel, history, channel_list, unread_messages, unread_counts, mark_read, dm_list, dm_open, user_list)
 - [x] Auto-assign `bot` role when `identity.Type == "service"` in `UpsertIdentity`
@@ -206,6 +140,19 @@ Storybook lives in `~/Work/WorkFort/documentation/storybook/` (Lit on port 6006,
 - [x] Token cleanup plan — replace hardcoded styles with design tokens
 - [x] Component extraction plan — `wf-avatar`, `wf-divider` label extension
 - [x] Nav sidebar extraction plan — `wf-nav-sidebar` + `wf-nav-section` for shared use across MF remotes
+
+### Core Features (pre-2026-03-17)
+- [x] Webhook notifications — POST webhook on mentions and DMs
+- [x] Database abstraction — `domain.Store` interface with SQLite and Postgres backends
+- [x] Encrypted S3 backup — age encryption, xz compression, S3 + local mode
+- [x] Event bus — domain-level EventBus, decoupled webhook delivery, `wait_for_messages` MCP tool
+- [x] Server version query — WS hello envelope + `version` request + MCP serverInfo
+- [x] Bridge StreamableHTTP robustness — SSE streams, 202 acknowledgments, standard JSON
+- [x] Body-only mentions — server-side @mention extraction from message body
+- [x] Mention groups — named user sets (`@backend-team`), CRUD via WS and MCP
+- [x] Client libraries — Go (`client/go/`) and TypeScript (`client/ts/`) WebSocket clients
+- [x] Passport authentication — JWT via JWKS, API key auth, UUID-based identities
+- [x] Container image — Dockerfile, multi-arch builds, GHCR publishing on release
 
 ---
 
