@@ -9,6 +9,7 @@ Tracks remaining work for the sharkfin project. Items are roughly priority-order
 ### Bugs
 - [ ] ⚠️ **NEEDS PLAN** `read_public` permission — new RBAC permission, migration, seed, UI changes for read-only mode with join prompt. Touches daemon, client, and web UI.
 - [ ] MCP bridge identity has no permissions (chicken-and-egg). Now solvable via the admin UI (create agent key). Note: likely not needed as manual docs — the process is being fully automated soon.
+- [ ] **Release task missing `-tags ui`** — `.mise/tasks/build/release` runs `go build` without `-tags ui`, producing a binary that 404s on `/ui/*` (no embedded frontend). Broke Scope's chat view on first integration-env bring-up until someone rebuilt manually. Either default release to `-tags ui`, or split into `release-cli` (no UI) and `release` (with UI) and make the default include the UI.
 
 ---
 
