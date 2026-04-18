@@ -2,14 +2,11 @@
 package client
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"log/slog"
 	"net/http"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -111,13 +108,7 @@ func Dial(ctx context.Context, url string, opts ...Option) (*Client, error) {
 	}
 
 	// Derive HTTP base URL from WS URL.
-	baseURL := strings.TrimSuffix(url, "/ws")
-	baseURL = strings.TrimSuffix(baseURL, "/")
-	if strings.HasPrefix(baseURL, "ws://") {
-		baseURL = "http://" + baseURL[5:]
-	} else if strings.HasPrefix(baseURL, "wss://") {
-		baseURL = "https://" + baseURL[6:]
-	}
+	baseURL := deriveBaseURL(url)
 
 	c := &Client{
 		conn:       conn,
@@ -261,48 +252,17 @@ func (c *Client) reconnectLoop() {
 	}
 }
 
-// httpDo performs an authenticated HTTP request and decodes the JSON response into out.
-// Pass out=nil to discard the body (e.g. for 204 responses).
+// httpDo performs an authenticated HTTP request and decodes the JSON
+// response into out. Pass out=nil to discard the body (e.g. for 204
+// responses). Delegates to the shared restTransport.
 func (c *Client) httpDo(ctx context.Context, method, path string, reqBody, out any) (int, error) {
-	var bodyReader io.Reader
-	if reqBody != nil {
-		b, err := json.Marshal(reqBody)
-		if err != nil {
-			return 0, fmt.Errorf("client: marshal: %w", err)
-		}
-		bodyReader = bytes.NewReader(b)
+	t := restTransport{
+		baseURL:    c.baseURL,
+		httpClient: c.httpClient,
+		token:      c.opts.token,
+		apiKey:     c.opts.apiKey,
 	}
-
-	req, err := http.NewRequestWithContext(ctx, method, c.baseURL+path, bodyReader)
-	if err != nil {
-		return 0, fmt.Errorf("client: new request: %w", err)
-	}
-	if reqBody != nil {
-		req.Header.Set("Content-Type", "application/json")
-	}
-	if c.opts.token != "" {
-		req.Header.Set("Authorization", "Bearer "+c.opts.token)
-	} else if c.opts.apiKey != "" {
-		req.Header.Set("Authorization", "Bearer "+c.opts.apiKey)
-	}
-
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return 0, fmt.Errorf("client: http: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode >= 400 {
-		b, _ := io.ReadAll(resp.Body)
-		return resp.StatusCode, &ServerError{Message: fmt.Sprintf("HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(b)))}
-	}
-
-	if out != nil && resp.StatusCode != http.StatusNoContent {
-		if err := json.NewDecoder(resp.Body).Decode(out); err != nil {
-			return resp.StatusCode, fmt.Errorf("client: decode response: %w", err)
-		}
-	}
-	return resp.StatusCode, nil
+	return t.do(ctx, method, path, reqBody, out)
 }
 
 // nextRef generates a unique reference string for request tracking.
