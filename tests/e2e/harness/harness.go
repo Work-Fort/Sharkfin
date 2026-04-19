@@ -46,12 +46,12 @@ func WithDB(dsn string) DaemonOption {
 }
 
 type Daemon struct {
-	cmd      *exec.Cmd
-	addr     string
-	xdgDir   string
-	stderr   *bytes.Buffer
-	stubStop func()
-	signJWT  func(id, username, displayName, userType string) string
+	cmd        *exec.Cmd
+	addr       string
+	xdgDir     string
+	stderrFile *os.File // *os.File (not bytes.Buffer) — see hardening notes
+	stubStop   func()
+	signJWT    func(id, username, displayName, userType string) string
 }
 
 func StartDaemon(binary, addr string, opts ...DaemonOption) (*Daemon, error) {
@@ -94,7 +94,12 @@ func StartDaemon(binary, addr string, opts ...DaemonOption) (*Daemon, error) {
 		}
 	}
 
-	var stderrBuf bytes.Buffer
+	stderrFile, err := os.CreateTemp("", "sharkfin-e2e-stderr-*")
+	if err != nil {
+		os.RemoveAll(xdgDir)
+		stubStop()
+		return nil, fmt.Errorf("create stderr temp file: %w", err)
+	}
 
 	cmd := exec.Command(binary, args...)
 	cmd.Env = append(os.Environ(),
@@ -102,10 +107,19 @@ func StartDaemon(binary, addr string, opts ...DaemonOption) (*Daemon, error) {
 		"XDG_STATE_HOME="+xdgDir+"/state",
 		fmt.Sprintf("SHARKFIN_PRESENCE_TIMEOUT=%s", cfg.presenceTimeout),
 	)
-	cmd.Stdout = os.Stderr
-	cmd.Stderr = io.MultiWriter(os.Stderr, &stderrBuf)
+	// *os.File (not io.MultiWriter) so exec.Cmd does not create a
+	// copy goroutine; Setpgid puts the daemon and any descendants
+	// in a fresh process group; WaitDelay force-closes any inherited
+	// fds after the daemon exits. See the orphan-process hardening
+	// section of go-service-architecture.
+	cmd.Stdout = stderrFile
+	cmd.Stderr = stderrFile
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.WaitDelay = 10 * time.Second
 
 	if err := cmd.Start(); err != nil {
+		stderrFile.Close()
+		os.Remove(stderrFile.Name())
 		os.RemoveAll(xdgDir)
 		stubStop()
 		return nil, fmt.Errorf("start daemon: %w", err)
@@ -117,19 +131,22 @@ func StartDaemon(binary, addr string, opts ...DaemonOption) (*Daemon, error) {
 		if err == nil {
 			conn.Close()
 			return &Daemon{
-				cmd:      cmd,
-				addr:     addr,
-				xdgDir:   xdgDir,
-				stderr:   &stderrBuf,
-				stubStop: stubStop,
-				signJWT:  signJWT,
+				cmd:        cmd,
+				addr:       addr,
+				xdgDir:     xdgDir,
+				stderrFile: stderrFile,
+				stubStop:   stubStop,
+				signJWT:    signJWT,
 			}, nil
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
 
-	cmd.Process.Kill()
+	pgid := cmd.Process.Pid
+	_ = syscall.Kill(-pgid, syscall.SIGKILL)
 	cmd.Wait()
+	stderrFile.Close()
+	os.Remove(stderrFile.Name())
 	os.RemoveAll(xdgDir)
 	stubStop()
 	return nil, fmt.Errorf("daemon did not become ready on %s", addr)
@@ -150,28 +167,46 @@ func (d *Daemon) DBPath() string {
 	return filepath.Join(d.xdgDir, "state", "sharkfin", "sharkfin.db")
 }
 
-// StopNoClean stops the daemon and JWKS stub without removing the xdg directory.
-// Use Cleanup() later to remove it.
+// stopDaemonProcess signals the daemon's process group with SIGTERM,
+// waits up to 5s, then SIGKILLs the group. Returns the wait error
+// (if any) and the captured stdout+stderr bytes for DATA RACE
+// detection. Safe to call when d.cmd.Process is already nil.
+func (d *Daemon) stopDaemonProcess() (waitErr error, stderrBytes []byte) {
+	if d.cmd.Process != nil {
+		pgid := d.cmd.Process.Pid
+		_ = syscall.Kill(-pgid, syscall.SIGTERM)
+		done := make(chan error, 1)
+		go func() { done <- d.cmd.Wait() }()
+		select {
+		case waitErr = <-done:
+		case <-time.After(5 * time.Second):
+			_ = syscall.Kill(-pgid, syscall.SIGKILL)
+			<-done
+			waitErr = fmt.Errorf("daemon did not exit after SIGTERM")
+		}
+	}
+	if d.stderrFile != nil {
+		stderrBytes, _ = os.ReadFile(d.stderrFile.Name())
+		d.stderrFile.Close()
+		os.Remove(d.stderrFile.Name())
+		d.stderrFile = nil
+	}
+	return waitErr, stderrBytes
+}
+
+// StopNoClean stops the daemon and JWKS stub without removing the xdg
+// directory. Use Cleanup() later to remove it.
 func (d *Daemon) StopNoClean(t testing.TB) {
 	t.Helper()
 	if d.stubStop != nil {
 		d.stubStop()
 	}
-	if d.cmd.Process == nil {
-		return
+	waitErr, stderrBytes := d.stopDaemonProcess()
+	if waitErr != nil {
+		t.Log(waitErr)
 	}
-	d.cmd.Process.Signal(syscall.SIGTERM)
-	done := make(chan error, 1)
-	go func() { done <- d.cmd.Wait() }()
-	select {
-	case <-done:
-	case <-time.After(5 * time.Second):
-		d.cmd.Process.Kill()
-		<-done
-		t.Log("daemon did not exit after SIGTERM, killed")
-	}
-	if d.stderr != nil && strings.Contains(d.stderr.String(), "DATA RACE") {
-		t.Fatal("data race detected in daemon (see stderr output above)")
+	if bytes.Contains(stderrBytes, []byte("DATA RACE")) {
+		t.Fatalf("data race detected in daemon stderr:\n%s", stderrBytes)
 	}
 }
 
@@ -199,37 +234,30 @@ func (d *Daemon) GrantAdmin(binary, username string) error {
 	return nil
 }
 
-// StopFatal stops the daemon and fails the test if a data race was detected.
+// StopFatal stops the daemon and fails the test if a data race was
+// detected.
 func (d *Daemon) StopFatal(t testing.TB) {
 	t.Helper()
-	if err := d.Stop(); err != nil {
+	stderrBytes, err := d.Stop()
+	if err != nil {
 		t.Logf("daemon stop: %v", err)
 	}
-	if d.stderr != nil && strings.Contains(d.stderr.String(), "DATA RACE") {
-		t.Fatal("data race detected in daemon (see stderr output above)")
+	if bytes.Contains(stderrBytes, []byte("DATA RACE")) {
+		t.Fatalf("data race detected in daemon stderr:\n%s", stderrBytes)
 	}
 }
 
-func (d *Daemon) Stop() error {
+// Stop tears down the JWKS stub, signals the daemon group, and
+// removes the xdg dir. Returns the captured stdout+stderr bytes
+// (read after cmd.Wait so teardown writes are included) alongside
+// the wait error.
+func (d *Daemon) Stop() ([]byte, error) {
 	if d.stubStop != nil {
 		d.stubStop()
 	}
-	if d.cmd.Process == nil {
-		return nil
-	}
-	d.cmd.Process.Signal(syscall.SIGTERM)
-	done := make(chan error, 1)
-	go func() { done <- d.cmd.Wait() }()
-	select {
-	case err := <-done:
-		os.RemoveAll(d.xdgDir)
-		return err
-	case <-time.After(5 * time.Second):
-		d.cmd.Process.Kill()
-		<-done
-		os.RemoveAll(d.xdgDir)
-		return fmt.Errorf("daemon did not exit after SIGTERM")
-	}
+	waitErr, stderrBytes := d.stopDaemonProcess()
+	os.RemoveAll(d.xdgDir)
+	return stderrBytes, waitErr
 }
 
 // --- Client ---
