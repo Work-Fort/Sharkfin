@@ -10,6 +10,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -734,6 +735,70 @@ func resetPostgres(dsn string) error {
 		return fmt.Errorf("create schema: %w", err)
 	}
 	return nil
+}
+
+// AltDB returns a second DB DSN for use by a second daemon in the same test.
+// Under SQLite (SHARKFIN_DB not set) it returns a fresh tempfile path inside
+// t.TempDir() — the file does not yet exist, so the daemon will seed it on
+// first open. Under Postgres it constructs a sibling database DSN by appending
+// "_b" to the database name in SHARKFIN_DB (e.g. sharkfin_test → sharkfin_test_b),
+// resets its schema (DROP/CREATE public), and registers a t.Cleanup that drops
+// the sibling database. The caller must pass this DSN to both the backup CLI
+// --db flag and harness.WithDB(...) so daemon B uses the same database.
+func AltDB(t *testing.T) string {
+	t.Helper()
+	envDSN := os.Getenv("SHARKFIN_DB")
+	if envDSN == "" {
+		// SQLite path: return a fresh tempfile (does not exist yet).
+		return filepath.Join(t.TempDir(), "imported.db")
+	}
+
+	// Postgres path: build sibling DSN by appending "_b" to the db name.
+	u, err := url.Parse(envDSN)
+	if err != nil {
+		t.Fatalf("AltDB: parse SHARKFIN_DB %q: %v", envDSN, err)
+	}
+	origDB := strings.TrimPrefix(u.Path, "/")
+	siblingDB := origDB + "_b"
+	u.Path = "/" + siblingDB
+	siblingDSN := u.String()
+
+	// Ensure the sibling database exists (create if absent).
+	// Connect to the original DB to run CREATE DATABASE.
+	adminDB, err := sql.Open("pgx", envDSN)
+	if err != nil {
+		t.Fatalf("AltDB: open admin connection: %v", err)
+	}
+	defer adminDB.Close()
+
+	var exists bool
+	err = adminDB.QueryRow(
+		"SELECT EXISTS(SELECT 1 FROM pg_database WHERE datname = $1)", siblingDB,
+	).Scan(&exists)
+	if err != nil {
+		t.Fatalf("AltDB: check sibling db existence: %v", err)
+	}
+	if !exists {
+		if _, err := adminDB.Exec("CREATE DATABASE " + siblingDB); err != nil {
+			t.Fatalf("AltDB: create sibling db %q: %v", siblingDB, err)
+		}
+	}
+
+	// Reset the sibling schema so each test run starts fresh.
+	if err := resetPostgres(siblingDSN); err != nil {
+		t.Fatalf("AltDB: reset sibling postgres %q: %v", siblingDSN, err)
+	}
+
+	// Register cleanup: reset the sibling schema again after the test.
+	// We don't DROP DATABASE because that can race with daemon shutdown;
+	// leaving a clean schema is sufficient.
+	t.Cleanup(func() {
+		if err := resetPostgres(siblingDSN); err != nil {
+			t.Logf("AltDB cleanup: reset sibling postgres: %v", err)
+		}
+	})
+
+	return siblingDSN
 }
 
 // --- Helpers ---
