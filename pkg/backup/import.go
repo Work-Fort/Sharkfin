@@ -97,9 +97,24 @@ func ImportData(s BackupStore, b *Backup, force bool) error {
 				memberIDs = append(memberIDs, id)
 			}
 		}
-		chID, err := s.CreateChannel(ch.Name, ch.Public, memberIDs, ch.Type)
-		if err != nil {
-			return fmt.Errorf("create channel %q: %w", ch.Name, err)
+
+		// Check if a channel with this name was pre-seeded (e.g. "general" is
+		// seeded on first boot by both the SQLite and Postgres stores). If so,
+		// reuse the existing channel rather than trying to create a duplicate.
+		var chID int64
+		if existing, err := s.GetChannelByName(ch.Name); err == nil {
+			// Pre-seeded channel found — add any members that aren't already there.
+			chID = existing.ID
+			for _, memberID := range memberIDs {
+				// AddChannelMember is idempotent on most backends; ignore
+				// duplicate-member errors to keep import resilient.
+				_ = s.AddChannelMember(chID, memberID)
+			}
+		} else {
+			chID, err = s.CreateChannel(ch.Name, ch.Public, memberIDs, ch.Type)
+			if err != nil {
+				return fmt.Errorf("create channel %q: %w", ch.Name, err)
+			}
 		}
 		channelIDByName[ch.Name] = chID
 	}
