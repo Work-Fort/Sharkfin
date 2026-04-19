@@ -8,7 +8,10 @@ import (
 	"github.com/Work-Fort/sharkfin/pkg/infra/sqlite"
 )
 
-func newTestStore(t *testing.T) *sqlite.Store {
+// newTestStore opens an in-memory SQLite store and returns it as a
+// BackupStore port. Tests exercise the backup package contract; the concrete
+// adapter type is an implementation detail that must not leak into callers.
+func newTestStore(t *testing.T) backup.BackupStore {
 	t.Helper()
 	s, err := sqlite.Open(":memory:")
 	if err != nil {

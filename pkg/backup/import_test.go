@@ -6,11 +6,13 @@ import (
 	"testing"
 
 	"github.com/Work-Fort/sharkfin/pkg/backup"
-	"github.com/Work-Fort/sharkfin/pkg/infra/sqlite"
+	"github.com/Work-Fort/sharkfin/pkg/domain"
 )
 
-// populateSource sets up a source store with representative data for roundtrip testing.
-func populateSource(t *testing.T, s *sqlite.Store) {
+// populateSource seeds a store with representative data for roundtrip testing.
+// It accepts domain.Store because it only calls port methods — no adapter-specific
+// behaviour is needed here.
+func populateSource(t *testing.T, s domain.Store) {
 	t.Helper()
 
 	alice, _ := s.UpsertIdentity("uuid-alice", "alice", "Alice", "user", "user")

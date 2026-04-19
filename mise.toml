@@ -1,3 +1,4 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 [tools]
+"aqua:golangci/golangci-lint" = "2.11.4"
 go = "latest"
