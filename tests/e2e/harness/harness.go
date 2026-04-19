@@ -449,6 +449,12 @@ func StartBridge(binary, daemonAddr, xdgDir, apiKey string) (*Bridge, error) {
 		"XDG_CONFIG_HOME="+xdgDir+"/config",
 		"XDG_STATE_HOME="+xdgDir+"/state",
 	)
+	// Setpgid + WaitDelay match the daemon spawn — see the orphan-
+	// process hardening section of go-service-architecture. Stderr
+	// inherits os.Stderr directly (no io.Writer wrapper) so no copy
+	// goroutine is created.
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.WaitDelay = 10 * time.Second
 
 	stdinPipe, err := cmd.StdinPipe()
 	if err != nil {
@@ -492,19 +498,34 @@ func (b *Bridge) Send(request any) (json.RawMessage, error) {
 	return json.RawMessage(b.stdout.Bytes()), nil
 }
 
+// Stop signals the bridge's process group with SIGTERM, waits up to
+// 5s, then SIGKILLs the group. The previous implementation only
+// signalled SIGTERM and waited indefinitely — a bridge that ignored
+// the signal hung the harness.
 func (b *Bridge) Stop() error {
 	if b.cmd.Process == nil {
 		return nil
 	}
-	b.cmd.Process.Signal(syscall.SIGTERM)
-	return b.cmd.Wait()
+	pgid := b.cmd.Process.Pid
+	_ = syscall.Kill(-pgid, syscall.SIGTERM)
+	done := make(chan error, 1)
+	go func() { done <- b.cmd.Wait() }()
+	select {
+	case err := <-done:
+		return err
+	case <-time.After(5 * time.Second):
+		_ = syscall.Kill(-pgid, syscall.SIGKILL)
+		<-done
+		return fmt.Errorf("bridge did not exit after SIGTERM")
+	}
 }
 
 func (b *Bridge) Kill() error {
 	if b.cmd.Process == nil {
 		return nil
 	}
-	return b.cmd.Process.Kill()
+	pgid := b.cmd.Process.Pid
+	return syscall.Kill(-pgid, syscall.SIGKILL)
 }
 
 // --- WSClient ---
