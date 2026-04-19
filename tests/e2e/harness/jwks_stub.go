@@ -15,9 +15,19 @@ import (
 	"github.com/lestrrat-go/jwx/v2/jwt"
 )
 
+// validBridgeAPIKey is the only API key accepted by the JWKS stub's
+// verify-api-key endpoint. Tests that start a bridge use this same key
+// (see harness.StartBridge callers passing "test-api-key"). Accepting
+// any non-empty key would silently authenticate invalid tokens that
+// fall through the JWT validator into the API-key validator —
+// see TestToolCallWithInvalidJWT.
+const validBridgeAPIKey = "test-api-key"
+
 // StartJWKSStub starts a JWKS stub server that serves:
 //   - GET /v1/jwks — the public key in JWKS format
-//   - POST /v1/verify-api-key — accepts any key and returns a canned bridge identity
+//   - POST /v1/verify-api-key — accepts the canned bridge API key and
+//     returns the bridge identity; rejects all other keys with
+//     {valid: false}
 //
 // It returns:
 //   - addr: the server address (host:port)
@@ -74,7 +84,11 @@ func StartJWKSStub() (addr string, stop func(), signJWT func(id, username, displ
 	})
 
 	mux.HandleFunc("POST /v1/verify-api-key", func(w http.ResponseWriter, r *http.Request) {
-		// Accept any key and return the bridge identity.
+		// Accept only the canned bridge API key. Returning the bridge
+		// identity for any non-empty key would mean an invalid JWT
+		// (which falls through to the API-key validator as a fallback)
+		// is silently authenticated as the bridge — defeating tests
+		// like TestToolCallWithInvalidJWT.
 		var req struct {
 			Key string `json:"key"`
 		}
@@ -85,6 +99,10 @@ func StartJWKSStub() (addr string, stop func(), signJWT func(id, username, displ
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
+		if req.Key != validBridgeAPIKey {
+			json.NewEncoder(w).Encode(map[string]any{"valid": false, "error": "invalid api key"})
+			return
+		}
 		json.NewEncoder(w).Encode(bridgeIdentity)
 	})
 

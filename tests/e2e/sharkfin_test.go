@@ -353,18 +353,13 @@ func TestToolCallWithInvalidJWT(t *testing.T) {
 	}
 	defer d.StopFatal(t)
 
-	// Use an invalid JWT token
+	// Use an invalid JWT token. The Passport auth middleware should
+	// reject the request at the HTTP layer (401) before any MCP method
+	// is dispatched — Initialize is the first request that exercises
+	// the middleware, so it must fail.
 	c := harness.NewClient(addr, "invalid-jwt-token")
-	if err := c.Initialize(); err != nil {
-		t.Fatal(err)
-	}
-
-	r, err := c.ToolCall("user_list", map[string]any{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if r.Error == nil {
-		t.Fatal("expected error for tool call with invalid JWT")
+	if err := c.Initialize(); err == nil {
+		t.Fatal("expected error initializing MCP session with invalid JWT")
 	}
 }
 
