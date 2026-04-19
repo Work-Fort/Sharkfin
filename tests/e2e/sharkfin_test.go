@@ -322,6 +322,7 @@ func TestToolsList(t *testing.T) {
 		"grant_permission", "revoke_permission", "list_roles", "wait_for_messages",
 		"mention_group_create", "mention_group_delete", "mention_group_get",
 		"mention_group_list", "mention_group_add_member", "mention_group_remove_member",
+		"register_webhook", "unregister_webhook", "list_webhooks",
 	}
 	if len(listResult.Tools) != len(expected) {
 		names := make([]string, len(listResult.Tools))
@@ -494,7 +495,7 @@ func TestChannelCreateAndList(t *testing.T) {
 	}
 
 	r, err := alice.ToolCall("channel_create", map[string]any{
-		"name":   "general",
+		"name":   "test-channel-creation",
 		"public": true,
 	})
 	if err != nil {
@@ -522,15 +523,15 @@ func TestChannelCreateAndList(t *testing.T) {
 
 	found := false
 	for _, ch := range channels {
-		if ch.Name == "general" {
+		if ch.Name == "test-channel-creation" {
 			found = true
 			if !ch.Public {
-				t.Error("channel 'general' should be public")
+				t.Error("channel 'test-channel-creation' should be public")
 			}
 		}
 	}
 	if !found {
-		t.Errorf("channel 'general' not found in list: %s", r.Text)
+		t.Errorf("channel 'test-channel-creation' not found in list: %s", r.Text)
 	}
 }
 
@@ -662,6 +663,10 @@ func TestChannelCreatePermissionDenied(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer d.StopFatal(t)
+
+	// Provision a sentinel admin first so alice is NOT the first identity
+	// and therefore does NOT get auto-promoted to admin (first-user-auto-admin).
+	_ = newMCPClient(t, d, "uuid-admin-bootstrap", "admin-bootstrap", "Admin Bootstrap", "user")
 
 	alice := newMCPClient(t, d, "uuid-alice", "alice", "Alice", "user")
 
@@ -1206,7 +1211,7 @@ func TestMCPHistory(t *testing.T) {
 
 	// Create channel
 	r, err := alice.ToolCall("channel_create", map[string]any{
-		"name": "general", "public": true,
+		"name": "test-mcp-history", "public": true,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -1218,7 +1223,7 @@ func TestMCPHistory(t *testing.T) {
 	// Send 3 messages
 	for i := 1; i <= 3; i++ {
 		r, err := alice.ToolCall("send_message", map[string]any{
-			"channel": "general",
+			"channel": "test-mcp-history",
 			"message": fmt.Sprintf("msg-%d", i),
 		})
 		if err != nil {
@@ -1231,7 +1236,7 @@ func TestMCPHistory(t *testing.T) {
 
 	// Fetch history
 	r, err = alice.ToolCall("history", map[string]any{
-		"channel": "general",
+		"channel": "test-mcp-history",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -1261,7 +1266,7 @@ func TestMCPHistory(t *testing.T) {
 
 	// Test pagination with "before" — get messages before msg-3
 	r, err = alice.ToolCall("history", map[string]any{
-		"channel": "general",
+		"channel": "test-mcp-history",
 		"before":  messages[2].ID, // before newest
 		"limit":   2,
 	})
@@ -1601,15 +1606,15 @@ func TestWSSendAndBroadcast(t *testing.T) {
 
 	// Create channel with both
 	alice.Req("channel_create", map[string]any{
-		"name": "general", "public": true,
+		"name": "test-ws-broadcast", "public": true,
 	}, "c1")
 	alice.Req("channel_invite", map[string]any{
-		"channel": "general", "username": "bob",
+		"channel": "test-ws-broadcast", "username": "bob",
 	}, "inv1")
 
 	// Alice sends
 	env, err := alice.Req("send_message", map[string]any{
-		"channel": "general", "body": "hello everyone",
+		"channel": "test-ws-broadcast", "body": "hello everyone",
 	}, "m1")
 	if err != nil {
 		t.Fatal(err)
@@ -1634,8 +1639,8 @@ func TestWSSendAndBroadcast(t *testing.T) {
 		ID      int64  `json:"id"`
 	}
 	json.Unmarshal(bcast.D, &msg)
-	if msg.Channel != "general" {
-		t.Errorf("channel = %q, want general", msg.Channel)
+	if msg.Channel != "test-ws-broadcast" {
+		t.Errorf("channel = %q, want test-ws-broadcast", msg.Channel)
 	}
 	if msg.From != "alice" {
 		t.Errorf("from = %q, want alice", msg.From)
@@ -1672,19 +1677,19 @@ func TestWSHistory(t *testing.T) {
 	}
 
 	ws.Req("channel_create", map[string]any{
-		"name": "general", "public": true,
+		"name": "test-ws-history", "public": true,
 	}, "c1")
 
 	// Send 3 messages
 	for i := 0; i < 3; i++ {
 		ws.Req("send_message", map[string]any{
-			"channel": "general", "body": fmt.Sprintf("msg-%d", i),
+			"channel": "test-ws-history", "body": fmt.Sprintf("msg-%d", i),
 		}, fmt.Sprintf("m%d", i))
 	}
 
 	// Fetch history
 	env, err := ws.Req("history", map[string]any{
-		"channel": "general",
+		"channel": "test-ws-history",
 	}, "h1")
 	if err != nil {
 		t.Fatal(err)
@@ -1825,15 +1830,15 @@ func TestWSMentions(t *testing.T) {
 	}
 
 	alice.Req("channel_create", map[string]any{
-		"name": "general", "public": true,
+		"name": "test-ws-mentions", "public": true,
 	}, "c1")
 	alice.Req("channel_invite", map[string]any{
-		"channel": "general", "username": "bob",
+		"channel": "test-ws-mentions", "username": "bob",
 	}, "inv1")
 
 	// Send with mention
 	env, err := alice.Req("send_message", map[string]any{
-		"channel": "general",
+		"channel": "test-ws-mentions",
 		"body":    "hey @bob look at this",
 	}, "m1")
 	if err != nil {
@@ -1858,7 +1863,7 @@ func TestWSMentions(t *testing.T) {
 
 	// Also send a non-mention message
 	alice.Req("send_message", map[string]any{
-		"channel": "general", "body": "just chatting",
+		"channel": "test-ws-mentions", "body": "just chatting",
 	}, "m2")
 	bob.Read() // drain broadcast
 
@@ -1908,11 +1913,11 @@ func TestWSMentionInvalidUser(t *testing.T) {
 	}
 
 	ws.Req("channel_create", map[string]any{
-		"name": "general", "public": true,
+		"name": "test-ws-invalid-mention", "public": true,
 	}, "c1")
 
 	env, err := ws.Req("send_message", map[string]any{
-		"channel": "general",
+		"channel": "test-ws-invalid-mention",
 		"body":    "hey @ghost",
 	}, "m1")
 	if err != nil {
@@ -1957,15 +1962,15 @@ func TestWSThreadReply(t *testing.T) {
 	}
 
 	alice.Req("channel_create", map[string]any{
-		"name": "general", "public": true,
+		"name": "test-ws-thread", "public": true,
 	}, "c1")
 	alice.Req("channel_invite", map[string]any{
-		"channel": "general", "username": "bob",
+		"channel": "test-ws-thread", "username": "bob",
 	}, "inv1")
 
 	// Send parent
 	parentEnv, err := alice.Req("send_message", map[string]any{
-		"channel": "general", "body": "parent message",
+		"channel": "test-ws-thread", "body": "parent message",
 	}, "m1")
 	if err != nil {
 		t.Fatal(err)
@@ -1979,7 +1984,7 @@ func TestWSThreadReply(t *testing.T) {
 
 	// Reply in thread
 	env, err := alice.Req("send_message", map[string]any{
-		"channel":   "general",
+		"channel":   "test-ws-thread",
 		"body":      "thread reply",
 		"thread_id": parentResult.ID,
 	}, "m2")
@@ -2005,7 +2010,7 @@ func TestWSThreadReply(t *testing.T) {
 
 	// History filtered by thread_id returns only the reply
 	env, err = alice.Req("history", map[string]any{
-		"channel":   "general",
+		"channel":   "test-ws-thread",
 		"thread_id": parentResult.ID,
 	}, "h1")
 	if err != nil {
@@ -2607,7 +2612,7 @@ func TestRBACDefaultPermissions(t *testing.T) {
 	}
 
 	r, err := admin.ToolCall("channel_create", map[string]any{
-		"name": "general", "public": true,
+		"name": "test-rbac-default", "public": true,
 	})
 	if err != nil || r.Error != nil {
 		t.Fatalf("channel_create: err=%v rpc=%+v", err, r.Error)
@@ -2617,13 +2622,13 @@ func TestRBACDefaultPermissions(t *testing.T) {
 	alice := newMCPClient(t, d, "uuid-alice", "alice", "Alice", "user")
 
 	// Alice should be able to join the channel and send a message
-	r, err = alice.ToolCall("channel_join", map[string]any{"channel": "general"})
+	r, err = alice.ToolCall("channel_join", map[string]any{"channel": "test-rbac-default"})
 	if err != nil || r.Error != nil {
 		t.Fatalf("channel_join: err=%v rpc=%+v", err, r.Error)
 	}
 
 	r, err = alice.ToolCall("send_message", map[string]any{
-		"channel": "general", "message": "hello from alice",
+		"channel": "test-rbac-default", "message": "hello from alice",
 	})
 	if err != nil || r.Error != nil {
 		t.Fatalf("send_message should succeed: err=%v rpc=%+v", err, r.Error)
@@ -2655,7 +2660,11 @@ func TestRBACAdminCanManageRoles(t *testing.T) {
 	}
 	defer d.StopFatal(t)
 
-	// Register a user
+	// Provision a sentinel admin first so alice is NOT the first identity
+	// and therefore does NOT get auto-promoted to admin (first-user-auto-admin).
+	_ = newMCPClient(t, d, "uuid-admin-bootstrap", "admin-bootstrap", "Admin Bootstrap", "user")
+
+	// Register alice as a regular user
 	alice := newMCPClient(t, d, "uuid-alice", "alice", "Alice", "user")
 
 	// Verify alice cannot create channels initially
@@ -2696,6 +2705,10 @@ func TestCapabilitiesQueryMCP(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer d.StopFatal(t)
+
+	// Provision a sentinel admin first so alice is NOT the first identity
+	// and therefore does NOT get auto-promoted to admin (first-user-auto-admin).
+	_ = newMCPClient(t, d, "uuid-admin-bootstrap", "admin-bootstrap", "Admin Bootstrap", "user")
 
 	alice := newMCPClient(t, d, "uuid-alice", "alice", "Alice", "user")
 
@@ -2747,6 +2760,10 @@ func TestCapabilitiesQueryWS(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer d.StopFatal(t)
+
+	// Provision a sentinel admin first so alice is NOT the first identity
+	// and therefore does NOT get auto-promoted to admin (first-user-auto-admin).
+	_ = newMCPClient(t, d, "uuid-admin-bootstrap", "admin-bootstrap", "Admin Bootstrap", "user")
 
 	aliceToken := d.SignJWT("uuid-alice", "alice", "Alice", "user")
 	ws, err := harness.NewWSClient(addr, aliceToken)
@@ -2979,7 +2996,7 @@ func TestNotificationsOnlyMode(t *testing.T) {
 		t.Fatal(err)
 	}
 	r, err := admin.ToolCall("channel_create", map[string]any{
-		"name": "general", "public": true,
+		"name": "test-notifications-only", "public": true,
 	})
 	if err != nil || r.Error != nil {
 		t.Fatalf("channel_create: err=%v rpc=%+v", err, r.Error)
@@ -3002,7 +3019,7 @@ func TestNotificationsOnlyMode(t *testing.T) {
 
 	// (a) send_message should return error "notification-only connection"
 	env, err := ws.Req("send_message", map[string]any{
-		"channel": "general", "message": "should fail",
+		"channel": "test-notifications-only", "message": "should fail",
 	}, "m1")
 	if err != nil {
 		t.Fatal(err)
@@ -3042,9 +3059,9 @@ func TestNotificationsOnlyMode(t *testing.T) {
 	}
 
 	// (e) user still receives message.new broadcasts from other users
-	// Admin joins general and invites notif-user to receive broadcasts
+	// Admin invites notif-user to receive broadcasts
 	r, err = admin.ToolCall("channel_invite", map[string]any{
-		"channel": "general", "username": "notif-user",
+		"channel": "test-notifications-only", "username": "notif-user",
 	})
 	if err != nil || r.Error != nil {
 		t.Fatalf("invite notif-user: err=%v rpc=%+v", err, r.Error)
@@ -3052,7 +3069,7 @@ func TestNotificationsOnlyMode(t *testing.T) {
 
 	// Admin sends a message
 	r, err = admin.ToolCall("send_message", map[string]any{
-		"channel": "general", "message": "hello from admin",
+		"channel": "test-notifications-only", "message": "hello from admin",
 	})
 	if err != nil || r.Error != nil {
 		t.Fatalf("admin send: err=%v rpc=%+v", err, r.Error)
@@ -3071,7 +3088,7 @@ func TestNotificationsOnlyMode(t *testing.T) {
 				Body    string `json:"body"`
 			}
 			json.Unmarshal(bcast.D, &msg)
-			if msg.Channel == "general" && msg.Body == "hello from admin" {
+			if msg.Channel == "test-notifications-only" && msg.Body == "hello from admin" {
 				foundBroadcast = true
 				break
 			}
@@ -3264,21 +3281,21 @@ func TestBackupExportImport(t *testing.T) {
 	}
 
 	r, err := alice.ToolCall("channel_create", map[string]any{
-		"name": "general", "public": true, "members": []string{"bob"},
+		"name": "test-backup-channel", "public": true, "members": []string{"bob"},
 	})
 	if err != nil || r.Error != nil {
 		t.Fatalf("create channel: err=%v rpc=%+v", err, r.Error)
 	}
 
 	r, err = alice.ToolCall("send_message", map[string]any{
-		"channel": "general", "message": "hello from @bob via alice",
+		"channel": "test-backup-channel", "message": "hello from @bob via alice",
 	})
 	if err != nil || r.Error != nil {
 		t.Fatalf("send: err=%v rpc=%+v", err, r.Error)
 	}
 
 	r, err = bob.ToolCall("send_message", map[string]any{
-		"channel": "general", "message": "hello from bob",
+		"channel": "test-backup-channel", "message": "hello from bob",
 	})
 	if err != nil || r.Error != nil {
 		t.Fatalf("send: err=%v rpc=%+v", err, r.Error)
@@ -3341,9 +3358,9 @@ func TestBackupExportImport(t *testing.T) {
 		t.Errorf("expected alice and bob in user_list, got: %s", ur.Text)
 	}
 
-	// Verify messages in general channel
+	// Verify messages in test-backup-channel
 	hr, err := verifier.ToolCall("history", map[string]any{
-		"channel": "general", "limit": 50,
+		"channel": "test-backup-channel", "limit": 50,
 	})
 	if err != nil || hr.Error != nil {
 		t.Fatalf("history: err=%v rpc=%+v", err, hr.Error)
@@ -3414,7 +3431,7 @@ func TestPresenceNotificationOnMention(t *testing.T) {
 
 	// Alice creates a public channel and invites bob
 	r, err := alice.ToolCall("channel_create", map[string]any{
-		"name": "general", "public": true, "members": []string{"bob"},
+		"name": "test-presence-mention", "public": true, "members": []string{"bob"},
 	})
 	if err != nil || r.Error != nil {
 		t.Fatalf("channel_create: err=%v rpc=%+v", err, r.Error)
@@ -3422,7 +3439,7 @@ func TestPresenceNotificationOnMention(t *testing.T) {
 
 	// Alice sends a message mentioning bob
 	r, err = alice.ToolCall("send_message", map[string]any{
-		"channel": "general", "message": "hey @bob check this out",
+		"channel": "test-presence-mention", "message": "hey @bob check this out",
 	})
 	if err != nil || r.Error != nil {
 		t.Fatalf("send_message: err=%v rpc=%+v", err, r.Error)
@@ -3447,8 +3464,8 @@ func TestPresenceNotificationOnMention(t *testing.T) {
 	if err := json.Unmarshal(notif.D, &payload); err != nil {
 		t.Fatalf("unmarshal notification data: %v (raw: %s)", err, string(notif.D))
 	}
-	if payload.Channel != "general" {
-		t.Errorf("channel = %q, want %q", payload.Channel, "general")
+	if payload.Channel != "test-presence-mention" {
+		t.Errorf("channel = %q, want %q", payload.Channel, "test-presence-mention")
 	}
 	if payload.ChannelType != "channel" {
 		t.Errorf("channel_type = %q, want %q", payload.ChannelType, "channel")
@@ -3548,7 +3565,7 @@ func TestPresenceNoNotificationWithoutMention(t *testing.T) {
 
 	// Create channel with both users
 	r, err := alice.ToolCall("channel_create", map[string]any{
-		"name": "general", "public": true, "members": []string{"carol"},
+		"name": "test-presence-no-notif", "public": true, "members": []string{"carol"},
 	})
 	if err != nil || r.Error != nil {
 		t.Fatalf("channel_create: err=%v rpc=%+v", err, r.Error)
@@ -3556,7 +3573,7 @@ func TestPresenceNoNotificationWithoutMention(t *testing.T) {
 
 	// Alice sends a message WITHOUT mentioning anyone
 	r, err = alice.ToolCall("send_message", map[string]any{
-		"channel": "general", "message": "hello everyone, no mentions here",
+		"channel": "test-presence-no-notif", "message": "hello everyone, no mentions here",
 	})
 	if err != nil || r.Error != nil {
 		t.Fatalf("send_message: err=%v rpc=%+v", err, r.Error)
@@ -3759,15 +3776,15 @@ func TestWSMentionGroupExpansion(t *testing.T) {
 
 	// Create channel.
 	alice.Req("channel_create", map[string]any{
-		"name": "general", "public": true,
+		"name": "test-ws-mention-group", "public": true,
 	}, "c1")
 	alice.Req("channel_invite", map[string]any{
-		"channel": "general", "username": "bob",
+		"channel": "test-ws-mention-group", "username": "bob",
 	}, "inv1")
 
 	// Send with @devs.
 	env, err := alice.Req("send_message", map[string]any{
-		"channel": "general",
+		"channel": "test-ws-mention-group",
 		"body":    "hey @devs review this",
 	}, "m1")
 	if err != nil || env.OK == nil || !*env.OK {
