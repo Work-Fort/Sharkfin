@@ -76,7 +76,7 @@ type bridge struct {
 
 func (b *bridge) startPresence(ctx context.Context) error {
 	header := http.Header{}
-	header.Set("Authorization", "Bearer "+b.apiKey)
+	header.Set("Authorization", "ApiKey-v1 "+b.apiKey)
 	conn, _, err := websocket.DefaultDialer.Dial(b.wsURL, header)
 	if err != nil {
 		return fmt.Errorf("dial presence: %w", err)
@@ -163,7 +163,7 @@ func (b *bridge) processStdin() error {
 			return fmt.Errorf("create request: %w", err)
 		}
 		req.Header.Set("Content-Type", "application/json")
-		req.Header.Set("Authorization", "Bearer "+b.apiKey)
+		req.Header.Set("Authorization", "ApiKey-v1 "+b.apiKey)
 		if b.sessionID != "" {
 			req.Header.Set("Mcp-Session-Id", b.sessionID)
 		}
@@ -279,7 +279,7 @@ func (b *bridge) callUnreadMessages() (string, error) {
 		return "", fmt.Errorf("create request: %w", err)
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("Authorization", "Bearer "+b.apiKey)
+	httpReq.Header.Set("Authorization", "ApiKey-v1 "+b.apiKey)
 	if b.sessionID != "" {
 		httpReq.Header.Set("Mcp-Session-Id", b.sessionID)
 	}

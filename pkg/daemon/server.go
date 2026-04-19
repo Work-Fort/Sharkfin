@@ -38,7 +38,7 @@ func NewServer(ctx context.Context, addr string, store domain.Store, pongTimeout
 		return nil, fmt.Errorf("init JWT validator: %w", err)
 	}
 	akV := authapikey.New(opts.VerifyAPIKeyURL, opts.APIKeyCacheTTL)
-	mw := auth.NewFromValidators(jwtV, akV)
+	mw := auth.NewSchemeDispatch(jwtV, akV)
 
 	hub := NewHub(bus)
 	presenceHandler := NewPresenceHandler(pongTimeout)
