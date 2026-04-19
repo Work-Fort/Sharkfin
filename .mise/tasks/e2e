@@ -5,4 +5,5 @@
 #MISE dir="tests/e2e"
 set -euo pipefail
 
-go test -v -race -timeout 180s
+export SHARKFIN_BINARY="${MISE_PROJECT_ROOT}/build/sharkfin"
+go test -v -race -timeout 180s ./...
