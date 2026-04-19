@@ -46,6 +46,14 @@ func Open(dsn string) (*Store, error) {
 		sqldb.Close()
 		return nil, fmt.Errorf("migrate: %w", err)
 	}
+
+	// Seed a default "general" channel on first run, matching the SQLite backend.
+	var channelCount int
+	_ = sqldb.QueryRow("SELECT COUNT(*) FROM channels").Scan(&channelCount)
+	if channelCount == 0 {
+		_, _ = sqldb.Exec("INSERT INTO channels (name, public, type) VALUES ('general', TRUE, 'channel')")
+	}
+
 	return &Store{db: sqldb}, nil
 }
 
