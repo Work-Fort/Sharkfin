@@ -1,7 +1,7 @@
 -- SPDX-License-Identifier: AGPL-3.0-or-later
 
 -- +goose Up
-INSERT INTO roles (name, built_in) VALUES ('bot', 1);
+INSERT INTO roles (name, built_in) VALUES ('bot', TRUE);
 
 INSERT INTO role_permissions (role, permission) VALUES ('bot', 'send_message');
 INSERT INTO role_permissions (role, permission) VALUES ('bot', 'join_channel');
