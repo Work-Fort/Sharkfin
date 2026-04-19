@@ -1,6 +1,21 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 package domain
 
+import "time"
+
+// BackupStore extends Store with backup-specific operations.
+// These methods are only needed in backup restore paths and are intentionally
+// excluded from the composite Store to honour the Interface Segregation
+// Principle — daemon handlers must not accidentally call WipeAll or
+// ImportMessage. A concrete adapter satisfies BackupStore if and only if
+// it implements Store plus the three methods below.
+type BackupStore interface {
+	Store
+	ImportMessage(channelID int64, identityID string, body string, threadID *int64, mentionIdentityIDs []string, createdAt time.Time) (int64, error)
+	IsEmpty() (bool, error)
+	WipeAll() error
+}
+
 type IdentityStore interface {
 	UpsertIdentity(authID, username, displayName, identityType, role string) (*Identity, error)
 	GetIdentityByID(id string) (*Identity, error)

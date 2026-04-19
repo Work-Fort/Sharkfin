@@ -7,13 +7,11 @@ import (
 	"github.com/Work-Fort/sharkfin/pkg/domain"
 )
 
-// BackupStore extends domain.Store with backup-specific methods.
-type BackupStore interface {
-	domain.Store
-	ImportMessage(channelID int64, identityID string, body string, threadID *int64, mentionIdentityIDs []string, createdAt time.Time) (int64, error)
-	IsEmpty() (bool, error)
-	WipeAll() error
-}
+// BackupStore is an alias for domain.BackupStore, re-exported from this package
+// for backward compatibility with existing callers (cmd/backup, tests).
+// The canonical definition lives in pkg/domain/ports.go so that any reader of
+// the central ports file sees the full production storage contract.
+type BackupStore = domain.BackupStore
 
 // Backup is the top-level JSON-serializable backup format.
 type Backup struct {
