@@ -65,6 +65,42 @@ func newMCPClient(t *testing.T, d *harness.Daemon, id, username, displayName, us
 	return c
 }
 
+// --- Scheme-dispatch regression tests ---
+
+// TestInboundMiddleware_BearerForAPIKeyReturns401 asserts that sending a valid
+// API key under the wrong Authorization scheme ("Bearer" instead of "ApiKey-v1")
+// is rejected with 401 and that the verify-api-key endpoint is NOT called.
+// This is the load-bearing closure of Cluster 3b at the daemon boundary:
+// passport's NewSchemeDispatch middleware must route by scheme before dispatching
+// to validators, so there is no fallthrough path from JWT-parse-failure to
+// API-key validation.
+func TestInboundMiddleware_BearerForAPIKeyReturns401(t *testing.T) {
+	addr, err := harness.FreePort()
+	if err != nil {
+		t.Fatal(err)
+	}
+	d, err := harness.StartDaemon(sharkfinBin, addr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.StopFatal(t)
+
+	req, _ := http.NewRequest("GET", fmt.Sprintf("http://%s/api/v1/channels", addr), nil)
+	req.Header.Set("Authorization", "Bearer "+harness.ValidBridgeAPIKey)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401 (API key sent under Bearer must not be accepted)", resp.StatusCode)
+	}
+	if got := d.JWKS.APIKeyVerifyCount(); got != 0 {
+		t.Errorf("APIKeyVerifyCount = %d, want 0 (Bearer must not fall through to verify-api-key)", got)
+	}
+}
+
 // --- Presence tests ---
 
 func TestPresenceWSDisconnectMarksOffline(t *testing.T) {

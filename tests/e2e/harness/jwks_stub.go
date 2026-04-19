@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"sync/atomic"
 	"time"
 
 	"github.com/lestrrat-go/jwx/v2/jwa"
@@ -15,13 +16,35 @@ import (
 	"github.com/lestrrat-go/jwx/v2/jwt"
 )
 
-// validBridgeAPIKey is the only API key accepted by the JWKS stub's
+// ValidBridgeAPIKey is the only API key accepted by the JWKS stub's
 // verify-api-key endpoint. Tests that start a bridge use this same key
-// (see harness.StartBridge callers passing "test-api-key"). Accepting
-// any non-empty key would silently authenticate invalid tokens that
-// fall through the JWT validator into the API-key validator —
-// see TestToolCallWithInvalidJWT.
-const validBridgeAPIKey = "test-api-key"
+// (see harness.StartBridge callers passing "test-api-key"). Returning
+// the bridge identity for any non-empty key would make a real
+// production bug — a stolen API key being sent under the wrong scheme
+// — silently pass in tests. The stub mirrors production: only this
+// exact key resolves to the bridge identity.
+//
+// As of 2026-04-19, passport's middleware also dispatches by
+// Authorization scheme (Bearer → JWT only, ApiKey-v1 → this endpoint
+// only), so the historical "invalid JWT falls through to verify-api-key"
+// concern documented here previously is impossible by construction.
+//
+// signJWT below remains in use: inbound-middleware tests still need to
+// exercise the JWT-acceptance path (browser-routed traffic). Only the
+// outbound JWT-sending was removed from consumer clients.
+const ValidBridgeAPIKey = "test-api-key"
+
+// JWKSStub is the handle returned by StartJWKSStub that lets tests
+// inspect the stub's internal state (e.g. call counts).
+type JWKSStub struct {
+	apiKeyVerifyCount atomic.Int64
+}
+
+// APIKeyVerifyCount returns the number of times the verify-api-key
+// endpoint has been called since the stub started.
+func (s *JWKSStub) APIKeyVerifyCount() int64 {
+	return s.apiKeyVerifyCount.Load()
+}
 
 // StartJWKSStub starts a JWKS stub server that serves:
 //   - GET /v1/jwks — the public key in JWKS format
@@ -30,10 +53,13 @@ const validBridgeAPIKey = "test-api-key"
 //     {valid: false}
 //
 // It returns:
+//   - stub: the JWKSStub handle (for call-count inspection)
 //   - addr: the server address (host:port)
 //   - stop: function to stop the server
 //   - signJWT: function to create signed JWTs with the expected claims
-func StartJWKSStub() (addr string, stop func(), signJWT func(id, username, displayName, userType string) string) {
+func StartJWKSStub() (stub *JWKSStub, addr string, stop func(), signJWT func(id, username, displayName, userType string) string) {
+	stub = &JWKSStub{}
+
 	// Generate RSA key pair.
 	rawKey, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
@@ -84,6 +110,7 @@ func StartJWKSStub() (addr string, stop func(), signJWT func(id, username, displ
 	})
 
 	mux.HandleFunc("POST /v1/verify-api-key", func(w http.ResponseWriter, r *http.Request) {
+		stub.apiKeyVerifyCount.Add(1)
 		// Accept only the canned bridge API key. Returning the bridge
 		// identity for any non-empty key would mean an invalid JWT
 		// (which falls through to the API-key validator as a fallback)
@@ -99,7 +126,7 @@ func StartJWKSStub() (addr string, stop func(), signJWT func(id, username, displ
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		if req.Key != validBridgeAPIKey {
+		if req.Key != ValidBridgeAPIKey {
 			json.NewEncoder(w).Encode(map[string]any{"valid": false, "error": "invalid api key"})
 			return
 		}
@@ -143,5 +170,5 @@ func StartJWKSStub() (addr string, stop func(), signJWT func(id, username, displ
 		return string(signedBytes)
 	}
 
-	return ln.Addr().String(), stopFn, signFn
+	return stub, ln.Addr().String(), stopFn, signFn
 }

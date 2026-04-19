@@ -53,6 +53,7 @@ type Daemon struct {
 	stderrFile *os.File // *os.File (not bytes.Buffer) — see hardening notes
 	stubStop   func()
 	signJWT    func(id, username, displayName, userType string) string
+	JWKS       *JWKSStub
 }
 
 func StartDaemon(binary, addr string, opts ...DaemonOption) (*Daemon, error) {
@@ -64,7 +65,7 @@ func StartDaemon(binary, addr string, opts ...DaemonOption) (*Daemon, error) {
 	}
 
 	// Start JWKS stub server before the daemon so the initial JWKS fetch succeeds.
-	stubAddr, stubStop, signJWT := StartJWKSStub()
+	jwksStub, stubAddr, stubStop, signJWT := StartJWKSStub()
 
 	xdgDir, err := os.MkdirTemp("", "sharkfin-e2e-*")
 	if err != nil {
@@ -138,6 +139,7 @@ func StartDaemon(binary, addr string, opts ...DaemonOption) (*Daemon, error) {
 				stderrFile: stderrFile,
 				stubStop:   stubStop,
 				signJWT:    signJWT,
+				JWKS:       jwksStub,
 			}, nil
 		}
 		time.Sleep(50 * time.Millisecond)
