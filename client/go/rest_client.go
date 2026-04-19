@@ -21,7 +21,7 @@ type RESTClient struct {
 // sub-path — REST method paths like "/api/v1/channels" are appended
 // directly. A WebSocket URL such as "ws://localhost:16000/ws" is also
 // accepted: the scheme is rewritten to http(s) and a trailing "/ws"
-// is trimmed. Authentication is provided via WithToken or WithAPIKey;
+// is trimmed. Authentication is provided via WithAPIKey;
 // other Options (WithDialer, WithReconnect) are accepted for
 // signature compatibility but are ignored because there is no WS
 // connection.
@@ -34,7 +34,6 @@ func NewRESTClient(baseURL string, opts ...Option) *RESTClient {
 		transport: restTransport{
 			baseURL:    deriveBaseURL(baseURL),
 			httpClient: &http.Client{Timeout: 30 * time.Second},
-			token:      o.token,
 			apiKey:     o.apiKey,
 		},
 	}

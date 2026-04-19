@@ -737,35 +737,6 @@ func TestReconnect(t *testing.T) {
 	}
 }
 
-func TestAuthHeaders(t *testing.T) {
-	var gotAuth string
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		gotAuth = r.Header.Get("Authorization")
-		conn, err := upgrader.Upgrade(w, r, nil)
-		if err != nil {
-			t.Fatalf("upgrade: %v", err)
-		}
-		defer conn.Close()
-		for {
-			if _, _, err := conn.ReadMessage(); err != nil {
-				return
-			}
-		}
-	}))
-	defer srv.Close()
-	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http")
-
-	c, err := Dial(context.Background(), wsURL, WithToken("my-jwt-token"))
-	if err != nil {
-		t.Fatalf("Dial: %v", err)
-	}
-	defer c.Close()
-
-	if gotAuth != "Bearer my-jwt-token" {
-		t.Errorf("Authorization = %q, want %q", gotAuth, "Bearer my-jwt-token")
-	}
-}
-
 func TestAPIKeyHeader(t *testing.T) {
 	var gotAuth string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -790,8 +761,8 @@ func TestAPIKeyHeader(t *testing.T) {
 	}
 	defer c.Close()
 
-	if gotAuth != "Bearer sk-test-key" {
-		t.Errorf("Authorization = %q, want %q", gotAuth, "Bearer sk-test-key")
+	if gotAuth != "ApiKey-v1 sk-test-key" {
+		t.Errorf("Authorization = %q, want %q", gotAuth, "ApiKey-v1 sk-test-key")
 	}
 }
 
@@ -817,7 +788,7 @@ func TestRESTRegisterWebhook(t *testing.T) {
 	}, mux)
 	defer srv.Close()
 
-	c, err := Dial(context.Background(), wsURL, WithToken("tok"))
+	c, err := Dial(context.Background(), wsURL, WithAPIKey("tok"))
 	if err != nil {
 		t.Fatalf("Dial: %v", err)
 	}
@@ -849,7 +820,7 @@ func TestRESTUnregisterWebhook(t *testing.T) {
 	}, mux)
 	defer srv.Close()
 
-	c, err := Dial(context.Background(), wsURL, WithToken("tok"))
+	c, err := Dial(context.Background(), wsURL, WithAPIKey("tok"))
 	if err != nil {
 		t.Fatalf("Dial: %v", err)
 	}
@@ -882,7 +853,7 @@ func TestRESTListWebhooks(t *testing.T) {
 	}, mux)
 	defer srv.Close()
 
-	c, err := Dial(context.Background(), wsURL, WithToken("tok"))
+	c, err := Dial(context.Background(), wsURL, WithAPIKey("tok"))
 	if err != nil {
 		t.Fatalf("Dial: %v", err)
 	}
@@ -914,7 +885,7 @@ func TestRESTRegisterIdentity(t *testing.T) {
 	}, mux)
 	defer srv.Close()
 
-	c, err := Dial(context.Background(), wsURL, WithToken("tok"))
+	c, err := Dial(context.Background(), wsURL, WithAPIKey("tok"))
 	if err != nil {
 		t.Fatalf("Dial: %v", err)
 	}

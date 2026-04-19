@@ -17,7 +17,7 @@
 //
 // Usage (WebSocket):
 //
-//	c, err := client.Dial(ctx, "ws://localhost:16000/ws", client.WithToken(tok))
+//	c, err := client.Dial(ctx, "ws://localhost:16000/ws", client.WithAPIKey(tok))
 //	if err != nil { log.Fatal(err) }
 //	defer c.Close()
 //
@@ -31,7 +31,7 @@
 //
 // Usage (REST-only):
 //
-//	c := client.NewRESTClient("http://localhost:16000", client.WithToken(tok))
+//	c := client.NewRESTClient("http://localhost:16000", client.WithAPIKey(tok))
 //	defer c.Close()
 //
 //	if err := c.Register(ctx); err != nil { log.Fatal(err) }

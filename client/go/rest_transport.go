@@ -18,7 +18,6 @@ import (
 type restTransport struct {
 	baseURL    string
 	httpClient *http.Client
-	token      string
 	apiKey     string
 }
 
@@ -45,10 +44,8 @@ func (t *restTransport) do(ctx context.Context, method, path string, reqBody, ou
 	if reqBody != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
-	if t.token != "" {
-		req.Header.Set("Authorization", "Bearer "+t.token)
-	} else if t.apiKey != "" {
-		req.Header.Set("Authorization", "Bearer "+t.apiKey)
+	if t.apiKey != "" {
+		req.Header.Set("Authorization", "ApiKey-v1 "+t.apiKey)
 	}
 
 	resp, err := t.httpClient.Do(req)

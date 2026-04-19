@@ -41,7 +41,6 @@ type clientOpts struct {
 	dialer    *websocket.Dialer
 	reconnect BackoffFunc
 	logger    *slog.Logger
-	token     string
 	apiKey    string
 }
 
@@ -67,11 +66,6 @@ func WithLogger(l *slog.Logger) Option {
 	return func(o *clientOpts) { o.logger = l }
 }
 
-// WithToken sets a Passport JWT token for authentication.
-func WithToken(t string) Option {
-	return func(o *clientOpts) { o.token = t }
-}
-
 // WithAPIKey sets an API key for authentication.
 func WithAPIKey(k string) Option {
 	return func(o *clientOpts) { o.apiKey = k }
@@ -86,7 +80,7 @@ type envelope struct {
 
 // Dial connects to a Sharkfin server at the given WebSocket URL (e.g.
 // "ws://localhost:16000/ws") and starts the background read pump.
-// Authentication is provided via WithToken or WithAPIKey options.
+// Authentication is provided via the WithAPIKey option.
 func Dial(ctx context.Context, url string, opts ...Option) (*Client, error) {
 	o := clientOpts{
 		dialer: websocket.DefaultDialer,
@@ -96,10 +90,8 @@ func Dial(ctx context.Context, url string, opts ...Option) (*Client, error) {
 	}
 
 	header := http.Header{}
-	if o.token != "" {
-		header.Set("Authorization", "Bearer "+o.token)
-	} else if o.apiKey != "" {
-		header.Set("Authorization", "Bearer "+o.apiKey)
+	if o.apiKey != "" {
+		header.Set("Authorization", "ApiKey-v1 "+o.apiKey)
 	}
 
 	conn, _, err := o.dialer.DialContext(ctx, url, header)
@@ -207,10 +199,8 @@ func (c *Client) cleanupPending() {
 
 func (c *Client) reconnectLoop() {
 	header := http.Header{}
-	if c.opts.token != "" {
-		header.Set("Authorization", "Bearer "+c.opts.token)
-	} else if c.opts.apiKey != "" {
-		header.Set("Authorization", "Bearer "+c.opts.apiKey)
+	if c.opts.apiKey != "" {
+		header.Set("Authorization", "ApiKey-v1 "+c.opts.apiKey)
 	}
 
 	for attempt := 0; ; attempt++ {
@@ -259,7 +249,6 @@ func (c *Client) httpDo(ctx context.Context, method, path string, reqBody, out a
 	t := restTransport{
 		baseURL:    c.baseURL,
 		httpClient: c.httpClient,
-		token:      c.opts.token,
 		apiKey:     c.opts.apiKey,
 	}
 	return t.do(ctx, method, path, reqBody, out)

@@ -10,13 +10,30 @@ import (
 	"testing"
 )
 
+func TestRESTClient_APIKeyUsesApiKeyV1Scheme(t *testing.T) {
+	gotAuth := ""
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{}`))
+	}))
+	defer srv.Close()
+
+	c := NewRESTClient(srv.URL, WithAPIKey("wf-svc_secret"))
+	_, _ = c.Channels(context.Background())
+
+	if gotAuth != "ApiKey-v1 wf-svc_secret" {
+		t.Errorf("Authorization = %q, want %q", gotAuth, "ApiKey-v1 wf-svc_secret")
+	}
+}
+
 func TestNewRESTClient_NoDial(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
 	defer srv.Close()
 
-	c := NewRESTClient(srv.URL, WithToken("tok"))
+	c := NewRESTClient(srv.URL, WithAPIKey("tok"))
 	if c == nil {
 		t.Fatal("NewRESTClient returned nil")
 	}
@@ -33,15 +50,15 @@ func TestRESTClientRegister(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /api/v1/auth/register", func(w http.ResponseWriter, r *http.Request) {
 		called = true
-		if got := r.Header.Get("Authorization"); got != "Bearer tok" {
-			t.Errorf("Authorization = %q, want Bearer tok", got)
+		if got := r.Header.Get("Authorization"); got != "ApiKey-v1 tok" {
+			t.Errorf("Authorization = %q, want ApiKey-v1 tok", got)
 		}
 		w.WriteHeader(http.StatusCreated)
 	})
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
 
-	c := NewRESTClient(srv.URL, WithToken("tok"))
+	c := NewRESTClient(srv.URL, WithAPIKey("tok"))
 	if err := c.Register(context.Background()); err != nil {
 		t.Fatalf("Register: %v", err)
 	}
@@ -65,7 +82,7 @@ func TestRESTClientChannels(t *testing.T) {
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
 
-	c := NewRESTClient(srv.URL, WithToken("tok"))
+	c := NewRESTClient(srv.URL, WithAPIKey("tok"))
 	channels, err := c.Channels(context.Background())
 	if err != nil {
 		t.Fatalf("Channels: %v", err)
@@ -100,7 +117,7 @@ func TestRESTClientCreateChannel(t *testing.T) {
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
 
-	c := NewRESTClient(srv.URL, WithToken("tok"))
+	c := NewRESTClient(srv.URL, WithAPIKey("tok"))
 	if err := c.CreateChannel(context.Background(), "general", true); err != nil {
 		t.Fatalf("CreateChannel: %v", err)
 	}
@@ -119,7 +136,7 @@ func TestRESTClientJoinChannel(t *testing.T) {
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
 
-	c := NewRESTClient(srv.URL, WithToken("tok"))
+	c := NewRESTClient(srv.URL, WithAPIKey("tok"))
 	if err := c.JoinChannel(context.Background(), "general"); err != nil {
 		t.Fatalf("JoinChannel: %v", err)
 	}
@@ -149,7 +166,7 @@ func TestRESTClientSendMessage(t *testing.T) {
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
 
-	c := NewRESTClient(srv.URL, WithToken("tok"))
+	c := NewRESTClient(srv.URL, WithAPIKey("tok"))
 	id, err := c.SendMessage(context.Background(), "general", "hello", nil)
 	if err != nil {
 		t.Fatalf("SendMessage: %v", err)
@@ -181,7 +198,7 @@ func TestRESTClientSendMessageMetadata(t *testing.T) {
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
 
-	c := NewRESTClient(srv.URL, WithToken("tok"))
+	c := NewRESTClient(srv.URL, WithAPIKey("tok"))
 	meta := `{"event_type":"task_assignment","event_payload":{"task_id":"42"}}`
 	id, err := c.SendMessage(context.Background(), "general", "body", &SendOpts{Metadata: &meta})
 	if err != nil {
@@ -218,7 +235,7 @@ func TestRESTClientSendMessageInvalidMetadata(t *testing.T) {
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
 
-	c := NewRESTClient(srv.URL, WithToken("tok"))
+	c := NewRESTClient(srv.URL, WithAPIKey("tok"))
 	bad := `not-json`
 	if _, err := c.SendMessage(context.Background(), "general", "body", &SendOpts{Metadata: &bad}); err == nil {
 		t.Fatal("expected error for invalid metadata JSON")
@@ -243,7 +260,7 @@ func TestRESTClientListMessages(t *testing.T) {
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
 
-	c := NewRESTClient(srv.URL, WithToken("tok"))
+	c := NewRESTClient(srv.URL, WithAPIKey("tok"))
 	limit := 10
 	msgs, err := c.ListMessages(context.Background(), "general", &HistoryOpts{Limit: &limit})
 	if err != nil {
@@ -271,7 +288,7 @@ func TestRESTClientRegisterWebhook(t *testing.T) {
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
 
-	c := NewRESTClient(srv.URL, WithToken("tok"))
+	c := NewRESTClient(srv.URL, WithAPIKey("tok"))
 	id, err := c.RegisterWebhook(context.Background(), "http://example.com/hook")
 	if err != nil {
 		t.Fatalf("RegisterWebhook: %v", err)
@@ -292,7 +309,7 @@ func TestRESTClientListWebhooks(t *testing.T) {
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
 
-	c := NewRESTClient(srv.URL, WithToken("tok"))
+	c := NewRESTClient(srv.URL, WithAPIKey("tok"))
 	hooks, err := c.ListWebhooks(context.Background())
 	if err != nil {
 		t.Fatalf("ListWebhooks: %v", err)
@@ -312,7 +329,7 @@ func TestRESTClientUnregisterWebhook(t *testing.T) {
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
 
-	c := NewRESTClient(srv.URL, WithToken("tok"))
+	c := NewRESTClient(srv.URL, WithAPIKey("tok"))
 	if err := c.UnregisterWebhook(context.Background(), "hook-abc"); err != nil {
 		t.Fatalf("UnregisterWebhook: %v", err)
 	}
@@ -342,7 +359,7 @@ func TestRESTClientErrorMapping(t *testing.T) {
 			srv := httptest.NewServer(mux)
 			defer srv.Close()
 
-			c := NewRESTClient(srv.URL, WithToken("tok"))
+			c := NewRESTClient(srv.URL, WithAPIKey("tok"))
 			err := c.JoinChannel(context.Background(), "general")
 			if err == nil {
 				t.Fatal("expected error")
@@ -430,7 +447,7 @@ func TestRESTClientRoundTrip(t *testing.T) {
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
 
-	c := NewRESTClient(srv.URL, WithToken("tok"))
+	c := NewRESTClient(srv.URL, WithAPIKey("tok"))
 	ctx := context.Background()
 
 	if err := c.CreateChannel(ctx, "demo", true); err != nil {
