@@ -3257,10 +3257,12 @@ func TestWebhookNotFiredWithoutMention(t *testing.T) {
 // --- Backup tests ---
 
 func TestBackupExportImport(t *testing.T) {
-	if os.Getenv("SHARKFIN_DB") != "" {
-		t.Skip("backup e2e requires SQLite (SHARKFIN_DB must not be set)")
-	}
 	passphrase := "test-passphrase"
+
+	// Resolve the DB DSN that daemon A (and the export CLI) will use.
+	// Under SQLite, SHARKFIN_DB is unset and dA.DBPath() is the right path.
+	// Under Postgres, we pass SHARKFIN_DB directly to the export CLI.
+	// dsnForExport is populated after daemon A starts.
 
 	// --- Daemon A: populate data ---
 	addrA, err := harness.FreePort()
@@ -3272,6 +3274,19 @@ func TestBackupExportImport(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer dA.Cleanup()
+
+	// Resolve DSN for the backup export CLI: Postgres env or SQLite file path.
+	dsnForExport := dA.DBPath()
+	if envDSN := os.Getenv("SHARKFIN_DB"); envDSN != "" {
+		dsnForExport = envDSN
+	}
+
+	// Allocate an independent DB for daemon B. Under SQLite this is a fresh
+	// tempfile; under Postgres it is the sibling sharkfin_test_b database
+	// (schema-reset before return, cleanup registered). Both backends pre-seed
+	// the general channel on Open, so IsEmpty() returns true (identities table
+	// is empty), allowing import to proceed without --force.
+	dsnForImport := harness.AltDB(t)
 
 	alice := newMCPClient(t, dA, "uuid-alice", "alice", "Alice", "user")
 	bob := newMCPClient(t, dA, "uuid-bob", "bob", "Bob", "user")
@@ -3305,11 +3320,11 @@ func TestBackupExportImport(t *testing.T) {
 	_ = bob
 	dA.StopNoClean(t)
 
-	// --- Export to local file ---
+	// --- Export from daemon A's DB ---
 	backupFile := filepath.Join(t.TempDir(), "backup.tar.xz.age")
 	exportOut, err := exec.Command(sharkfinBin,
 		"backup", "export",
-		"--db", dA.DBPath(),
+		"--db", dsnForExport,
 		"--passphrase", passphrase,
 		"--local", backupFile,
 	).CombinedOutput()
@@ -3318,12 +3333,11 @@ func TestBackupExportImport(t *testing.T) {
 	}
 	t.Logf("export output: %s", exportOut)
 
-	// --- Import from local file into fresh DB ---
-	dbPathB := filepath.Join(t.TempDir(), "imported.db")
+	// --- Import into daemon B's fresh DB ---
 	importOut, err := exec.Command(sharkfinBin,
 		"backup", "import",
 		"--local", backupFile,
-		"--db", dbPathB,
+		"--db", dsnForImport,
 		"--passphrase", passphrase,
 	).CombinedOutput()
 	if err != nil {
@@ -3336,7 +3350,7 @@ func TestBackupExportImport(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	dB, err := harness.StartDaemon(sharkfinBin, addrB, harness.WithDB(dbPathB))
+	dB, err := harness.StartDaemon(sharkfinBin, addrB, harness.WithDB(dsnForImport))
 	if err != nil {
 		t.Fatal(err)
 	}
