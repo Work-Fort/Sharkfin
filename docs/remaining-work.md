@@ -33,6 +33,42 @@ Storybook lives in `~/Work/WorkFort/documentation/storybook/` (Lit on port 6006,
 
 ---
 
+## Test Coverage Gaps
+
+### Convention: every `t.Skip` must be cross-referenced here
+
+Any conditional `t.Skip` in an e2e or integration test MUST have a corresponding
+entry in this section. The entry must name the test, state the condition under
+which it skips, and describe the work needed to remove the skip.
+
+A skip with no paper trail is indistinguishable from an accidental omission — and
+will be treated as one during future audits. The rationale for this rule is
+documented in the architecture reference:
+
+> See `skills/lead/go-service-architecture/references/architecture-reference.md`
+> §"Multi-Daemon Test Isolation (Per-Backend)" for the harness pattern and
+> the anti-pattern that created this gap.
+
+### Resolved: `TestBackupExportImport` skip (SHARKFIN_DB)
+
+**Status: closed.** The skip was removed in commits `8fa7499` and `57820bb`
+(2026-04-18). The test now runs on both SQLite and Postgres using the
+`harness.AltDB(t)` helper added in `8fa7499`.
+
+**Historical context:** The test was introduced in commit `c5a1f5f` (2026-03-06)
+with an inline skip (`t.Skip("backup e2e requires SQLite")`) that activated
+whenever `SHARKFIN_DB` was set. The skip was never mentioned in the commit
+message, the implementation plan (`docs/plans/2026-03-06-backup-implementation.md`),
+or this file. The CI e2e-postgres job therefore silently skipped the only
+end-to-end backup verification on every PG run for six weeks.
+
+The fix required adding `harness.AltDB(t)` — a primitive that provisions a
+sibling database per daemon, abstracting over the SQLite/Postgres difference.
+Without that primitive the two-daemon test shape is inherently SQLite-only; the
+right response to that harness gap is to add the primitive, not to skip the test.
+
+---
+
 ## Recently Completed
 
 ### Component Extraction (Plans 5-8)
